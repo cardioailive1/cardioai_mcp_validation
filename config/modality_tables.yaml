@@ -1,0 +1,68 @@
+# =============================================================================
+# MCP modality tables (ECG waveforms, echocardiography DICOM / reports)
+# -----------------------------------------------------------------------------
+# Mayo Clinic Platform exposes structured EHR in OMOP CDM, plus physiologic
+# waveforms, imaging and de-identified notes.  The physical table names for the
+# waveform / imaging indices are platform-specific and are NOT public, so they
+# are isolated here.  At onboarding:
+#   1. run  python scripts/discover_schema.py --engine spark   (lists every
+#      table/column matching ecg|ekg|waveform|echo|dicom|study|series)
+#   2. confirm names in the MCP Schema Visualizer
+#   3. fill the `table` / `columns` below.  Nothing else in the code changes.
+# Until filled, the builder falls back to pure-OMOP proxies (procedure codes,
+# LOINC measurements and NOTE text) and marks modality columns as NULL.
+# =============================================================================
+ecg:
+  enabled: false                       # set true once mapped
+  table: "{modality}.ecg_index"        # PLACEHOLDER
+  columns:
+    person_id: person_id
+    ecg_id: ecg_id
+    acquisition_datetime: acquisition_datetime
+    waveform_uri: waveform_path        # path to XML / HDF5 / .npy waveform inside workspace storage
+    sample_rate_hz: sample_rate
+    n_leads: lead_count
+    read_statement: diagnosis_statement   # confirmed (over-read) interpretation text
+    is_confirmed: confirmed_flag          # cardiologist over-read flag
+    vent_rate: ventricular_rate
+    pr_interval: pr_interval
+    qrs_duration: qrs_duration
+    qt_interval: qt_interval
+    qtc_interval: qtc_interval
+    qrs_axis: r_axis
+  requirements:            # agent input spec (PTB-XL–trained model)
+    n_leads: 12
+    duration_s: 10
+    resample_to_hz: 500
+
+echo:
+  enabled: false
+  study_table: "{modality}.echo_study"     # PLACEHOLDER — one row per echo exam
+  columns:
+    person_id: person_id
+    study_id: study_uid
+    study_datetime: study_datetime
+    dicom_uri: dicom_path
+    has_a4c_cine: a4c_available           # apical-4-chamber cine present (EchoNet-Dynamic input)
+    image_quality: image_quality
+    report_text: report_text
+  measurement_table: "{modality}.echo_measurement"   # PLACEHOLDER — structured echo report values
+  measurement_columns:
+    study_id: study_uid
+    name: measurement_name
+    value: measurement_value
+    unit: measurement_unit
+  requirements:           # agent input spec (EchoNet-Dynamic–trained model)
+    view: A4C
+    min_frames: 32
+    resize_px: 112
+
+# NOTE table conventions used for NLP fall-backs (OMOP NOTE / NOTE_NLP).
+# Titles are matched case-insensitively with these regexes.
+notes:
+  echo_report_title: '(?i)(echo|echocardiogra|tte)'
+  ecg_report_title: '(?i)(ecg|ekg|electrocardiogra)'
+  cath_report_title: '(?i)(cath|angiogra|coronary)'
+  ccta_report_title: '(?i)(ccta|coronary ct|cardiac ct)'
+  stress_report_title: '(?i)(stress|treadmill|exercise test|nuclear)'
+  hf_note_title: '(?i)(cardio|heart failure|progress|discharge)'

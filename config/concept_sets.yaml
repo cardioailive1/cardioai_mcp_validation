@@ -1,0 +1,327 @@
+# =============================================================================
+# CardioAI Phase 2 — OMOP concept sets for Mayo Clinic Platform (MCP) Discover
+# -----------------------------------------------------------------------------
+# Each concept set is resolved AT RUNTIME against the OMOP vocabulary tables in
+# the MCP workspace (CONCEPT, CONCEPT_RELATIONSHIP, CONCEPT_ANCESTOR):
+#   1. codes are matched in CONCEPT on (vocabulary_id, concept_code); a trailing
+#      '%' means "prefix match" (ICD10CM I21% = every I21.x code)
+#   2. non-standard codes (ICD10CM, ICD9CM, HCPCS ...) are mapped to standard
+#      concepts via CONCEPT_RELATIONSHIP 'Maps to'
+#   3. if descendants: true, all descendants via CONCEPT_ANCESTOR are added
+#   4. name_like entries are a fallback search on concept_name inside a domain;
+#      they are flagged review: true and MUST be reviewed in Athena / the MCP
+#      Schema Visualizer before database lock (see scripts/export_concept_sets.py)
+# Resolving at runtime (instead of hard-coding concept_ids) keeps the sets
+# correct for whatever OMOP vocabulary release MCP has loaded.
+# =============================================================================
+
+# ---------------------------------------------------------------- conditions
+mi_any:            # acute + old MI
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I21%", "I22%", "I25.2"]}
+    - {vocab: ICD9CM,  codes: ["410%", "412"]}
+  descendants: true
+mi_acute:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I21%", "I22%"]}
+    - {vocab: ICD9CM,  codes: ["410%"]}
+  descendants: true
+stemi:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I21.0%", "I21.1%", "I21.2%", "I21.3", "I22.0", "I22.1", "I22.8"]}
+  descendants: false   # do not pull generic "acute MI" children
+nstemi:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I21.4", "I22.2"]}
+  descendants: false
+heart_failure:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I50%", "I11.0", "I13.0", "I13.2", "I09.81"]}
+    - {vocab: ICD9CM,  codes: ["428%", "402.01", "402.11", "402.91"]}
+  descendants: true
+hf_acute:          # acute / acute-on-chronic HF = decompensation codes
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I50.21", "I50.23", "I50.31", "I50.33", "I50.41", "I50.43", "I50.811", "I50.813", "I50.9"]}
+  descendants: false
+hypertension:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I10", "I11%", "I12%", "I13%", "I15%", "I16%"]}
+    - {vocab: ICD9CM,  codes: ["401%", "402%", "403%", "404%", "405%"]}
+  descendants: true
+diabetes:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["E10%", "E11%", "E13%"]}
+    - {vocab: ICD9CM,  codes: ["250%"]}
+  descendants: true
+cad:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I20%", "I24%", "I25%"]}
+    - {vocab: ICD9CM,  codes: ["413%", "414%"]}
+  descendants: true
+unstable_angina:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I20.0", "I24.9"]}
+    - {vocab: ICD9CM,  codes: ["411.1"]}
+  descendants: false
+angina_chest_pain:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I20%", "R07%"]}
+  descendants: true
+valvular_disease:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I05%", "I06%", "I07%", "I08%", "I09.1", "I34%", "I35%", "I36%", "I37%", "I38", "I39", "Q22%", "Q23%"]}
+  descendants: true
+hyperlipidemia:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["E78.0%", "E78.1", "E78.2", "E78.3", "E78.4%", "E78.5"]}
+    - {vocab: ICD9CM,  codes: ["272.0", "272.1", "272.2", "272.4"]}
+  descendants: true
+ckd:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["N18%", "I12%", "I13%"]}
+    - {vocab: ICD9CM,  codes: ["585%"]}
+  descendants: true
+copd:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["J44%", "J43%"]}
+    - {vocab: ICD9CM,  codes: ["491.2%", "496"]}
+  descendants: true
+atrial_fibrillation:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I48%"]}
+    - {vocab: ICD9CM,  codes: ["427.31", "427.32"]}
+  descendants: true
+ventricular_tachycardia:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I47.2%"]}
+  descendants: true
+arrhythmia_any:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I44%", "I45%", "I46%", "I47%", "I48%", "I49%"]}
+  descendants: true
+bundle_branch_block:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I44.4", "I44.5", "I44.6%", "I44.7", "I45.0", "I45.1%", "I45.2"]}
+  descendants: true
+stroke:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I63%", "I61%", "I60%"]}
+    - {vocab: ICD9CM,  codes: ["430", "431", "433.%1", "434.%1"]}
+  descendants: true
+cv_death_causes:   # used against DEATH.cause_concept_id
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I%"]}
+    - {vocab: ICD10,   codes: ["I%"]}
+  descendants: true
+pregnancy:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["O%", "Z33.1", "Z34%"]}
+  descendants: true
+family_history_ihd:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["Z82.49"]}
+    - {vocab: SNOMED, name_like: ["%family history of ischemic heart disease%", "%family history of coronary%", "%family history of myocardial infarction%"], review: true}
+  descendants: true
+pacemaker_icd_status:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["Z95.0", "Z95.810", "Z95.818", "Z45.0%"]}
+  descendants: true
+smoking_current:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["F17.2%", "Z72.0"]}
+  descendants: true
+smoking_former:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["Z87.891"]}
+  descendants: true
+dyspnea:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["R06.0%"]}
+  descendants: true
+edema:
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["R60%"]}
+  descendants: true
+prior_cardiac_events:   # MI, revasc, HF, cardiac arrest, stroke — for CAD cohort history
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I21%", "I22%", "I25.2", "I50%", "I46%", "Z95.1", "Z95.5", "Z98.61"]}
+  descendants: true
+prior_cabg:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["Z95.1"]}
+  descendants: true
+
+# ---------------------------------------------------------------- procedures (CPT4 / HCPCS)
+tte:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93303", "93304", "93306", "93307", "93308"]}
+echo_any:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93303", "93304", "93306", "93307", "93308", "93312", "93313", "93314", "93315", "93316", "93317", "93318", "93350", "93351"]}
+ecg_12lead:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93000", "93005", "93010"]}
+coronary_angiography:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93454", "93455", "93456", "93457", "93458", "93459", "93460", "93461"]}
+pci:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["92920", "92924", "92928", "92933", "92937", "92941", "92943"]}
+    - {vocab: HCPCS, codes: ["C9600", "C9602", "C9604", "C9607"]}
+cabg:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["33510", "33511", "33512", "33513", "33514", "33516", "33517", "33518", "33519", "33521", "33522", "33523", "33533", "33534", "33535", "33536"]}
+ccta:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["75574"]}
+stress_test:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93015", "93016", "93017", "93018", "93350", "93351", "78451", "78452", "78453", "78454", "78491", "78492", "78431", "78432", "78433"]}
+exercise_ett:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93015", "93016", "93017", "93018"]}
+cardiac_imaging_any:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93303", "93304", "93306", "93307", "93308", "75574", "75571", "78451", "78452", "78453", "78454", "75557", "75559", "75561", "75563"]}
+cardiac_procedure_any:   # longitudinal procedure_dates
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93454", "93455", "93456", "93457", "93458", "93459", "93460", "93461", "92920", "92924", "92928", "92933", "92937", "92941", "92943", "33206", "33207", "33208", "33249", "93650", "93653", "93654", "93656", "92960", "92961"]}
+pacemaker_icd_implant:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["33206", "33207", "33208", "33249", "33270"]}
+
+# ---------------------------------------------------------------- measurements (LOINC)
+height:        {domain: Measurement, include: [{vocab: LOINC, codes: ["8302-2", "8306-3"]}]}
+weight:        {domain: Measurement, include: [{vocab: LOINC, codes: ["29463-7", "3141-9"]}]}
+bmi:           {domain: Measurement, include: [{vocab: LOINC, codes: ["39156-5"]}]}
+sbp:           {domain: Measurement, include: [{vocab: LOINC, codes: ["8480-6", "8459-0", "8460-8"]}]}
+dbp:           {domain: Measurement, include: [{vocab: LOINC, codes: ["8462-4", "8453-3", "8454-1"]}]}
+heart_rate:    {domain: Measurement, include: [{vocab: LOINC, codes: ["8867-4"]}]}
+spo2:          {domain: Measurement, include: [{vocab: LOINC, codes: ["59408-5", "2708-6"]}]}
+total_chol:    {domain: Measurement, include: [{vocab: LOINC, codes: ["2093-3"]}]}
+ldl:           {domain: Measurement, include: [{vocab: LOINC, codes: ["13457-7", "18262-6", "2089-1"]}]}
+hdl:           {domain: Measurement, include: [{vocab: LOINC, codes: ["2085-9"]}]}
+triglycerides: {domain: Measurement, include: [{vocab: LOINC, codes: ["2571-8"]}]}
+glucose_fasting: {domain: Measurement, include: [{vocab: LOINC, codes: ["1558-6"]}]}
+hba1c:         {domain: Measurement, include: [{vocab: LOINC, codes: ["4548-4", "17856-6"]}]}
+creatinine:    {domain: Measurement, include: [{vocab: LOINC, codes: ["2160-0", "38483-4"]}]}
+egfr:          {domain: Measurement, include: [{vocab: LOINC, codes: ["33914-3", "48642-3", "48643-1", "62238-1", "98979-8"]}]}
+bnp:           {domain: Measurement, include: [{vocab: LOINC, codes: ["30934-4"]}]}
+ntprobnp:      {domain: Measurement, include: [{vocab: LOINC, codes: ["33762-6", "83107-3"]}]}
+troponin:      {domain: Measurement, include: [{vocab: LOINC, codes: ["6598-7", "67151-1", "10839-9", "42757-5", "89579-7"]}]}
+potassium:     {domain: Measurement, include: [{vocab: LOINC, codes: ["2823-3", "6298-4"]}]}
+magnesium:     {domain: Measurement, include: [{vocab: LOINC, codes: ["19123-9", "2601-3"]}]}
+sodium:        {domain: Measurement, include: [{vocab: LOINC, codes: ["2951-2", "2947-0"]}]}
+hscrp:         {domain: Measurement, include: [{vocab: LOINC, codes: ["30522-7"]}]}
+# ECG measurements (machine / over-read values as stored in MEASUREMENT)
+ecg_pr:        {domain: Measurement, include: [{vocab: LOINC, codes: ["8625-6"]}]}
+ecg_qrs:       {domain: Measurement, include: [{vocab: LOINC, codes: ["8633-0"]}]}
+ecg_qt:        {domain: Measurement, include: [{vocab: LOINC, codes: ["8634-8"]}]}
+ecg_qtc:       {domain: Measurement, include: [{vocab: LOINC, codes: ["8636-3"]}]}
+ecg_qrs_axis:  {domain: Measurement, include: [{vocab: LOINC, codes: ["8632-2"]}]}
+ecg_hr:        {domain: Measurement, include: [{vocab: LOINC, codes: ["8867-4", "76282-3"]}]}
+# Echo measurements — LVEF has a firm LOINC; others are name searches to REVIEW
+lvef:
+  domain: Measurement
+  include:
+    - {vocab: LOINC, codes: ["10230-1"]}
+    - {vocab: LOINC, name_like: ["%left ventricular ejection fraction%"], review: true}
+lv_edv:   {domain: Measurement, include: [{vocab: LOINC, name_like: ["%left ventricular end diastolic volume%"], review: true}]}
+lv_esv:   {domain: Measurement, include: [{vocab: LOINC, name_like: ["%left ventricular end systolic volume%"], review: true}]}
+la_diam:  {domain: Measurement, include: [{vocab: LOINC, name_like: ["%left atrium%diameter%", "%left atrial%diameter%"], review: true}]}
+la_vol:   {domain: Measurement, include: [{vocab: LOINC, name_like: ["%left atrium%volume%", "%left atrial%volume%"], review: true}]}
+# Observations
+smoking_status_obs: {domain: Observation, include: [{vocab: LOINC, codes: ["72166-2"]}]}
+pack_years:         {domain: Observation, include: [{vocab: LOINC, name_like: ["%pack%year%"], review: true}]}
+pregnancy_status_obs: {domain: Observation, include: [{vocab: LOINC, codes: ["82810-3"]}]}
+
+# ---------------------------------------------------------------- drugs (ATC classes -> RxNorm descendants)
+statins:           {domain: Drug, include: [{vocab: ATC, codes: ["C10AA", "C10BA", "C10BX"]}], descendants: true}
+antihypertensives: {domain: Drug, include: [{vocab: ATC, codes: ["C02", "C03", "C07", "C08", "C09"]}], descendants: true}
+aspirin:           {domain: Drug, include: [{vocab: ATC, codes: ["B01AC06", "N02BA01"]}], descendants: true}
+cardiac_meds:      # ECG cohort: drugs that alter ECG intervals / rhythm
+  domain: Drug
+  include: [{vocab: ATC, codes: ["C01A", "C01B", "C07", "C08D"]}]
+  descendants: true
+loop_diuretics:    {domain: Drug, include: [{vocab: ATC, codes: ["C03CA"]}], descendants: true}
+cardiovascular_drugs: {domain: Drug, include: [{vocab: ATC, codes: ["C01", "C02", "C03", "C07", "C08", "C09", "C10", "B01"]}], descendants: true}
+
+# ---------------------------------------------------------------- additional sets used by cohorts
+lvad_transplant:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["Z95.811", "Z94.1", "T86.2%"]}
+  descendants: true
+angina:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["I20%"]}]
+  descendants: true
+chest_pain:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["R07%"]}]
+  descendants: true
+pacemaker_any:
+  domain: Observation
+  include:
+    - {vocab: ICD10CM, codes: ["Z95.0", "Z95.810", "Z95.818", "Z45.0%"]}
+    - {vocab: CPT4, codes: ["33206", "33207", "33208", "33249", "33270"]}
+  descendants: true
+revasc_or_angio:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["93454", "93455", "93456", "93457", "93458", "93459", "93460", "93461", "92920", "92924", "92928", "92933", "92937", "92941", "92943", "33510", "33511", "33512", "33513", "33514", "33516", "33533", "33534", "33535", "33536"]}
+prior_revasc:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["92920", "92924", "92928", "92933", "92937", "92941", "92943", "33510", "33511", "33512", "33513", "33514", "33516", "33533", "33534", "33535", "33536"]}
+    - {vocab: ICD10CM, codes: ["Z95.1", "Z95.5", "Z98.61"]}
+  descendants: true
+cardiac_dx:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["I%"]}]
+  descendants: true
+natriuretic_peptides:
+  domain: Measurement
+  include: [{vocab: LOINC, codes: ["30934-4", "33762-6", "83107-3"]}]

@@ -1,0 +1,163 @@
+# =============================================================================
+# ECG Analysis External Validation Cohort — CA-AGENTS-VAL-PHASE2-ECG
+# Agent under test: ECG agent (Phase 1 trained on PTB-XL, Germany, 21,837 pts)
+# Deck: 2,000 patients · 12 sites · 30 elements (22 REQ / 8 OPT) · 90.1% avg completeness
+# =============================================================================
+key: ecg
+study_id: CA-AGENTS-VAL-PHASE2-ECG
+title: ECG Analysis External Validation Cohort
+agent: ecg_agent
+phase1_source: PTB-XL Database (Germany) — 21,837 patients
+target_n: 2000
+target_sites: 12
+expected: {total_elements: 30, required: 22, avg_completeness: 90.1}
+
+index:
+  description: "adult digital 12-lead ECG in study window (CPT 93000-93010 or ECG interval measurements)"
+  # Prefer the ECG belonging to a labelled episode (STEMI > VT > AF > BBB), else earliest — this is
+  # what makes case-enriched sampling possible without reading the same patient twice.
+  one_per_person: "CASE WHEN c.stemi_dx = 1 THEN 0 WHEN c.vt_dx = 1 THEN 1 WHEN c.af_dx = 1 THEN 2 WHEN c.bbb_dx = 1 THEN 3 ELSE 4 END, c.index_date"
+  one_per_person_label: "prefer ECG of a labelled episode STEMI > VT > AF > BBB, then earliest"
+  keep_columns: [index_visit_concept_id, stemi_dx, af_dx, vt_dx, bbb_dx]
+  sql: |
+    WITH ecg AS (
+      SELECT po.person_id, CAST(po.procedure_date AS DATE) AS index_date, po.visit_occurrence_id
+      FROM {{cdm}}.procedure_occurrence po
+      WHERE (po.procedure_concept_id IN {{cs:ecg_12lead}} OR po.procedure_source_concept_id IN {{cs:ecg_12lead}})
+      UNION
+      SELECT m.person_id, CAST(m.measurement_date AS DATE), m.visit_occurrence_id
+      FROM {{cdm}}.measurement m
+      WHERE m.measurement_concept_id IN {{cs:ecg_qrs}} OR m.measurement_source_concept_id IN {{cs:ecg_qrs}}
+    ),
+    base AS (
+      SELECT e.person_id, e.index_date, MAX(COALESCE(v.care_site_id, p.care_site_id)) AS care_site_id,
+             MIN(v.visit_concept_id) AS index_visit_concept_id
+      FROM ecg e JOIN {{cdm}}.person p ON p.person_id = e.person_id
+      LEFT JOIN {{cdm}}.visit_occurrence v ON v.visit_occurrence_id = e.visit_occurrence_id
+      WHERE e.index_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end}}' AS DATE)
+        AND YEAR(e.index_date) - p.year_of_birth >= {{min_age}}
+      GROUP BY e.person_id, e.index_date
+    ),
+    dx AS (   -- diagnosis codes in [0, +2] days of the ECG (used ONLY for enrichment strata, not as reference)
+      SELECT b.person_id, b.index_date,
+        MAX(CASE WHEN co.condition_concept_id IN {{cs:stemi}} OR co.condition_source_concept_id IN {{cs:stemi}} THEN 1 ELSE 0 END) AS stemi_dx,
+        MAX(CASE WHEN co.condition_concept_id IN {{cs:atrial_fibrillation}} OR co.condition_source_concept_id IN {{cs:atrial_fibrillation}} THEN 1 ELSE 0 END) AS af_dx,
+        MAX(CASE WHEN co.condition_concept_id IN {{cs:ventricular_tachycardia}} OR co.condition_source_concept_id IN {{cs:ventricular_tachycardia}} THEN 1 ELSE 0 END) AS vt_dx,
+        MAX(CASE WHEN co.condition_concept_id IN {{cs:bundle_branch_block}} OR co.condition_source_concept_id IN {{cs:bundle_branch_block}} THEN 1 ELSE 0 END) AS bbb_dx
+      FROM base b JOIN {{cdm}}.condition_occurrence co ON co.person_id = b.person_id
+      WHERE DATEDIFF(co.condition_start_date, b.index_date) BETWEEN 0 AND 2
+      GROUP BY b.person_id, b.index_date
+    )
+    SELECT b.*, COALESCE(dx.stemi_dx, 0) AS stemi_dx, COALESCE(dx.af_dx, 0) AS af_dx,
+           COALESCE(dx.vt_dx, 0) AS vt_dx, COALESCE(dx.bbb_dx, 0) AS bbb_dx
+    FROM base b LEFT JOIN dx ON dx.person_id = b.person_id AND dx.index_date = b.index_date
+
+exclusions:
+  - name: "no ECG interpretation available (confirmed read / ECG report) — reference standard missing"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.note n WHERE n.person_id = c.person_id AND n.note_date = c.index_date
+                  AND n.note_title RLIKE '(?i)(ecg|ekg|electrocardiogra)')
+  - name: "< 365 days of observation before index"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.observation_period op WHERE op.person_id = c.person_id
+                  AND op.observation_period_start_date <= DATE_SUB(c.index_date, {{min_prior_observation_days}})
+                  AND op.observation_period_end_date >= c.index_date)
+
+# Case-enriched sampling inside the deck's N = 2,000.  Quotas come from scripts/sample_size_report.py:
+# 730 STEMI and 670 AF give >= 80% power for the two primary sensitivity endpoints IF the agent
+# performs at its Phase 1 level (STEMI 94.7%, AF 96.4%).  Inverse-probability sampling weights
+# restore natural prevalence for overall accuracy / F1 (reported weighted AND unweighted).
+sampling:
+  method: "case-enriched stratified sampling (STEMI / VT / AF / BBB / other)"
+  strata_expr: |
+    CASE WHEN e.stemi_dx = 1 THEN 'stemi' WHEN e.vt_dx = 1 THEN 'vt' WHEN e.af_dx = 1 THEN 'af'
+         WHEN e.bbb_dx = 1 THEN 'bbb' ELSE 'other' END
+  quotas: {stemi: 730, vt: 150, af: 670, bbb: 150, other: 300}
+
+elements:
+  # ---------------- DEMOGRAPHICS (4)
+  - {name: age, domain: demographics, description: Patient age at ECG, required: true, expected_completeness: 1.00, src: {type: person, field: age}}
+  - {name: gender, domain: demographics, description: Male / Female, required: true, expected_completeness: 1.00, src: {type: person, field: gender}}
+  - {name: race, domain: demographics, description: Race / ethnicity, required: true, expected_completeness: 0.95, src: {type: person, field: race}}
+  - {name: bmi, domain: demographics, description: Body mass index, required: false, expected_completeness: 0.85, src: {type: measurement, set: bmi, window: [-365, 30], range: [10, 90]}}
+  # ---------------- CLINICAL HISTORY (6)
+  - {name: prior_mi, domain: clinical_history, description: Prior myocardial infarction (before the index episode), required: true, expected_completeness: 0.95, src: {type: flag, set: mi_any, window: [-36500, -1]}}
+  - {name: heart_failure, domain: clinical_history, description: Heart failure, required: true, expected_completeness: 0.95, src: {type: flag, set: heart_failure, window: [-36500, 0]}}
+  - {name: hypertension, domain: clinical_history, description: Hypertension, required: true, expected_completeness: 0.95, src: {type: flag, set: hypertension, window: [-36500, 0]}}
+  - {name: diabetes, domain: clinical_history, description: Diabetes mellitus, required: true, expected_completeness: 0.95, src: {type: flag, set: diabetes, window: [-36500, 0]}}
+  - {name: pacemaker, domain: clinical_history, description: Pacemaker / ICD present, required: true, expected_completeness: 0.98,
+     src: {type: flag, set: pacemaker_any, window: [-36500, 0], tables: [condition, observation, procedure, device]}}
+  - {name: medications, domain: clinical_history, description: "Cardiac medications (antiarrhythmics, digoxin, beta-blockers, non-DHP CCB) active in prior 90 d", required: false, expected_completeness: 0.85,
+     src: {type: flag, set: cardiac_meds, domain: Drug, window: [-90, 0]}}
+  # ---------------- helper: ECG read statement (confirmed over-read) — aux
+  - {name: ecg_read, aux: true, src: {type: modality, modality: ecg, column: read_statement, window: [0, 0],
+                                      fallback: {type: note_text, note: ecg_report_title, window: [0, 0], max_chars: 2000}}}
+  # ---------------- DIAGNOSTIC DATA (13)
+  - {name: rhythm_classification, domain: diagnostic, role: reference, description: Primary rhythm diagnosis from report, required: true, expected_completeness: 0.98,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE 'atrial fibrillation' THEN 'AFIB' WHEN ecg_read RLIKE 'atrial flutter' THEN 'AFLT' WHEN ecg_read RLIKE 'ventricular tachycardia' THEN 'VT' WHEN ecg_read RLIKE '(ventricular[- ]paced|pacemaker|paced rhythm)' THEN 'PACE' WHEN ecg_read RLIKE 'sinus bradycardia' THEN 'SBRAD' WHEN ecg_read RLIKE 'sinus tachycardia' THEN 'STACH' WHEN ecg_read RLIKE 'sinus rhythm' THEN 'SR' ELSE 'OTHER' END"}}
+  - {name: heart_rate, domain: diagnostic, description: Heart rate (bpm), required: true, expected_completeness: 1.00,
+     src: {type: modality, modality: ecg, column: vent_rate, fallback: {type: measurement, set: ecg_hr, window: [0, 0], range: [20, 300]}}}
+  - {name: pr_interval, domain: diagnostic, description: PR interval (ms), required: true, expected_completeness: 0.95,
+     src: {type: modality, modality: ecg, column: pr_interval, fallback: {type: measurement, set: ecg_pr, window: [0, 0], range: [60, 500]}}}
+  - {name: qrs_duration, domain: diagnostic, description: QRS duration (ms), required: true, expected_completeness: 0.95,
+     src: {type: modality, modality: ecg, column: qrs_duration, fallback: {type: measurement, set: ecg_qrs, window: [0, 0], range: [40, 300]}}}
+  - {name: qt_interval, domain: diagnostic, description: QT interval (ms), required: true, expected_completeness: 0.95,
+     src: {type: modality, modality: ecg, column: qt_interval, fallback: {type: measurement, set: ecg_qt, window: [0, 0], range: [150, 800]}}}
+  - {name: qtc_interval, domain: diagnostic, description: QTc interval (ms), required: true, expected_completeness: 0.95,
+     src: {type: modality, modality: ecg, column: qtc_interval, fallback: {type: measurement, set: ecg_qtc, window: [0, 0], range: [200, 800]}}}
+  - {name: qrs_axis, domain: diagnostic, description: QRS axis (degrees), required: true, expected_completeness: 0.90,
+     src: {type: modality, modality: ecg, column: qrs_axis, fallback: {type: measurement, set: ecg_qrs_axis, window: [0, 0], range: [-180, 360]}}}
+  - {name: st_elevation, domain: diagnostic, role: reference, description: ST elevation present, required: true, expected_completeness: 0.98,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE '(no (significant )?st[- ](segment )?elevation)' THEN 0 WHEN ecg_read RLIKE '(st[- ](segment )?elevation|injury|stemi)' THEN 1 ELSE 0 END"}}
+  - {name: st_depression, domain: diagnostic, role: reference, description: ST depression present, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE '(no (significant )?st[- ](segment )?depression)' THEN 0 WHEN ecg_read RLIKE 'st[- ](segment )?depression' THEN 1 ELSE 0 END"}}
+  - {name: t_wave_abnormality, domain: diagnostic, role: reference, description: T wave abnormality, required: true, expected_completeness: 0.92,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE '(t[- ]wave (abnormalit|inversion|changes)|inverted t|nonspecific t)' THEN 1 ELSE 0 END"}}
+  - {name: bundle_branch_block, domain: diagnostic, role: reference, description: Bundle branch block type, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE 'incomplete right bundle' THEN 'IRBBB' WHEN ecg_read RLIKE 'left bundle branch block' THEN 'LBBB' WHEN ecg_read RLIKE 'right bundle branch block' THEN 'RBBB' WHEN ecg_read RLIKE '(intraventricular conduction|ivcd)' THEN 'IVCD' ELSE 'NONE' END"}}
+  - {name: atrial_enlargement, domain: diagnostic, description: Atrial enlargement, required: false, expected_completeness: 0.85,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE '(atrial enlargement|atrial abnormality)' THEN 1 ELSE 0 END"}}
+  - {name: ventricular_hypertrophy, domain: diagnostic, description: Ventricular hypertrophy, required: false, expected_completeness: 0.85,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN ecg_read RLIKE '(ventricular hypertrophy|lvh|rvh)' THEN 1 ELSE 0 END"}}
+  # ---------------- LABORATORY (3)
+  - {name: troponin, domain: laboratory, description: Troponin level, required: false, expected_completeness: 0.60, src: {type: measurement, set: troponin, window: [-1, 1], range: [0, 100000]}}
+  - {name: potassium, domain: laboratory, description: Serum potassium, required: false, expected_completeness: 0.70, src: {type: measurement, set: potassium, window: [-1, 1], range: [1.5, 9.5]}}
+  - {name: magnesium, domain: laboratory, description: Serum magnesium, required: false, expected_completeness: 0.50, src: {type: measurement, set: magnesium, window: [-3, 1], range: [0.5, 6]}}
+  # ---------------- OUTCOME DATA (4)
+  - {name: clinical_diagnosis_stemi, domain: outcome, role: reference, description: STEMI diagnosis (clinical) within 0-3 days of ECG, required: true, expected_completeness: 0.98,
+     src: {type: flag, set: stemi, window: [0, 3], require_lookback: false}}
+  - {name: clinical_diagnosis_nstemi, domain: outcome, role: reference, description: NSTEMI diagnosis (clinical) within 0-3 days of ECG, required: true, expected_completeness: 0.95,
+     src: {type: flag, set: nstemi, window: [0, 3], require_lookback: false}}
+  - {name: subsequent_intervention, domain: outcome, description: "Intervention within 30 days (angiography, PCI, CABG)", required: false, expected_completeness: 0.80,
+     src: {type: flag, set: revasc_or_angio, domain: Procedure, window: [0, 30], require_lookback: false}}
+  - {name: clinical_indication, domain: outcome, description: Indication for ECG, required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "COALESCE(NULLIF(REGEXP_EXTRACT(ecg_read, 'indications?:[ ]*([^.;]{3,80})', 1), ''), CASE index_visit_concept_id WHEN 9203 THEN 'emergency' WHEN 262 THEN 'emergency' WHEN 9201 THEN 'inpatient' WHEN 9202 THEN 'outpatient' END)"}}
+  # ---------------- reference helpers (aux): PTB-XL diagnostic superclass from the confirmed read
+  - {name: ref_superclass, aux: true,
+     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN st_elevation = 1 OR ecg_read RLIKE '(infarct|q waves)' THEN 'MI' WHEN bundle_branch_block <> 'NONE' OR ecg_read RLIKE '(av block|first degree|wpw|fascicular block)' THEN 'CD' WHEN ventricular_hypertrophy = 1 OR atrial_enlargement = 1 THEN 'HYP' WHEN st_depression = 1 OR t_wave_abnormality = 1 THEN 'STTC' WHEN ecg_read RLIKE '(normal ecg|normal electrocardiogram|within normal limits|normal sinus rhythm)' THEN 'NORM' ELSE 'OTHER' END"}}
+  - {name: ref_stemi, aux: true, src: {type: derived, expr: "CASE WHEN clinical_diagnosis_stemi = 1 THEN 1 ELSE 0 END"}}
+  - {name: ref_af, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification = 'AFIB' THEN 1 ELSE 0 END"}}
+  - {name: ref_vt, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification = 'VT' THEN 1 ELSE 0 END"}}
+  - {name: ref_nsr, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification = 'SR' THEN 1 ELSE 0 END"}}
+
+predictions:
+  table: ecg_predictions
+  columns:
+    agent_superclass: "NORM | MI | STTC | CD | HYP (PTB-XL superclass, top-1)"
+    agent_stemi: "0/1 STEMI / acute occlusion call"
+    agent_rhythm: "SR | AFIB | AFLT | VT | SBRAD | STACH | PACE | OTHER"
+    agent_bbb: "NONE | LBBB | RBBB | IRBBB | IVCD"
+    runtime_s: "seconds per ECG"
+
+endpoints:
+  primary:
+    - {id: overall_accuracy, label: "Overall accuracy (PTB-XL superclass)", metric: accuracy, pred: agent_superclass, ref: ref_superclass, goal: 0.95, direction: ge, phase1: 0.973, weighted: true}
+    - {id: stemi_sensitivity, label: "STEMI sensitivity", metric: sensitivity, pred: agent_stemi, ref: ref_stemi, positive: 1, goal: 0.92, direction: ge, phase1: 0.947}
+    - {id: af_sensitivity, label: "Atrial fibrillation sensitivity", metric: sensitivity, pred: agent_rhythm, ref: rhythm_classification, positive: AFIB, goal: 0.94, direction: ge, phase1: 0.964}
+  secondary:
+    - {id: vt_sensitivity, label: "VT sensitivity", metric: sensitivity, pred: agent_rhythm, ref: rhythm_classification, positive: VT, goal: 0.93, direction: ge, phase1: 0.958}
+    - {id: bbb_accuracy, label: "Bundle branch block accuracy", metric: accuracy, pred: agent_bbb, ref: bundle_branch_block, goal: 0.93, direction: ge, phase1: 0.952}
+    - {id: nsr_accuracy, label: "Normal sinus rhythm accuracy", metric: binary_accuracy, pred: agent_rhythm, ref: rhythm_classification, positive: SR, goal: 0.95, direction: ge, phase1: 0.981}
+    - {id: f1_macro, label: "Multi-class F1 (macro, superclass)", metric: f1_macro, pred: agent_superclass, ref: ref_superclass, goal: 0.94, direction: ge, phase1: 0.97}
+    - {id: processing_speed, label: "Processing speed (median s / ECG)", metric: median, pred: runtime_s, goal: 3.0, direction: le, phase1: 2.1}
+  subgroups: [gender, age_group, race, site, pacemaker, clinical_indication]

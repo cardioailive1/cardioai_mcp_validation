@@ -1,0 +1,185 @@
+# =============================================================================
+# Longitudinal Cardiac Monitoring Cohort — CA-AGENTS-VAL-PHASE2-LONG
+# Agent under test: Longitudinal monitoring agent (Phase 1: Kaggle EHR time-series, historical cohort)
+# Deck: 1,000 patients · 12 sites · 40 elements (27 REQ / 13 OPT) · 86.0% avg completeness
+# Monitoring period: 180 days after index; serial elements stored long-format in longitudinal_series
+# =============================================================================
+key: longitudinal
+study_id: CA-AGENTS-VAL-PHASE2-LONG
+title: Longitudinal Cardiac Monitoring Cohort
+agent: longitudinal_agent
+phase1_source: Kaggle EHR Time-Series Database (historical cohort)
+target_n: 1000
+target_sites: 12
+monitoring_days: 180
+expected: {total_elements: 40, required: 27, avg_completeness: 86.0}
+
+calendar:
+  index_end_long: '2025-06-30'   # need 180 d of potential follow-up before data_cutoff
+
+index:
+  description: "adult with established heart failure (HF-coded hospitalization, or 2 HF-coded encounters within 1 y); index = discharge / visit date; >= 3 serial vital-sign sets in -30..+180 d"
+  one_per_person: earliest
+  keep_columns: [index_visit_concept_id]
+  sql: |
+    WITH hfv AS (
+      SELECT vo.person_id, vo.visit_occurrence_id, vo.visit_concept_id, vo.care_site_id,
+             CAST(CASE WHEN vo.visit_concept_id IN (9201, 262) THEN vo.visit_end_date ELSE vo.visit_start_date END AS DATE) AS index_date
+      FROM {{cdm}}.visit_occurrence vo
+      WHERE EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence co WHERE co.visit_occurrence_id = vo.visit_occurrence_id
+                    AND (co.condition_concept_id IN {{cs:heart_failure}} OR co.condition_source_concept_id IN {{cs:heart_failure}}))
+    ),
+    qual AS (
+      SELECT h.* FROM hfv h
+      WHERE h.visit_concept_id IN (9201, 262)
+         OR EXISTS (SELECT 1 FROM hfv h2 WHERE h2.person_id = h.person_id AND h2.visit_occurrence_id <> h.visit_occurrence_id
+                    AND DATEDIFF(h.index_date, h2.index_date) BETWEEN 1 AND 365)
+    )
+    SELECT q.person_id, q.index_date, MAX(COALESCE(q.care_site_id, p.care_site_id)) AS care_site_id, MIN(q.visit_concept_id) AS index_visit_concept_id
+    FROM qual q JOIN {{cdm}}.person p ON p.person_id = q.person_id
+    WHERE q.index_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end_long}}' AS DATE)
+      AND YEAR(q.index_date) - p.year_of_birth >= {{min_age}}
+      AND (SELECT COUNT(DISTINCT m.measurement_date) FROM {{cdm}}.measurement m WHERE m.person_id = q.person_id
+           AND (m.measurement_concept_id IN {{cs:sbp}} OR m.measurement_source_concept_id IN {{cs:sbp}})
+           AND DATEDIFF(m.measurement_date, q.index_date) BETWEEN -30 AND 180) >= 3
+    GROUP BY q.person_id, q.index_date
+
+exclusions:
+  - name: "pregnant at baseline (pregnancy code in prior 280 d)"
+    where: |
+      EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence x WHERE x.person_id = c.person_id
+              AND DATEDIFF(x.condition_start_date, c.index_date) BETWEEN -280 AND 0
+              AND (x.condition_concept_id IN {{cs:pregnancy}} OR x.condition_source_concept_id IN {{cs:pregnancy}}))
+  - name: "< 365 days of observation before index"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.observation_period op WHERE op.person_id = c.person_id
+                  AND op.observation_period_start_date <= DATE_SUB(c.index_date, {{min_prior_observation_days}})
+                  AND op.observation_period_end_date >= c.index_date)
+
+sampling:
+  method: "simple random sample (natural exacerbation rate — required for PPV)"
+  strata_expr: "'all'"
+  quotas: {all: 1000}
+
+elements:
+  # ---------------- helpers (aux)
+  - {name: hf_note, aux: true, src: {type: note_text, note: hf_note_title, window: [-90, 0], max_chars: 6000}}
+  - {name: weight, aux: true, src: {type: measurement, set: weight, window: [-90, 0], range: [25, 300]}}
+  - {name: height, aux: true, src: {type: measurement, set: height, window: [-1095, 0], range: [120, 230]}}
+  - {name: aux_bnp, aux: true, src: {type: measurement, set: bnp, window: [-30, 0], range: [1, 50000]}}
+  - {name: aux_ntprobnp, aux: true, src: {type: measurement, set: ntprobnp, window: [-30, 0], range: [1, 100000]}}
+  # ---------------- DEMOGRAPHICS (5)
+  - {name: age, domain: demographics, description: Patient age at baseline, required: true, expected_completeness: 1.00, src: {type: person, field: age}}
+  - {name: gender, domain: demographics, description: Male / Female, required: true, expected_completeness: 1.00, src: {type: person, field: gender}}
+  - {name: race, domain: demographics, description: Race / ethnicity, required: true, expected_completeness: 0.95, src: {type: person, field: race}}
+  - {name: bmi_baseline, domain: demographics, description: Baseline BMI, required: true, expected_completeness: 0.95,
+     src: {type: measurement, set: bmi, window: [-90, 0], range: [10, 90]}, fill: "weight / POWER(height / 100.0, 2)"}
+  - {name: pregnancy_status, domain: demographics, description: "Pregnant at baseline (exclusion; 0 for all included)", required: true, expected_completeness: 1.00,
+     src: {type: flag, set: pregnancy, window: [-280, 0], require_lookback: false}}
+  # ---------------- CLINICAL HISTORY (8)
+  - {name: heart_failure_class, domain: clinical_history, description: NYHA class if HF, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "NULLIF(REGEXP_EXTRACT(hf_note, 'nyha( functional)? class[: ]*(iv|iii|ii|i|[1-4])', 2), '')"},
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN {v} IN ('iv', '4') THEN 'IV' WHEN {v} IN ('iii', '3') THEN 'III' WHEN {v} IN ('ii', '2') THEN 'II' ELSE 'I' END"}
+  - {name: post_mi_status, domain: clinical_history, description: "Post-MI timing (days since most recent acute MI, categorised)", required: true, expected_completeness: 0.98,
+     src: {type: days_since, set: mi_acute, window: [-36500, 0]},
+     transform: "CASE WHEN {v} IS NULL THEN 'no_prior_mi' WHEN {v} <= 30 THEN 'mi_0_30d' WHEN {v} <= 90 THEN 'mi_31_90d' WHEN {v} <= 365 THEN 'mi_91_365d' ELSE 'mi_gt_1y' END"}
+  - {name: ejection_fraction_baseline, domain: clinical_history, description: Baseline EF if known, required: false, expected_completeness: 0.70,
+     src: {type: measurement, set: lvef, window: [-365, 0], range: [5, 90], pick: latest}}
+  - {name: diabetes, domain: clinical_history, description: Diabetes mellitus, required: true, expected_completeness: 0.98, src: {type: flag, set: diabetes, window: [-36500, 0]}}
+  - {name: hypertension, domain: clinical_history, description: Hypertension, required: true, expected_completeness: 0.98, src: {type: flag, set: hypertension, window: [-36500, 0]}}
+  - {name: ckd, domain: clinical_history, description: Chronic kidney disease, required: true, expected_completeness: 0.95, src: {type: flag, set: ckd, window: [-36500, 0]}}
+  - {name: copd, domain: clinical_history, description: COPD, required: false, expected_completeness: 0.90, src: {type: flag, set: copd, window: [-36500, 0]}}
+  - {name: atrial_fibrillation, domain: clinical_history, description: Atrial fibrillation, required: true, expected_completeness: 0.95, src: {type: flag, set: atrial_fibrillation, window: [-36500, 0]}}
+  # ---------------- DIAGNOSTIC DATA — SERIAL (8)  (wide column = # observations; values in longitudinal_series)
+  - {name: heart_rate_series, domain: diagnostic_serial, description: Serial heart rate measurements, required: true, expected_completeness: 0.90,
+     src: {type: measurement_series, set: heart_rate, window: [-30, 180], range: [20, 250]}}
+  - {name: systolic_bp_series, domain: diagnostic_serial, description: Serial systolic BP measurements, required: true, expected_completeness: 0.90,
+     src: {type: measurement_series, set: sbp, window: [-30, 180], range: [50, 260]}}
+  - {name: diastolic_bp_series, domain: diagnostic_serial, description: Serial diastolic BP measurements, required: true, expected_completeness: 0.90,
+     src: {type: measurement_series, set: dbp, window: [-30, 180], range: [20, 160]}}
+  - {name: weight_series, domain: diagnostic_serial, description: Serial weight measurements (kg), required: true, expected_completeness: 0.85,
+     src: {type: measurement_series, set: weight, window: [-30, 180], range: [25, 300], convert: weight_series}}
+  - {name: spo2_series, domain: diagnostic_serial, description: Serial SpO2 if available, required: false, expected_completeness: 0.60,
+     src: {type: measurement_series, set: spo2, window: [-30, 180], range: [50, 100]}}
+  - {name: dyspnea_documentation, domain: diagnostic_serial, description: Dyspnea symptoms documented (dates), required: false, expected_completeness: 0.70,
+     src: {type: event_series, set: dyspnea, window: [-30, 180]}}
+  - {name: chest_pain_events, domain: diagnostic_serial, description: Chest pain episodes (dates), required: false, expected_completeness: 0.75,
+     src: {type: event_series, set: angina_chest_pain, window: [-30, 180]}}
+  - {name: edema_documentation, domain: diagnostic_serial, description: Edema documentation (dates), required: false, expected_completeness: 0.65,
+     src: {type: event_series, set: edema, window: [-30, 180]}}
+  # ---------------- LABORATORY DATA — SERIAL (7)
+  - {name: bnp_baseline, domain: laboratory_serial, description: "Baseline BNP / NT-proBNP (pg/mL; assay in bnp_baseline_assay)", required: true, expected_completeness: 0.80,
+     src: {type: derived, expr: "COALESCE(aux_bnp, aux_ntprobnp)"}}
+  - {name: bnp_baseline_assay, aux: true, src: {type: derived, expr: "CASE WHEN aux_bnp IS NOT NULL THEN 'BNP' WHEN aux_ntprobnp IS NOT NULL THEN 'NT-proBNP' END"}}
+  - {name: bnp_series, domain: laboratory_serial, description: Serial BNP / NT-proBNP measurements, required: false, expected_completeness: 0.60,
+     src: {type: measurement_series, set: natriuretic_peptides, window: [1, 180], range: [1, 100000]}}
+  - {name: troponin_series, domain: laboratory_serial, description: Serial troponin if checked, required: false, expected_completeness: 0.50,
+     src: {type: measurement_series, set: troponin, window: [1, 180], range: [0, 100000]}}
+  - {name: creatinine_baseline, domain: laboratory_serial, description: Baseline creatinine, required: true, expected_completeness: 0.90,
+     src: {type: measurement, set: creatinine, window: [-90, 0], range: [0.2, 20]}}
+  - {name: creatinine_series, domain: laboratory_serial, description: Serial creatinine, required: false, expected_completeness: 0.70,
+     src: {type: measurement_series, set: creatinine, window: [1, 180], range: [0.2, 20]}}
+  - {name: potassium_series, domain: laboratory_serial, description: Serial potassium levels, required: false, expected_completeness: 0.60,
+     src: {type: measurement_series, set: potassium, window: [1, 180], range: [1.5, 9.5]}}
+  - {name: sodium_series, domain: laboratory_serial, description: Serial sodium levels, required: false, expected_completeness: 0.60,
+     src: {type: measurement_series, set: sodium, window: [1, 180], range: [100, 180]}}
+  # ---------------- OUTCOME DATA (12) — monitoring window days 1..180
+  - {name: hf_exacerbation_events, domain: outcome, role: reference, description: "HF exacerbations (# ED visits / hospitalizations with HF dx)", required: true, expected_completeness: 0.95,
+     src: {type: visit_count, visit_concepts: [9201, 262, 9203], set: heart_failure, window: [1, 180]}}
+  - {name: hf_exacerbation_dates, domain: outcome, role: reference, description: Dates of HF exacerbations, required: true, expected_completeness: 0.95,
+     src: {type: event_series, set: heart_failure, window: [1, 180], visit_concepts: [9201, 262, 9203]}}
+  - {name: cardiac_decompensation, domain: outcome, description: "Cardiac decompensation events (# visits coded acute / acute-on-chronic HF)", required: true, expected_completeness: 0.92,
+     src: {type: visit_count, visit_concepts: [9201, 262, 9203, 9202], set: hf_acute, window: [1, 180]}}
+  - {name: ed_visits_cardiac, domain: outcome, description: ED visits — cardiac cause, required: true, expected_completeness: 0.95,
+     src: {type: visit_count, visit_concepts: [9203, 262], set: cardiac_dx, window: [1, 180]}}
+  - {name: hospital_admissions_cardiac, domain: outcome, description: Hospital admissions — cardiac, required: true, expected_completeness: 0.95,
+     src: {type: visit_count, visit_concepts: [9201, 262], set: cardiac_dx, window: [1, 180]}}
+  - {name: mi_events, domain: outcome, description: MI during monitoring, required: true, expected_completeness: 0.98,
+     src: {type: outcome, set: mi_acute, window: [1, 180], visit_concepts: [9201, 262, 9203]}}
+  - {name: arrhythmia_events, domain: outcome, description: Documented arrhythmia events, required: false, expected_completeness: 0.80,
+     src: {type: outcome, set: arrhythmia_any, window: [1, 180]}}
+  - {name: mortality_30day, domain: outcome, description: 30-day mortality, required: true, expected_completeness: 0.98, src: {type: death, window: [1, 30]}}
+  - {name: mortality_90day, domain: outcome, description: 90-day mortality, required: true, expected_completeness: 0.98, src: {type: death, window: [1, 90]}}
+  - {name: mortality_180day, domain: outcome, description: 180-day mortality, required: true, expected_completeness: 0.98, src: {type: death, window: [1, 180]}}
+  - {name: medication_changes, domain: outcome, description: "Medication adjustments (# new CV drug ingredients started)", required: false, expected_completeness: 0.80,
+     src: {type: new_drug_count, set: cardiovascular_drugs, window: [1, 180]}}
+  - {name: procedure_dates, domain: outcome, description: Cardiac procedures performed (dates), required: true, expected_completeness: 0.90,
+     src: {type: event_series, set: cardiac_procedure_any, domain: Procedure, window: [1, 180]}}
+  # ---------------- reference helpers (aux)
+  - {name: acute_cardiac_dates, aux: true, src: {type: event_series, set: cardiac_dx, window: [1, 180], visit_concepts: [9201, 262, 9203]}}
+  - {name: readmission_30d, aux: true, src: {type: visit_count, visit_concepts: [9201, 262], window: [1, 30]}}
+  - {name: cardiac_event_30d, aux: true, src: {type: visit_count, visit_concepts: [9201, 262, 9203], set: cardiac_dx, window: [1, 30]}}
+  - {name: cardiac_event_90d, aux: true, src: {type: visit_count, visit_concepts: [9201, 262, 9203], set: cardiac_dx, window: [1, 90]}}
+  - {name: ref_mi_30d, aux: true, src: {type: derived, expr: "CASE WHEN mi_events = 1 AND mi_events_days <= 30 THEN 1 WHEN mi_events = 1 THEN 0 WHEN mortality_30day IS NULL THEN NULL ELSE 0 END"}}
+  - {name: ref_readmit_30d, aux: true, src: {type: derived, expr: "CASE WHEN readmission_30d IS NULL THEN NULL WHEN readmission_30d > 0 THEN 1 ELSE 0 END"}}
+  - {name: ref_event_30d, aux: true, src: {type: derived, expr: "CASE WHEN cardiac_event_30d IS NULL THEN NULL WHEN cardiac_event_30d > 0 THEN 1 ELSE 0 END"}}
+  - {name: ref_event_90d, aux: true, src: {type: derived, expr: "CASE WHEN cardiac_event_90d IS NULL THEN NULL WHEN cardiac_event_90d > 0 THEN 1 ELSE 0 END"}}
+
+predictions:
+  table: longitudinal_predictions          # one row per patient-day the agent is run (daily landmark)
+  columns:
+    day: "monitoring day (0..179) — agent sees only data with day <= this"
+    risk_hf_7d: "probability of HF exacerbation in (day, day+7]"
+    alert_hf_7d: "0/1 alert at locked threshold"
+    risk_acute_24h: "probability of ED visit / admission (cardiac) in (day, day+1]"
+    alert_acute_24h: "0/1"
+  patient_level:                            # from the day-0 run
+    risk_mi_30d: "probability of MI within 30 d"
+    risk_event_30d: "probability of any cardiac ED/admission within 30 d"
+    pred_readmit_30d: "0/1 30-d readmission"
+    pred_risk_90d: "0/1 high risk of cardiac ED/admission within 90 d"
+
+endpoints:
+  primary:
+    - {id: hf_sens_7d, label: "HF exacerbation prediction (7-day) — event-level sensitivity", metric: alert_sensitivity, horizon: 7, goal: 0.84, direction: ge, phase1: 0.867}
+    - {id: hf_spec_7d, label: "HF exacerbation — window-level specificity", metric: alert_specificity, horizon: 7, goal: 0.80, direction: ge, phase1: null}
+    - {id: hf_ppv_7d, label: "HF exacerbation — alert PPV", metric: alert_ppv, horizon: 7, goal: 0.30, direction: ge, phase1: null}
+    - {id: lead_time, label: "Prediction lead time (mean days, first alert -> event)", metric: alert_lead_time, horizon: 7, goal: 3.0, direction: ge, phase1: null}
+  secondary:
+    - {id: mi_auc_30d, label: "MI risk prediction (30-day AUC)", metric: auc, pred: risk_mi_30d, ref: ref_mi_30d, goal: 0.82, direction: ge, phase1: 0.843}
+    - {id: readmission, label: "Readmission prediction accuracy (30 d)", metric: accuracy, pred: pred_readmit_30d, ref: ref_readmit_30d, goal: 0.80, direction: ge, phase1: 0.829}
+    - {id: acute_24h_sens, label: "24-hour acute event prediction — sensitivity", metric: alert_sensitivity, horizon: 1, event: acute, goal: 0.87, direction: ge, phase1: 0.894}
+    - {id: event_auc_30d, label: "30-day event prediction AUC", metric: auc, pred: risk_event_30d, ref: ref_event_30d, goal: 0.82, direction: ge, phase1: 0.843}
+    - {id: risk_90d, label: "90-day risk stratification accuracy", metric: accuracy, pred: pred_risk_90d, ref: ref_event_90d, goal: 0.79, direction: ge, phase1: 0.818}
+    - {id: temporal_consistency, label: "Temporal consistency (CV of 7-d sensitivity across monitoring windows)", metric: temporal_cv, horizon: 7, goal: 0.05, direction: lt, phase1: null}
+  subgroups: [gender, age_group, race, site, heart_failure_class, atrial_fibrillation]

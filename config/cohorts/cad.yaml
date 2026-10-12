@@ -1,0 +1,182 @@
+# =============================================================================
+# CAD Detection External Validation Cohort — CA-AGENTS-VAL-PHASE2-CAD
+# Agent under test: CAD agent (Phase 1 trained on Z-Alizadeh Sani, Iran, 303 pts —
+# tabular clinical/ECG/lab features -> angiographic CAD, stenosis >= 50%)
+# Deck: 600 patients · 8 sites · 41 elements (27 REQ / 14 OPT) · 86.8% avg completeness
+# =============================================================================
+key: cad
+study_id: CA-AGENTS-VAL-PHASE2-CAD
+title: CAD Detection External Validation Cohort
+agent: cad_agent
+phase1_source: Z-Alizadeh Sani Hospital (Iran) — 303 patients
+target_n: 600
+target_sites: 8
+expected: {total_elements: 41, required: 27, avg_completeness: 86.8}
+
+index:
+  description: "adult first invasive coronary angiography (ICA) — or CCTA when no ICA — for suspected CAD"
+  one_per_person: "CASE WHEN c.index_modality = 'ICA' THEN 0 ELSE 1 END, c.index_date"
+  one_per_person_label: "prefer ICA over CCTA, then earliest"
+  keep_columns: [index_modality, index_visit_concept_id]
+  sql: |
+    WITH proc AS (
+      SELECT po.person_id, CAST(po.procedure_date AS DATE) AS index_date, po.visit_occurrence_id,
+             CASE WHEN po.procedure_concept_id IN {{cs:coronary_angiography}} OR po.procedure_source_concept_id IN {{cs:coronary_angiography}}
+                  THEN 'ICA' ELSE 'CCTA' END AS index_modality
+      FROM {{cdm}}.procedure_occurrence po
+      WHERE po.procedure_concept_id IN {{cs:coronary_angiography}} OR po.procedure_source_concept_id IN {{cs:coronary_angiography}}
+         OR po.procedure_concept_id IN {{cs:ccta}} OR po.procedure_source_concept_id IN {{cs:ccta}}
+    )
+    SELECT pr.person_id, pr.index_date, MIN(pr.index_modality) AS index_modality,
+           MAX(COALESCE(v.care_site_id, p.care_site_id)) AS care_site_id, MIN(v.visit_concept_id) AS index_visit_concept_id
+    FROM proc pr JOIN {{cdm}}.person p ON p.person_id = pr.person_id
+    LEFT JOIN {{cdm}}.visit_occurrence v ON v.visit_occurrence_id = pr.visit_occurrence_id
+    WHERE pr.index_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end}}' AS DATE)
+      AND YEAR(pr.index_date) - p.year_of_birth >= {{min_age}}
+    GROUP BY pr.person_id, pr.index_date
+
+exclusions:
+  - name: "known CAD before index: prior MI, PCI or CABG (diagnostic population = suspected CAD)"
+    where: |
+      EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence x WHERE x.person_id = c.person_id AND x.condition_start_date < DATE_SUB(c.index_date, 1)
+              AND (x.condition_concept_id IN {{cs:mi_any}} OR x.condition_source_concept_id IN {{cs:mi_any}}))
+      OR EXISTS (SELECT 1 FROM {{cdm}}.procedure_occurrence x WHERE x.person_id = c.person_id AND x.procedure_date < c.index_date
+              AND (x.procedure_concept_id IN {{cs:prior_revasc}} OR x.procedure_source_concept_id IN {{cs:prior_revasc}}))
+      OR EXISTS (SELECT 1 FROM {{cdm}}.observation x WHERE x.person_id = c.person_id AND x.observation_date < c.index_date
+              AND (x.observation_concept_id IN {{cs:prior_revasc}} OR x.observation_source_concept_id IN {{cs:prior_revasc}}))
+  - name: "emergent angiography for STEMI (index day -1..0) — not a suspected-CAD diagnostic study"
+    where: |
+      EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence x WHERE x.person_id = c.person_id
+              AND DATEDIFF(x.condition_start_date, c.index_date) BETWEEN -1 AND 0
+              AND (x.condition_concept_id IN {{cs:stemi}} OR x.condition_source_concept_id IN {{cs:stemi}}))
+  - name: "no cath / CCTA report available (reference standard missing)"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.note n WHERE n.person_id = c.person_id AND DATEDIFF(n.note_date, c.index_date) BETWEEN 0 AND 2
+                  AND n.note_title RLIKE '(?i)(cath|angiogra|coronary|ccta|cardiac ct)')
+  - name: "< 365 days of observation before index"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.observation_period op WHERE op.person_id = c.person_id
+                  AND op.observation_period_start_date <= DATE_SUB(c.index_date, {{min_prior_observation_days}})
+                  AND op.observation_period_end_date >= c.index_date)
+
+# Consecutive-like (random) sampling stratified by modality; ICA is the primary reference.
+sampling:
+  method: "random sampling stratified by reference modality (ICA primary, CCTA secondary)"
+  strata_expr: "e.index_modality"
+  quotas: {ICA: 500, CCTA: 100}
+
+elements:
+  # ---------------- helpers (aux): reports + coded symptom flags
+  - {name: cath_report, aux: true, src: {type: note_text, note: cath_report_title, window: [0, 2], max_chars: 8000}}
+  - {name: ccta_report, aux: true, src: {type: note_text, note: ccta_report_title, window: [0, 2], max_chars: 4000}}
+  - {name: stress_report, aux: true, src: {type: note_text, note: stress_report_title, window: [-365, -1], max_chars: 4000}}
+  - {name: ecg_read_pre, aux: true, src: {type: modality, modality: ecg, column: read_statement, window: [-90, 0],
+                                          fallback: {type: note_text, note: ecg_report_title, window: [-90, 0], max_chars: 2000}}}
+  - {name: angina_dx, aux: true, src: {type: flag, set: angina, window: [-180, 0], require_lookback: false}}
+  - {name: chest_pain_dx, aux: true, src: {type: flag, set: chest_pain, window: [-180, 0], require_lookback: false}}
+  - {name: smoking_current_dx, aux: true, src: {type: flag, set: smoking_current, window: [-730, 0], require_lookback: false}}
+  - {name: smoking_former_dx, aux: true, src: {type: flag, set: smoking_former, window: [-3650, 0], require_lookback: false}}
+  # ---------------- DEMOGRAPHICS (5)
+  - {name: age, domain: demographics, description: Patient age, required: true, expected_completeness: 1.00, src: {type: person, field: age}}
+  - {name: gender, domain: demographics, description: Male / Female, required: true, expected_completeness: 1.00, src: {type: person, field: gender}}
+  - {name: race, domain: demographics, description: Race / ethnicity, required: true, expected_completeness: 0.95, src: {type: person, field: race}}
+  - {name: weight, aux: true, src: {type: measurement, set: weight, window: [-90, 0], range: [25, 300]}}
+  - {name: height, aux: true, src: {type: measurement, set: height, window: [-1095, 0], range: [120, 230]}}
+  - {name: bmi, domain: demographics, description: Body mass index, required: true, expected_completeness: 0.95,
+     src: {type: measurement, set: bmi, window: [-365, 0], range: [10, 90]}, fill: "weight / POWER(height / 100.0, 2)"}
+  - {name: family_history_cad, domain: demographics, description: Family history of CAD, required: true, expected_completeness: 0.90,
+     src: {type: flag, set: family_history_ihd, window: [-36500, 0], tables: [observation, condition]}}
+  # ---------------- CLINICAL HISTORY (9)
+  - {name: chest_pain_type, domain: clinical_history, description: "Chest pain characteristics (typical / atypical / non-anginal / none)", required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "COALESCE(NULLIF(REGEXP_EXTRACT(cath_report, '(atypical (angina|chest pain)|typical angina|non-?anginal|asymptomatic)', 1), ''), CASE WHEN angina_dx = 1 THEN 'typical angina' WHEN chest_pain_dx = 1 THEN 'chest pain, unspecified' END)"},
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN {v} RLIKE '^atypical' THEN 'atypical' WHEN {v} RLIKE '^typical' THEN 'typical' WHEN {v} RLIKE 'non' THEN 'non_anginal' WHEN {v} RLIKE 'asymptomatic' THEN 'asymptomatic' ELSE 'unspecified' END"}
+  - {name: chest_pain_duration, domain: clinical_history, description: Duration of symptoms, required: false, expected_completeness: 0.85,
+     src: {type: derived, expr: "NULLIF(REGEXP_EXTRACT(cath_report, '(for|x|over the (past|last)) ([0-9]+ (day|week|month|year)s?)', 3), '')"}}
+  - {name: exertional_symptoms, domain: clinical_history, description: Symptoms with exertion, required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN cath_report IS NULL AND ccta_report IS NULL THEN NULL WHEN COALESCE(cath_report, ccta_report) RLIKE '(on exertion|exertional|with exertion|with activity|walking)' THEN 1 ELSE 0 END"}}
+  - {name: prior_cardiac_history, domain: clinical_history, description: Prior cardiac events, required: true, expected_completeness: 0.95,
+     src: {type: flag, set: prior_cardiac_events, window: [-36500, -1]}}
+  - {name: diabetes, domain: clinical_history, description: Diabetes mellitus, required: true, expected_completeness: 0.98, src: {type: flag, set: diabetes, window: [-36500, 0]}}
+  - {name: hypertension, domain: clinical_history, description: Hypertension, required: true, expected_completeness: 0.98, src: {type: flag, set: hypertension, window: [-36500, 0]}}
+  - {name: hyperlipidemia, domain: clinical_history, description: Hyperlipidemia, required: true, expected_completeness: 0.95, src: {type: flag, set: hyperlipidemia, window: [-36500, 0]}}
+  - {name: smoking_status, domain: clinical_history, description: Current smoking status, required: true, expected_completeness: 0.95,
+     src: {type: observation_value, set: smoking_status_obs, window: [-730, 0]},
+     fill: "CASE WHEN smoking_current_dx = 1 THEN 'current' WHEN smoking_former_dx = 1 THEN 'former' END",
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN LOWER({v}) RLIKE '(current|every day|some day|light|heavy)' THEN 'current' WHEN LOWER({v}) RLIKE 'former' THEN 'former' WHEN LOWER({v}) RLIKE 'never' THEN 'never' ELSE 'unknown' END"}
+  - {name: smoking_pack_years, domain: clinical_history, description: Pack-years if smoker, required: false, expected_completeness: 0.70,
+     src: {type: observation_value, set: pack_years, window: [-3650, 0]}}
+  # ---------------- DIAGNOSTIC DATA (6)
+  - {name: baseline_ecg, domain: diagnostic, description: "Baseline ECG abnormalities (Q waves, ST/T change, LVH, BBB)", required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE '(q wave|infarct|st[- ](segment )?(elevation|depression)|t[- ]wave (inversion|abnormal)|hypertrophy|lvh|bundle branch block|poor r[- ]wave)' THEN 'abnormal' ELSE 'normal' END"}}
+  - {name: stress_test_performed, domain: diagnostic, description: Stress test done (prior 12 months), required: false, expected_completeness: 0.80,
+     src: {type: flag, set: stress_test, domain: Procedure, window: [-365, -1], require_lookback: false}}
+  - {name: stress_test_result, domain: diagnostic, description: Stress test result, required: false, expected_completeness: 0.75,
+     src: {type: derived, expr: "CASE WHEN stress_report IS NULL THEN NULL WHEN stress_report RLIKE '(positive|ischemi|abnormal)' AND NOT stress_report RLIKE 'negative for ischemi' THEN 'positive' WHEN stress_report RLIKE '(negative|normal|no ischemi)' THEN 'negative' ELSE 'indeterminate' END"}}
+  - {name: stress_test_mets, domain: diagnostic, description: METs achieved on stress test, required: false, expected_completeness: 0.60,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(stress_report, '([0-9]{1,2}([.][0-9])?) ?mets', 1), '') AS DOUBLE)"}}
+  - {name: exercise_induced_symptoms, domain: diagnostic, description: Exercise-induced angina, required: false, expected_completeness: 0.70,
+     src: {type: derived, expr: "CASE WHEN stress_report IS NULL THEN NULL WHEN stress_report RLIKE '(exercise[- ]induced angina|chest pain during exercise|angina during)' THEN 1 ELSE 0 END"}}
+  - {name: prior_imaging, domain: diagnostic, description: Prior cardiac imaging, required: false, expected_completeness: 0.70,
+     src: {type: flag, set: cardiac_imaging_any, domain: Procedure, window: [-36500, -1]}}
+  # ---------------- LABORATORY (10)
+  - {name: total_cholesterol, domain: laboratory, description: Total cholesterol (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: total_chol, window: [-365, 0], range: [50, 600]}}
+  - {name: ldl_cholesterol, domain: laboratory, description: LDL cholesterol (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: ldl, window: [-365, 0], range: [10, 400]}}
+  - {name: hdl_cholesterol, domain: laboratory, description: HDL cholesterol (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: hdl, window: [-365, 0], range: [5, 200]}}
+  - {name: triglycerides, domain: laboratory, description: Triglycerides (mg/dL), required: true, expected_completeness: 0.88, src: {type: measurement, set: triglycerides, window: [-365, 0], range: [20, 4000]}}
+  - {name: fasting_glucose, domain: laboratory, description: Fasting glucose (mg/dL), required: false, expected_completeness: 0.80, src: {type: measurement, set: glucose_fasting, window: [-365, 0], range: [30, 700]}}
+  - {name: hba1c, domain: laboratory, description: Hemoglobin A1c (%), required: false, expected_completeness: 0.75, src: {type: measurement, set: hba1c, window: [-365, 0], range: [3, 20]}}
+  - {name: troponin_baseline, domain: laboratory, description: Baseline troponin, required: false, expected_completeness: 0.70, src: {type: measurement, set: troponin, window: [-7, 0], range: [0, 100000]}}
+  - {name: bnp, domain: laboratory, description: BNP level, required: false, expected_completeness: 0.50, src: {type: measurement, set: bnp, window: [-90, 0], range: [1, 50000]}}
+  - {name: creatinine, domain: laboratory, description: Serum creatinine, required: true, expected_completeness: 0.90, src: {type: measurement, set: creatinine, window: [-90, 0], range: [0.2, 20]}}
+  - {name: egfr, domain: laboratory, description: "Estimated GFR (reported, else CKD-EPI 2021 from creatinine)", required: true, expected_completeness: 0.90,
+     src: {type: measurement, set: egfr, window: [-90, 0], range: [2, 200]},
+     fill: "CASE WHEN creatinine IS NULL OR gender IS NULL THEN NULL WHEN gender = 'Female' THEN 142 * POWER(LEAST(creatinine / 0.7, 1), -0.241) * POWER(GREATEST(creatinine / 0.7, 1), -1.200) * POWER(0.9938, age) * 1.012 ELSE 142 * POWER(LEAST(creatinine / 0.9, 1), -0.302) * POWER(GREATEST(creatinine / 0.9, 1), -1.200) * POWER(0.9938, age) END"}
+  # ---------------- OUTCOME / REFERENCE STANDARD (11)  — ICA report NLP; 10% double manual adjudication
+  - {name: angiography_performed, domain: outcome, description: Coronary angiography done, required: true, expected_completeness: 1.00,
+     src: {type: derived, expr: "CASE WHEN index_modality = 'ICA' THEN 1 ELSE 0 END"}}
+  - {name: lad_stenosis, domain: outcome, role: reference, description: LAD stenosis percentage, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(lad|left anterior descending)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE)"}}
+  - {name: lcx_stenosis, domain: outcome, role: reference, description: LCX stenosis percentage, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(lcx|circumflex)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE)"}}
+  - {name: rca_stenosis, domain: outcome, role: reference, description: RCA stenosis percentage, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(rca|right coronary)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE)"}}
+  - {name: lm_stenosis, domain: outcome, role: reference, description: Left main stenosis percentage, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(left main|lmca)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE)"}}
+  - {name: normal_coronaries, aux: true,
+     src: {type: derived, expr: "CASE WHEN cath_report RLIKE '(angiographically normal|normal coronar|no (significant|obstructive) (coronary )?(artery )?disease)' THEN 1 ELSE 0 END"}}
+  - {name: stenosis_severity, domain: outcome, role: reference, description: Maximum stenosis severity (%), required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "COALESCE(GREATEST(lad_stenosis, lcx_stenosis, rca_stenosis, lm_stenosis), CASE WHEN normal_coronaries = 1 THEN 0 END)"}}
+  - {name: number_vessels_diseased, domain: outcome, role: reference, description: "Number of diseased vessels (>=50%; LM >=50% counts as LAD+LCX)", required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN stenosis_severity IS NULL THEN NULL ELSE (CASE WHEN COALESCE(lad_stenosis, 0) >= 50 OR COALESCE(lm_stenosis, 0) >= 50 THEN 1 ELSE 0 END) + (CASE WHEN COALESCE(lcx_stenosis, 0) >= 50 OR COALESCE(lm_stenosis, 0) >= 50 THEN 1 ELSE 0 END) + (CASE WHEN COALESCE(rca_stenosis, 0) >= 50 THEN 1 ELSE 0 END) END"}}
+  - {name: syntax_score, domain: outcome, description: SYNTAX score, required: false, expected_completeness: 0.60,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(cath_report, 'syntax score[: ]*(of )?([0-9]{1,2}([.][0-9])?)', 2), '') AS DOUBLE)"}}
+  - {name: ccta_performed, domain: outcome, description: CCTA performed instead, required: false, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN index_modality = 'CCTA' THEN 1 ELSE 0 END"}}
+  - {name: cadrads_score, domain: outcome, description: CAD-RADS score (if CCTA), required: false, expected_completeness: 0.75,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(ccta_report, 'cad-rads[ ]*([0-5])', 1), '') AS INT)"}}
+  - {name: cad_present, domain: outcome, role: reference, description: "CAD present (any stenosis >= 50% on ICA; CAD-RADS >= 3 if CCTA)", required: true, expected_completeness: 0.98,
+     src: {type: derived, expr: "CASE WHEN index_modality = 'ICA' AND stenosis_severity IS NOT NULL THEN CASE WHEN stenosis_severity >= 50 THEN 1 ELSE 0 END WHEN index_modality = 'CCTA' AND cadrads_score IS NOT NULL THEN CASE WHEN cadrads_score >= 3 THEN 1 ELSE 0 END END"}}
+  - {name: ref_multivessel, aux: true, src: {type: derived, expr: "CASE WHEN number_vessels_diseased IS NULL THEN NULL WHEN number_vessels_diseased >= 2 THEN 1 ELSE 0 END"}}
+  - {name: ref_risk_category, aux: true,
+     src: {type: derived, expr: "CASE WHEN stenosis_severity IS NULL THEN NULL WHEN stenosis_severity < 50 THEN 'low' WHEN number_vessels_diseased >= 2 OR COALESCE(lm_stenosis, 0) >= 50 THEN 'high' ELSE 'intermediate' END"}}
+
+predictions:
+  table: cad_predictions
+  columns:
+    agent_cad_prob: "probability of obstructive CAD (>=50%)"
+    agent_cad: "0/1 at the Phase 1 locked threshold"
+    agent_multivessel: "0/1 multivessel disease"
+    agent_risk_category: "low | intermediate | high"
+
+endpoints:
+  primary:
+    - {id: accuracy, label: "Overall accuracy", metric: accuracy, pred: agent_cad, ref: cad_present, goal: 0.92, direction: ge, phase1: 0.942, population: "index_modality = 'ICA'"}
+    - {id: sensitivity, label: "Sensitivity", metric: sensitivity, pred: agent_cad, ref: cad_present, positive: 1, goal: 0.90, direction: ge, phase1: 0.928, population: "index_modality = 'ICA'"}
+    - {id: specificity, label: "Specificity", metric: specificity, pred: agent_cad, ref: cad_present, positive: 1, goal: 0.93, direction: ge, phase1: 0.951, population: "index_modality = 'ICA'"}
+    - {id: auc, label: "AUC-ROC", metric: auc, pred: agent_cad_prob, ref: cad_present, goal: 0.93, direction: ge, phase1: 0.96, population: "index_modality = 'ICA'"}
+  secondary:
+    - {id: ppv, label: "Positive predictive value", metric: ppv, pred: agent_cad, ref: cad_present, positive: 1, goal: 0.88, direction: ge, phase1: 0.91}
+    - {id: npv, label: "Negative predictive value", metric: npv, pred: agent_cad, ref: cad_present, positive: 1, goal: 0.95, direction: ge, phase1: 0.96}
+    - {id: multivessel, label: "Multi-vessel CAD detection accuracy", metric: accuracy, pred: agent_multivessel, ref: ref_multivessel, goal: 0.85, direction: ge, phase1: 0.88}
+    - {id: risk_agreement, label: "Risk stratification agreement (kappa)", metric: kappa, pred: agent_risk_category, ref: ref_risk_category, goal: 0.82, direction: ge, phase1: 0.87}
+  subgroups: [gender, age_group, race, site, diabetes, index_modality]

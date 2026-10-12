@@ -1,0 +1,91 @@
+plan,rule,cohort,cohort_n,endpoint,label,primary,phase1,deck_goal,threshold,denominator,power_phase1,power_degraded
+A,goal,echo,1500,ef_correlation,EF correlation (Pearson r),True,0.96,0.9,0.9,1500,1.0,1.0
+A,goal,echo,1500,ef_mae,EF mean absolute error (EF points),True,3.2,5.0,5.0,1500,1.0,1.0
+A,goal,echo,1500,clinical_agreement,Clinical agreement — EF category (Cohen's kappa),True,0.91,0.85,0.85,1500,1.0,0.815
+A,goal,echo,1500,wall_motion_sens,Wall motion abnormality — sensitivity,False,0.88,0.85,0.85,600,0.531,0.155
+A,goal,echo,1500,wall_motion_spec,Wall motion abnormality — specificity,False,0.88,0.85,0.85,900,0.75,0.249
+A,goal,echo,1500,chamber_size,Chamber size agreement (kappa),False,0.84,0.8,0.8,1275,0.87,0.31
+A,goal,ecg,2000,overall_accuracy,Overall accuracy (PTB-XL superclass),True,0.973,0.95,0.95,2000,1.0,0.663
+A,goal,ecg,2000,stemi_sensitivity,STEMI sensitivity,True,0.947,0.92,0.92,730,0.832,0.279
+A,goal,ecg,2000,af_sensitivity,Atrial fibrillation sensitivity,True,0.964,0.94,0.94,670,0.82,0.259
+A,goal,ecg,2000,vt_sensitivity,VT sensitivity,False,0.958,0.93,0.93,150,0.241,0.073
+A,goal,ecg,2000,bbb_accuracy,Bundle branch block accuracy,False,0.952,0.93,0.93,2000,0.986,0.487
+A,goal,ecg,2000,nsr_accuracy,Normal sinus rhythm accuracy,False,0.981,0.95,0.95,2000,1.0,0.918
+A,goal,cad,2200,accuracy,Overall accuracy,True,0.942,0.92,0.92,2000,0.973,0.452
+A,goal,cad,2200,sensitivity,Sensitivity,True,0.928,0.9,0.9,1200,0.926,0.356
+A,goal,cad,2200,specificity,Specificity,True,0.951,0.93,0.93,800,0.655,0.182
+A,goal,cad,2200,auc,AUC-ROC,True,0.96,0.93,0.93,1200+/800-,1.0,0.858
+A,goal,cad,2200,ppv,Positive predictive value,False,0.91,0.88,0.88,1200,0.912,0.34
+A,goal,cad,2200,npv,Negative predictive value,False,0.96,0.95,0.95,800,0.211,0.069
+A,goal,cad,2200,multivessel,Multi-vessel CAD detection accuracy,False,0.88,0.85,0.85,1200,0.846,0.294
+A,goal,cad,2200,risk_agreement,Risk stratification agreement (kappa),False,0.87,0.82,0.82,2000,1.0,0.687
+A,goal,risk,2000,auc_mace,AUC-ROC for 5-y MACE,True,0.89,0.85,0.85,238+/1462-,0.807,0.261
+A,goal,risk,2000,accuracy,Overall classification accuracy,True,0.884,0.85,0.85,1700,0.986,0.515
+A,goal,risk,2000,sens_high,Sensitivity for high-risk,False,0.86,0.82,0.82,238,0.375,0.121
+A,goal,risk,2000,spec_low,Specificity for low-risk,False,0.91,0.88,0.88,1462,0.964,0.436
+A,goal,longitudinal,4000,hf_sens_7d,HF exacerbation prediction (7-day) — event-level sensitivity,True,0.867,0.84,0.84,1400,0.814,0.285
+A,goal,longitudinal,4000,mi_auc_30d,MI risk prediction (30-day AUC),False,0.843,0.82,0.82,100+/3900-,0.152,0.066
+A,goal,longitudinal,4000,readmission,Readmission prediction accuracy (30 d),False,0.829,0.8,0.8,4000,0.997,0.637
+A,goal,longitudinal,4000,acute_24h_sens,24-hour acute event prediction — sensitivity,False,0.894,0.87,0.87,1200,0.725,0.236
+A,goal,longitudinal,4000,event_auc_30d,30-day event prediction AUC,False,0.843,0.82,0.82,600+/3400-,0.607,0.191
+A,goal,longitudinal,4000,risk_90d,90-day risk stratification accuracy,False,0.818,0.79,0.79,4000,0.994,0.588
+B,margin,echo,1500,ef_correlation,EF correlation (Pearson r),True,0.96,0.9,0.9,1500,1.0,1.0
+B,margin,echo,1500,ef_mae,EF mean absolute error (EF points),True,3.2,5.0,5.0,1500,1.0,1.0
+B,margin,echo,1500,clinical_agreement,Clinical agreement — EF category (Cohen's kappa),True,0.91,0.85,0.85,1500,1.0,0.815
+B,margin,echo,1500,wall_motion_sens,Wall motion abnormality — sensitivity,False,0.88,0.85,0.83,600,0.924,0.622
+B,margin,echo,1500,wall_motion_spec,Wall motion abnormality — specificity,False,0.88,0.85,0.83,900,0.988,0.811
+B,margin,echo,1500,chamber_size,Chamber size agreement (kappa),False,0.84,0.8,0.79,1275,0.971,0.594
+B,margin,ecg,2000,overall_accuracy,Overall accuracy (PTB-XL superclass),True,0.973,0.95,0.923,2000,1.0,1.0
+B,margin,ecg,2000,stemi_sensitivity,STEMI sensitivity,True,0.947,0.92,0.897,730,0.999,0.945
+B,margin,ecg,2000,af_sensitivity,Atrial fibrillation sensitivity,True,0.964,0.94,0.914,670,1.0,0.976
+B,margin,ecg,2000,vt_sensitivity,VT sensitivity,False,0.958,0.93,0.908,150,0.557,0.259
+B,margin,ecg,2000,bbb_accuracy,Bundle branch block accuracy,False,0.952,0.93,0.902,2000,1.0,1.0
+B,margin,ecg,2000,nsr_accuracy,Normal sinus rhythm accuracy,False,0.981,0.95,0.931,2000,1.0,1.0
+B,margin,cad,600,accuracy,Overall accuracy,True,0.942,0.92,0.892,500,0.983,0.855
+B,margin,cad,600,sensitivity,Sensitivity,True,0.928,0.9,0.878,300,0.81,0.487
+B,margin,cad,600,specificity,Specificity,True,0.951,0.93,0.901,200,0.723,0.47
+B,margin,cad,600,auc,AUC-ROC,True,0.96,0.93,0.91,300+/200-,1.0,0.942
+B,margin,cad,600,ppv,Positive predictive value,False,0.91,0.88,0.86,300,0.764,0.435
+B,margin,cad,600,npv,Negative predictive value,False,0.96,0.95,0.91,200,0.82,0.709
+B,margin,cad,600,multivessel,Multi-vessel CAD detection accuracy,False,0.88,0.85,0.83,300,0.678,0.375
+B,margin,cad,600,risk_agreement,Risk stratification agreement (kappa),False,0.87,0.82,0.82,500,0.755,0.231
+B,margin,risk,1000,auc_mace,AUC-ROC for 5-y MACE,True,0.89,0.85,0.84,119+/731-,0.704,0.287
+B,margin,risk,1000,accuracy,Overall classification accuracy,True,0.884,0.85,0.834,850,0.986,0.745
+B,margin,risk,1000,sens_high,Sensitivity for high-risk,False,0.86,0.82,0.81,119,0.292,0.126
+B,margin,risk,1000,spec_low,Specificity for low-risk,False,0.91,0.88,0.86,731,0.987,0.794
+B,margin,longitudinal,1000,hf_sens_7d,HF exacerbation prediction (7-day) — event-level sensitivity,True,0.867,0.84,0.817,350,0.684,0.401
+B,margin,longitudinal,1000,mi_auc_30d,MI risk prediction (30-day AUC),False,0.843,0.82,0.793,25+/975-,0.172,0.115
+B,margin,longitudinal,1000,readmission,Readmission prediction accuracy (30 d),False,0.829,0.8,0.779,1000,0.979,0.793
+B,margin,longitudinal,1000,acute_24h_sens,24-hour acute event prediction — sensitivity,False,0.894,0.87,0.844,300,0.7,0.445
+B,margin,longitudinal,1000,event_auc_30d,30-day event prediction AUC,False,0.843,0.82,0.793,150+/850-,0.679,0.444
+B,margin,longitudinal,1000,risk_90d,90-day risk stratification accuracy,False,0.818,0.79,0.768,1000,0.972,0.776
+C,margin,echo,1500,ef_correlation,EF correlation (Pearson r),True,0.96,0.9,0.9,1500,1.0,1.0
+C,margin,echo,1500,ef_mae,EF mean absolute error (EF points),True,3.2,5.0,5.0,1500,1.0,1.0
+C,margin,echo,1500,clinical_agreement,Clinical agreement — EF category (Cohen's kappa),True,0.91,0.85,0.85,1500,1.0,0.815
+C,margin,echo,1500,wall_motion_sens,Wall motion abnormality — sensitivity,False,0.88,0.85,0.83,600,0.924,0.622
+C,margin,echo,1500,wall_motion_spec,Wall motion abnormality — specificity,False,0.88,0.85,0.83,900,0.988,0.811
+C,margin,echo,1500,chamber_size,Chamber size agreement (kappa),False,0.84,0.8,0.79,1275,0.971,0.594
+C,margin,ecg,2000,overall_accuracy,Overall accuracy (PTB-XL superclass),True,0.973,0.95,0.923,2000,1.0,1.0
+C,margin,ecg,2000,stemi_sensitivity,STEMI sensitivity,True,0.947,0.92,0.897,730,0.999,0.945
+C,margin,ecg,2000,af_sensitivity,Atrial fibrillation sensitivity,True,0.964,0.94,0.914,670,1.0,0.976
+C,margin,ecg,2000,vt_sensitivity,VT sensitivity,False,0.958,0.93,0.908,150,0.557,0.259
+C,margin,ecg,2000,bbb_accuracy,Bundle branch block accuracy,False,0.952,0.93,0.902,2000,1.0,1.0
+C,margin,ecg,2000,nsr_accuracy,Normal sinus rhythm accuracy,False,0.981,0.95,0.931,2000,1.0,1.0
+C,margin,cad,1300,accuracy,Overall accuracy,True,0.942,0.92,0.892,1200,1.0,0.998
+C,margin,cad,1300,sensitivity,Sensitivity,True,0.928,0.9,0.878,720,0.995,0.872
+C,margin,cad,1300,specificity,Specificity,True,0.951,0.93,0.901,480,0.986,0.873
+C,margin,cad,1300,auc,AUC-ROC,True,0.96,0.93,0.91,720+/480-,1.0,1.0
+C,margin,cad,1300,ppv,Positive predictive value,False,0.91,0.88,0.86,720,0.987,0.801
+C,margin,cad,1300,npv,Negative predictive value,False,0.96,0.95,0.91,480,0.993,0.97
+C,margin,cad,1300,multivessel,Multi-vessel CAD detection accuracy,False,0.88,0.85,0.83,720,0.965,0.721
+C,margin,cad,1300,risk_agreement,Risk stratification agreement (kappa),False,0.87,0.82,0.82,1200,0.984,0.475
+C,margin,risk,1500,auc_mace,AUC-ROC for 5-y MACE,True,0.89,0.85,0.84,179+/1096-,0.865,0.403
+C,margin,risk,1500,accuracy,Overall classification accuracy,True,0.884,0.85,0.834,1275,0.999,0.904
+C,margin,risk,1500,sens_high,Sensitivity for high-risk,False,0.86,0.82,0.81,179,0.377,0.147
+C,margin,risk,1500,spec_low,Specificity for low-risk,False,0.91,0.88,0.86,1096,0.999,0.934
+C,margin,longitudinal,2000,hf_sens_7d,HF exacerbation prediction (7-day) — event-level sensitivity,True,0.867,0.84,0.817,700,0.954,0.74
+C,margin,longitudinal,2000,mi_auc_30d,MI risk prediction (30-day AUC),False,0.843,0.82,0.793,50+/1950-,0.298,0.188
+C,margin,longitudinal,2000,readmission,Readmission prediction accuracy (30 d),False,0.829,0.8,0.779,2000,1.0,0.975
+C,margin,longitudinal,2000,acute_24h_sens,24-hour acute event prediction — sensitivity,False,0.894,0.87,0.844,600,0.954,0.767
+C,margin,longitudinal,2000,event_auc_30d,30-day event prediction AUC,False,0.843,0.82,0.793,300+/1700-,0.929,0.73
+C,margin,longitudinal,2000,risk_90d,90-day risk stratification accuracy,False,0.818,0.79,0.768,2000,1.0,0.976

@@ -1,0 +1,78 @@
+# =============================================================================
+# CardioAI Phase 2 — global study settings (Mayo Clinic Platform Discover)
+# Study ID: CA-AGENTS-VAL-PHASE2  — 5 agent-validation cohorts
+# (Women's CVD cohort and the 5 risk calculators are OUT OF SCOPE for this build)
+# =============================================================================
+study_id: CA-AGENTS-VAL-PHASE2
+seed: 20261012
+
+# --- Where the data lives inside the MCP workspace -------------------------
+# Confirm these names in the MCP Schema Visualizer at onboarding.  Spark SQL
+# accepts catalog.schema.table; leave catalog empty if not used.
+schemas:
+  cdm: omop            # OMOP CDM clinical tables (person, measurement, ...)
+  vocab: omop          # OMOP vocabulary tables (concept, concept_ancestor, ...)
+  work: cardioai_work  # project scratch schema (write access) — or temp views only
+  modality: modality   # MCP-specific ECG waveform / echo DICOM index tables (see modality_tables.yaml)
+
+# --- Study calendar --------------------------------------------------------
+# Retrospective window. Index events must fall inside; follow-up uses data
+# through the MCP data-refresh date (set data_cutoff to the snapshot date).
+index_start: '2012-01-01'
+index_end:   '2023-12-31'
+data_cutoff: '2025-12-31'
+min_age: 18
+min_prior_observation_days: 365   # lookback needed so "absence of code" = "no history"
+
+# --- Sites ------------------------------------------------------------------
+# Deck target: 12 sites (CAD: 8).  On MCP a "site" is defined from
+# CARE_SITE / LOCATION.  site_map assigns care_site -> analysis site; anything
+# unmapped is grouped by LOCATION.state.  Edit after running
+# scripts/discover_schema.py, which lists care sites with patient counts.
+site_definition: location_state_then_care_site
+site_map: {}            # e.g. {12345: "Rochester-MN", 23456: "Phoenix-AZ"}
+min_patients_per_site: 25
+
+# --- Export / disclosure control (data stays "behind glass") ---------------
+# Only aggregate tables leave the workspace; cells < small_cell are suppressed.
+small_cell: 11
+export_dir: exports
+
+# --- Unit harmonisation for MEASUREMENT values ------------------------------
+# OMOP unit concept ids: 8582 cm, 9330 inch, 9529 kg, 8739 lb.  Values whose
+# unit_source_value matches are converted; everything is range-checked.
+unit_conversions:
+  height: [{unit_concept_id: 9330, unit_source_like: ['in', 'inch%', '[in_i]'], factor: 2.54}]
+  weight: [{unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
+  weight_series: [{unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
+
+# --- Study plan: sample sizes + success rule (decision of 2026-10-12) --------
+# A = enlarge CAD / Risk / Longitudinal, keep the deck rule (lower 95% CI >= deck goal)
+# B = deck sizes, margin rule (lower 95% CI >= Phase 1 - margin)
+# C = moderate enlargement + margin rule
+# Under the margin rule the deck goal is still reported as a point-estimate target.
+# Endpoints without a Phase 1 value, and "<=" endpoints (MAE, time), keep the deck goal.
+plan: C
+margins:            # non-inferiority margin vs Phase 1, by metric
+  proportion: 0.05  # sensitivity, specificity, accuracy, PPV, NPV, alert sensitivity
+  auc: 0.05
+  pearson: 0.05
+  kappa: 0.05
+  f1_macro: 0.05
+  c_index: 0.05
+plans:
+  A:
+    rule: goal
+    sizes:
+      cad: {target_n: 2200, quotas: {ICA: 2000, CCTA: 200}}
+      risk: {target_n: 2000, quotas: {all: 2000}}
+      longitudinal: {target_n: 4000, quotas: {all: 4000}}
+  B:
+    rule: margin
+    sizes: {}
+  C:
+    rule: margin
+    sizes:
+      cad: {target_n: 1300, quotas: {ICA: 1200, CCTA: 100}}
+      risk: {target_n: 1500, quotas: {all: 1500}}
+      longitudinal: {target_n: 2000, quotas: {all: 2000}}

@@ -1,0 +1,166 @@
+# =============================================================================
+# Cardiovascular Risk Stratification Cohort — CA-AGENTS-VAL-PHASE2-RISK
+# Agent under test: Risk-stratification agent (Phase 1 trained on UCI Cleveland Clinic, 303 pts)
+# Deck: 1,000 patients · 12 sites · 41 elements (33 REQ / 8 OPT) · 88.5% avg completeness
+# Outcome: 5-year MACE (time-to-event); comparator: ACC/AHA Pooled Cohort Equations
+# =============================================================================
+key: risk
+study_id: CA-AGENTS-VAL-PHASE2-RISK
+title: Cardiovascular Risk Stratification Cohort
+agent: risk_agent
+phase1_source: UCI Cleveland Clinic Database — 303 patients
+target_n: 1000
+target_sites: 12
+horizon_days: 1825
+expected: {total_elements: 41, required: 33, avg_completeness: 88.5}
+
+calendar:
+  index_end_risk: '2020-12-31'     # guarantees >= 5 y potential follow-up to data_cutoff
+  min_age_risk: 40                 # PCE comparator valid 40-79
+  max_age_risk: 79
+
+index:
+  description: "adult 40-79 outpatient evaluation for chest pain / suspected angina with lipid panel in prior year, no prior ASCVD"
+  one_per_person: earliest
+  keep_columns: [index_visit_concept_id]
+  sql: |
+    WITH v AS (
+      SELECT vo.person_id, CAST(vo.visit_start_date AS DATE) AS index_date, vo.care_site_id, vo.visit_concept_id
+      FROM {{cdm}}.visit_occurrence vo
+      WHERE vo.visit_concept_id = 9202
+        AND vo.visit_start_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end_risk}}' AS DATE)
+        AND EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence co WHERE co.visit_occurrence_id = vo.visit_occurrence_id
+                    AND (co.condition_concept_id IN {{cs:angina_chest_pain}} OR co.condition_source_concept_id IN {{cs:angina_chest_pain}}))
+    )
+    SELECT v.person_id, v.index_date, MAX(COALESCE(v.care_site_id, p.care_site_id)) AS care_site_id, MIN(v.visit_concept_id) AS index_visit_concept_id
+    FROM v JOIN {{cdm}}.person p ON p.person_id = v.person_id
+    WHERE YEAR(v.index_date) - p.year_of_birth BETWEEN {{min_age_risk}} AND {{max_age_risk}}
+      AND EXISTS (SELECT 1 FROM {{cdm}}.measurement m WHERE m.person_id = v.person_id
+                  AND (m.measurement_concept_id IN {{cs:total_chol}} OR m.measurement_source_concept_id IN {{cs:total_chol}})
+                  AND DATEDIFF(m.measurement_date, v.index_date) BETWEEN -365 AND 0)
+    GROUP BY v.person_id, v.index_date
+
+exclusions:
+  - name: "prior ASCVD before index (MI, stroke, PCI/CABG) — PCE comparator population"
+    where: |
+      EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence x WHERE x.person_id = c.person_id AND x.condition_start_date < c.index_date
+              AND (x.condition_concept_id IN {{cs:mi_any}} OR x.condition_source_concept_id IN {{cs:mi_any}}
+                   OR x.condition_concept_id IN {{cs:stroke}} OR x.condition_source_concept_id IN {{cs:stroke}}))
+      OR EXISTS (SELECT 1 FROM {{cdm}}.procedure_occurrence x WHERE x.person_id = c.person_id AND x.procedure_date < c.index_date
+              AND (x.procedure_concept_id IN {{cs:prior_revasc}} OR x.procedure_source_concept_id IN {{cs:prior_revasc}}))
+  - name: "< 365 days of observation before index"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.observation_period op WHERE op.person_id = c.person_id
+                  AND op.observation_period_start_date <= DATE_SUB(c.index_date, {{min_prior_observation_days}})
+                  AND op.observation_period_end_date >= c.index_date)
+
+sampling:
+  method: "simple random sample (natural MACE prevalence — required for calibration)"
+  strata_expr: "'all'"
+  quotas: {all: 1000}
+
+elements:
+  # ---------------- helpers (aux)
+  - {name: ecg_read_pre, aux: true, src: {type: modality, modality: ecg, column: read_statement, window: [-90, 30],
+                                          fallback: {type: note_text, note: ecg_report_title, window: [-90, 30], max_chars: 2000}}}
+  - {name: stress_report, aux: true, src: {type: note_text, note: stress_report_title, window: [-365, 90], max_chars: 4000}}
+  - {name: angina_dx, aux: true, src: {type: flag, set: angina, window: [-30, 0], require_lookback: false}}
+  - {name: smoking_current_dx, aux: true, src: {type: flag, set: smoking_current, window: [-730, 0], require_lookback: false}}
+  - {name: smoking_former_dx, aux: true, src: {type: flag, set: smoking_former, window: [-3650, 0], require_lookback: false}}
+  - {name: weight, aux: true, src: {type: measurement, set: weight, window: [-180, 0], range: [25, 300]}}
+  - {name: height, aux: true, src: {type: measurement, set: height, window: [-1095, 0], range: [120, 230]}}
+  # ---------------- DEMOGRAPHICS (5)
+  - {name: age, domain: demographics, description: Patient age at baseline, required: true, expected_completeness: 1.00, src: {type: person, field: age}}
+  - {name: gender, domain: demographics, description: Male / Female, required: true, expected_completeness: 1.00, src: {type: person, field: gender}}
+  - {name: race, domain: demographics, description: Race / ethnicity, required: true, expected_completeness: 0.95, src: {type: person, field: race}}
+  - {name: bmi, domain: demographics, description: Body mass index, required: true, expected_completeness: 0.95,
+     src: {type: measurement, set: bmi, window: [-365, 0], range: [10, 90]}, fill: "weight / POWER(height / 100.0, 2)"}
+  - {name: family_history_cad, domain: demographics, description: Family history of premature CAD, required: true, expected_completeness: 0.90,
+     src: {type: flag, set: family_history_ihd, window: [-36500, 0], tables: [observation, condition]}}
+  # ---------------- CLINICAL HISTORY (10)
+  - {name: systolic_bp, domain: clinical_history, description: Systolic blood pressure (mmHg), required: true, expected_completeness: 0.98, src: {type: measurement, set: sbp, window: [-30, 0], range: [60, 260]}}
+  - {name: diastolic_bp, domain: clinical_history, description: Diastolic blood pressure (mmHg), required: true, expected_completeness: 0.98, src: {type: measurement, set: dbp, window: [-30, 0], range: [30, 160]}}
+  - {name: heart_rate, domain: clinical_history, description: Resting heart rate (bpm), required: true, expected_completeness: 0.95, src: {type: measurement, set: heart_rate, window: [-30, 0], range: [25, 220]}}
+  - {name: hypertension_diagnosis, domain: clinical_history, description: Hypertension diagnosis, required: true, expected_completeness: 0.98, src: {type: flag, set: hypertension, window: [-36500, 0]}}
+  - {name: diabetes_diagnosis, domain: clinical_history, description: Diabetes mellitus diagnosis, required: true, expected_completeness: 0.98, src: {type: flag, set: diabetes, window: [-36500, 0]}}
+  - {name: smoking_status, domain: clinical_history, description: Current smoking status, required: true, expected_completeness: 0.95,
+     src: {type: observation_value, set: smoking_status_obs, window: [-730, 0]},
+     fill: "CASE WHEN smoking_current_dx = 1 THEN 'current' WHEN smoking_former_dx = 1 THEN 'former' END",
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN LOWER({v}) RLIKE '(current|every day|some day|light|heavy)' THEN 'current' WHEN LOWER({v}) RLIKE 'former' THEN 'former' WHEN LOWER({v}) RLIKE 'never' THEN 'never' ELSE 'unknown' END"}
+  - {name: smoking_pack_years, domain: clinical_history, description: Pack-years if ever smoker, required: false, expected_completeness: 0.70,
+     src: {type: observation_value, set: pack_years, window: [-3650, 0]}}
+  - {name: antihypertensive_meds, domain: clinical_history, description: Taking antihypertensive medications, required: true, expected_completeness: 0.95,
+     src: {type: flag, set: antihypertensives, domain: Drug, window: [-180, 0]}}
+  - {name: statin_use, domain: clinical_history, description: Taking statin, required: true, expected_completeness: 0.95, src: {type: flag, set: statins, domain: Drug, window: [-180, 0]}}
+  - {name: aspirin_use, domain: clinical_history, description: "Taking aspirin (OTC use under-captured in EHR)", required: false, expected_completeness: 0.85, src: {type: flag, set: aspirin, domain: Drug, window: [-180, 0]}}
+  # ---------------- DIAGNOSTIC DATA (7)
+  - {name: baseline_ecg_st_depression, domain: diagnostic, description: ST depression on baseline ECG, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE 'no (significant )?st[- ](segment )?depression' THEN 0 WHEN ecg_read_pre RLIKE 'st[- ](segment )?depression' THEN 1 ELSE 0 END"}}
+  - {name: baseline_ecg_t_wave_abnormal, domain: diagnostic, description: T wave abnormality on baseline ECG, required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE '(t[- ]wave (abnormalit|inversion|changes)|inverted t|nonspecific t)' THEN 1 ELSE 0 END"}}
+  - {name: chest_pain_type, domain: diagnostic, description: Chest pain type if present, required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN angina_dx = 1 THEN 'typical' ELSE 'non_specific' END"}}
+  - {name: exercise_test_done, domain: diagnostic, description: Exercise tolerance test performed (-365..+90 d), required: false, expected_completeness: 0.70,
+     src: {type: flag, set: exercise_ett, domain: Procedure, window: [-365, 90], require_lookback: false}}
+  - {name: max_heart_rate_achieved, domain: diagnostic, description: Maximum heart rate on ETT, required: false, expected_completeness: 0.60,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(stress_report, 'max(imum)? heart rate[^0-9]{0,30}([0-9]{2,3})', 2), '') AS DOUBLE)"}}
+  - {name: exercise_induced_angina, domain: diagnostic, description: Exercise-induced angina, required: false, expected_completeness: 0.65,
+     src: {type: derived, expr: "CASE WHEN stress_report IS NULL THEN NULL WHEN stress_report RLIKE '(exercise[- ]induced angina|chest pain during exercise|angina during)' THEN 1 ELSE 0 END"}}
+  - {name: st_depression_exercise, domain: diagnostic, description: ST depression during exercise (mm), required: false, expected_completeness: 0.60,
+     src: {type: derived, expr: "CASE WHEN stress_report IS NULL THEN NULL ELSE COALESCE(CAST(NULLIF(REGEXP_EXTRACT(stress_report, '([0-9]([.][0-9])?) ?mm (of )?(horizontal |downsloping |upsloping )?st[- ]depression', 1), '') AS DOUBLE), 0) END"}}
+  # ---------------- LABORATORY (9)
+  - {name: total_cholesterol, domain: laboratory, description: Total cholesterol (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: total_chol, window: [-365, 0], range: [50, 600]}}
+  - {name: ldl_cholesterol, domain: laboratory, description: LDL cholesterol (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: ldl, window: [-365, 0], range: [10, 400]}}
+  - {name: hdl_cholesterol, domain: laboratory, description: HDL cholesterol (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: hdl, window: [-365, 0], range: [5, 200]}}
+  - {name: triglycerides, domain: laboratory, description: Triglycerides (mg/dL), required: true, expected_completeness: 0.88, src: {type: measurement, set: triglycerides, window: [-365, 0], range: [20, 4000]}}
+  - {name: fasting_glucose, domain: laboratory, description: Fasting glucose (mg/dL), required: true, expected_completeness: 0.85, src: {type: measurement, set: glucose_fasting, window: [-365, 0], range: [30, 700]}}
+  - {name: hba1c, domain: laboratory, description: Hemoglobin A1c (%), required: false, expected_completeness: 0.75, src: {type: measurement, set: hba1c, window: [-365, 0], range: [3, 20]}}
+  - {name: creatinine, domain: laboratory, description: Serum creatinine (mg/dL), required: true, expected_completeness: 0.90, src: {type: measurement, set: creatinine, window: [-365, 0], range: [0.2, 20]}}
+  - {name: egfr, domain: laboratory, description: "Estimated GFR (mL/min/1.73m2; reported, else CKD-EPI 2021)", required: true, expected_completeness: 0.90,
+     src: {type: measurement, set: egfr, window: [-365, 0], range: [2, 200]},
+     fill: "CASE WHEN creatinine IS NULL OR gender IS NULL THEN NULL WHEN gender = 'Female' THEN 142 * POWER(LEAST(creatinine / 0.7, 1), -0.241) * POWER(GREATEST(creatinine / 0.7, 1), -1.200) * POWER(0.9938, age) * 1.012 ELSE 142 * POWER(LEAST(creatinine / 0.9, 1), -0.302) * POWER(GREATEST(creatinine / 0.9, 1), -1.200) * POWER(0.9938, age) END"}
+  - {name: hscrp, domain: laboratory, description: High-sensitivity CRP (mg/L), required: false, expected_completeness: 0.50, src: {type: measurement, set: hscrp, window: [-365, 0], range: [0, 300]}}
+  # ---------------- OUTCOME DATA (10) — 5-year horizon
+  - {name: all_cause_mortality, domain: outcome, description: Death from any cause, required: true, expected_completeness: 0.98, src: {type: death, window: [1, 1825]}}
+  - {name: cv_mortality, domain: outcome, description: "Cardiovascular death (cause I00-I99)", required: true, expected_completeness: 0.95, src: {type: death, window: [1, 1825], cause_set: cv_death_causes}}
+  - {name: myocardial_infarction, domain: outcome, description: MI during follow-up (inpatient/ED), required: true, expected_completeness: 0.95,
+     src: {type: outcome, set: mi_acute, window: [1, 1825], visit_concepts: [9201, 262, 9203]}}
+  - {name: stroke, domain: outcome, description: Stroke during follow-up (inpatient/ED), required: true, expected_completeness: 0.95,
+     src: {type: outcome, set: stroke, window: [1, 1825], visit_concepts: [9201, 262, 9203]}}
+  - {name: heart_failure_hospitalization, domain: outcome, description: HF hospitalization, required: true, expected_completeness: 0.92,
+     src: {type: outcome, set: heart_failure, window: [1, 1825], visit_concepts: [9201, 262]}}
+  - {name: revascularization_pci, domain: outcome, description: "PCI performed (> 30 d after index; earlier = work-up of index presentation)", required: true, expected_completeness: 0.95,
+     src: {type: outcome, set: pci, domain: Procedure, window: [31, 1825]}}
+  - {name: revascularization_cabg, domain: outcome, description: "CABG performed (> 30 d after index)", required: true, expected_completeness: 0.95,
+     src: {type: outcome, set: cabg, domain: Procedure, window: [31, 1825]}}
+  - {name: unstable_angina_hospitalization, domain: outcome, description: Hospitalization for unstable angina, required: true, expected_completeness: 0.90,
+     src: {type: outcome, set: unstable_angina, window: [1, 1825], visit_concepts: [9201, 262]}}
+  - {name: composite_mace, domain: outcome, role: reference, description: "MACE at 5 y (CV death, MI, stroke, HF hosp., UA hosp., late PCI/CABG); NULL if censored event-free", required: true, expected_completeness: 0.95,
+     src: {type: derived, expr: "CASE WHEN GREATEST(cv_mortality, myocardial_infarction, stroke, heart_failure_hospitalization, revascularization_pci, revascularization_cabg, unstable_angina_hospitalization) = 1 THEN 1 WHEN cv_mortality IS NULL OR myocardial_infarction IS NULL OR stroke IS NULL OR heart_failure_hospitalization IS NULL OR revascularization_pci IS NULL OR revascularization_cabg IS NULL OR unstable_angina_hospitalization IS NULL THEN NULL ELSE 0 END"}}
+  - {name: days_to_event, domain: outcome, role: reference, description: Time to first MACE or censoring (days), required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN composite_mace = 1 THEN LEAST(CASE WHEN cv_mortality = 1 THEN cv_mortality_days END, CASE WHEN myocardial_infarction = 1 THEN myocardial_infarction_days END, CASE WHEN stroke = 1 THEN stroke_days END, CASE WHEN heart_failure_hospitalization = 1 THEN heart_failure_hospitalization_days END, CASE WHEN revascularization_pci = 1 THEN revascularization_pci_days END, CASE WHEN revascularization_cabg = 1 THEN revascularization_cabg_days END, CASE WHEN unstable_angina_hospitalization = 1 THEN unstable_angina_hospitalization_days END) ELSE all_cause_mortality_days END"}}
+  - {name: mace_event, aux: true, src: {type: derived, expr: "CASE WHEN GREATEST(cv_mortality, myocardial_infarction, stroke, heart_failure_hospitalization, revascularization_pci, revascularization_cabg, unstable_angina_hospitalization) = 1 THEN 1 ELSE 0 END"}}
+
+predictions:
+  table: risk_predictions
+  columns:
+    agent_mace_prob: "predicted 5-y MACE probability"
+    agent_high_risk: "0/1 high-risk call at locked threshold"
+    agent_risk_score: "continuous risk score (for C-index)"
+
+comparator:
+  name: "ACC/AHA Pooled Cohort Equations (10-y ASCVD) — computed by cardioai_mcp.risk_scores.pce"
+  categories: [0.05, 0.075, 0.20]   # <5% low, 5-7.5 borderline, 7.5-20 intermediate, >=20 high
+
+endpoints:
+  primary:
+    - {id: auc_mace, label: "AUC-ROC for 5-y MACE", metric: auc, pred: agent_mace_prob, ref: composite_mace, goal: 0.85, direction: ge, phase1: 0.89}
+    - {id: accuracy, label: "Overall classification accuracy", metric: accuracy, pred: agent_high_risk, ref: composite_mace, goal: 0.85, direction: ge, phase1: 0.884}
+    - {id: calibration, label: "Calibration (Hosmer-Lemeshow p)", metric: hosmer_lemeshow, pred: agent_mace_prob, ref: composite_mace, goal: 0.05, direction: gt, phase1: null}
+  secondary:
+    - {id: sens_high, label: "Sensitivity for high-risk", metric: sensitivity, pred: agent_high_risk, ref: composite_mace, positive: 1, goal: 0.82, direction: ge, phase1: 0.86}
+    - {id: spec_low, label: "Specificity for low-risk", metric: specificity, pred: agent_high_risk, ref: composite_mace, positive: 1, goal: 0.88, direction: ge, phase1: 0.91}
+    - {id: nri, label: "Net reclassification improvement vs PCE", metric: nri, pred: agent_mace_prob, ref: composite_mace, comparator: pce_risk, goal: 0.10, direction: ge, phase1: 0.15}
+    - {id: cstat_vs_pce, label: "C-statistic vs PCE (non-inferiority, margin 0.05)", metric: auc_difference, pred: agent_mace_prob, ref: composite_mace, comparator: pce_risk, goal: -0.05, direction: ge, phase1: null}
+    - {id: c_index, label: "Time-to-event C-index", metric: c_index, pred: agent_risk_score, time: days_to_event, event: mace_event, goal: 0.83, direction: ge, phase1: 0.87}
+  subgroups: [gender, age_group, race, site, diabetes_diagnosis]
