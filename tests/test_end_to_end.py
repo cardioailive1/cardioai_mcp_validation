@@ -37,8 +37,8 @@ def simulate_predictions(key: str, a: pd.DataFrame) -> pd.DataFrame:
     if key == "echo":
         p["agent_lvef"] = a.lvef_expert + RNG.normal(0, 3.5, len(a))
         p["agent_ef_category"] = np.where(p.agent_lvef <= 40, "reduced", np.where(p.agent_lvef < 50, "mildly_reduced", "normal"))
-        p["agent_wall_motion"] = _flip(a.wall_motion.fillna("normal"), 0.05, ["normal", "abnormal"])
-        p["agent_lv_size"] = _flip(a.ref_lv_size.fillna("normal"), 0.05, ["normal", "dilated"])
+        # single-plane area-length EDV reads ~10% under biplane, with scatter; lv_size is derived by evaluate()
+        p["agent_edv_ml"] = a.lv_end_diastolic_volume * 0.92 + RNG.normal(0, 6, len(a))
         p["runtime_s"] = RNG.gamma(9, 5, len(a))
     elif key == "ecg":
         p["agent_superclass"] = _flip(a.ref_superclass.fillna("NORM"), 0.03, ["NORM", "MI", "STTC", "CD", "HYP"])
@@ -124,7 +124,11 @@ def test_endpoints_evaluate(built):
         ep = evaluate(r["cohort"], a, preds, series=series, daily=daily, n_boot=200)
         errs = ep[ep.note.astype(str).str.startswith("ERROR")]
         assert errs.empty, errs.to_string()
-        assert ep.estimate.notna().sum() >= len(ep) - 1, ep.to_string()
+        scored = ep[ep.tier != "not_applicable"]
+        assert scored.estimate.notna().sum() >= len(scored) - 1, ep.to_string()
+        if k == "echo":
+            assert set(ep[ep.tier == "not_applicable"].endpoint) == {"wall_motion_sens", "wall_motion_spec"}
+            assert ep.set_index("endpoint").loc["chamber_size", "estimate"] == ep.set_index("endpoint").loc["chamber_size", "estimate"]  # not NaN
         ep.to_csv(os.path.join(ROOT, "exports", "synthetic_test", f"{k}_endpoints_SIMULATED.csv"), index=False)
 
 

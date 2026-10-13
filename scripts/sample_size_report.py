@@ -29,7 +29,7 @@ RATES = dict(
     risk_hd_prev=0.55,         # >= 50% stenosis among chest-pain patients referred to angiography
     hf_events_per_pt=0.35,     # HF exacerbations per patient per 180 d
     mi_30d=0.025, event_30d=0.15, acute_events_per_pt=0.30,
-    echo_wma=0.40, echo_size_avail=0.85,
+    echo_size_avail=0.85,
 )
 
 
@@ -39,7 +39,6 @@ def denominators(key: str, c) -> dict:
     N = c.target_n
     if key == "echo":
         return {"ef_correlation": N, "ef_mae": N, "clinical_agreement": N,
-                "wall_motion_sens": round(N * R["echo_wma"]), "wall_motion_spec": round(N * (1 - R["echo_wma"])),
                 "chamber_size": round(N * R["echo_size_avail"])}
     if key == "ecg":
         return {"overall_accuracy": N, "stemi_sensitivity": q.get("stemi"), "af_sensitivity": q.get("af"),

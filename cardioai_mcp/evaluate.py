@@ -27,6 +27,11 @@ def evaluate(cohort: Cohort, analytic: pd.DataFrame, predictions: pd.DataFrame |
         d = d.merge(predictions, on=["person_id"], how="left", suffixes=("", "_pred"))
     if cohort.key == "risk":
         d["pce_risk"] = pce(d)
+    if cohort.key == "echo" and "agent_lv_size" not in d and "agent_edv_ml" in d:
+        # same rule as ref_lv_size: EDV indexed to BSA vs ASE upper limits (74 men / 61 women mL/m2)
+        idx = pd.to_numeric(d["agent_edv_ml"], errors="coerce") / pd.to_numeric(d.get("bsa"), errors="coerce")
+        lim = d["gender"].map({"Male": 74.0}).fillna(61.0)
+        d["agent_lv_size"] = np.where(idx.isna(), None, np.where(idx > lim, "dilated", "normal"))
     cl = "site" if cluster_by_site else None
     out: list[M.Result] = []
     extra = []
@@ -43,6 +48,11 @@ def evaluate(cohort: Cohort, analytic: pd.DataFrame, predictions: pd.DataFrame |
     res = pd.concat([res, pd.DataFrame(extra)], axis=1)
     res.insert(0, "tier", [t for t in ("primary", "secondary") for _ in cohort.endpoints[t]])
     res.insert(1, "plan", cohort.raw.get("plan", {}).get("key"))
+    na = cohort.endpoints.get("not_applicable") or []
+    if na:   # deck endpoints the agent cannot produce: listed, never counted as failures
+        res = pd.concat([res, pd.DataFrame([dict(tier="not_applicable", plan=res["plan"].iloc[0], endpoint=e["id"],
+                                                 label=e["label"], deck_goal=e.get("deck_goal"), note="N/A: " + e["reason"])
+                                            for e in na])], ignore_index=True)
     return res
 
 
