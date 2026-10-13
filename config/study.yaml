@@ -76,3 +76,11 @@ plans:
       cad: {target_n: 1300, quotas: {ICA: 1200, CCTA: 100}}
       risk: {target_n: 1500, quotas: {all: 1500}}
       longitudinal: {target_n: 2000, quotas: {all: 2000}}
+
+# ---------------------------------------------------------------------------
+# Model lock: what this validation runs with. The app's
+# app/validated_agents/registry.yaml must carry the same values, so production
+# serves exactly what was validated.
+model_lock:
+  encoders_fingerprint: 4f55f1444d7ad13556e7d320334f56b6c873971dbda656ace1d1a8159f73213b   # cardioai_mcp/encoders == app preprocessing
+  app_repo: cardioailive1/cardioaimedconnect

@@ -128,5 +128,16 @@ def test_endpoints_evaluate(built):
         ep.to_csv(os.path.join(ROOT, "exports", "synthetic_test", f"{k}_endpoints_SIMULATED.csv"), index=False)
 
 
+def test_analytic_rows_encode_through_app_encoders(built):
+    from cardioai_mcp.agent_inputs import encode_cohort
+    _, res = built
+    for k, width in (("cad", 59), ("risk", 30)):
+        e = encode_cohort(k, res[k]["analytic"])
+        assert len(e) == len(res[k]["analytic"]) and e.scorable.any(), e.reason.value_counts().to_string()
+        assert all(len(v) == width for v in e.vector[e.scorable])
+    lon = encode_cohort("longitudinal", res["longitudinal"]["analytic"])
+    assert not lon.scorable.any()          # blocked until the raw-unit normalization is supplied
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q", "-x"]))

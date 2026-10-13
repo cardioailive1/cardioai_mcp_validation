@@ -1,0 +1,42 @@
+{
+ "model": "ehr-model (EHR vitals MLP)",
+ "source": "cardioailive1/cardioaimedconnect@EHR_branch cb18da0c cardioai_ehr_data/ehr_data/ehr_Model2.py + cardioai_ehr_data/scaler.joblib",
+ "scaler_sha256": "844011539e89bb9361683cecea4bde5394708f90c9fcc0c2a962c16dee324a16",
+ "training_data": {
+  "file": "datasets/ehr_dataset.json (60,000 rows, already standardized)",
+  "sha256": "fcdd8a6374666db240bcf76a705a33bc0db15b3c3969d5510a87801caf80cabf"
+ },
+ "columns": [
+  "bp_systolic",
+  "bp_diastolic",
+  "heart_rate",
+  "respiratory_rate",
+  "temperature",
+  "oxygen_saturation",
+  "med_adherence",
+  "symptom_severity"
+ ],
+ "mean": [
+  5.278588345013861e-06,
+  0.0004638908697702154,
+  -0.001832780455873745,
+  0.0016537454745793815,
+  0.0014430062584155413,
+  -0.0005731138487340483,
+  0.0017412108176366045,
+  -0.0003546775740737781
+ ],
+ "scale": [
+  0.9999881779275986,
+  1.0006738944548421,
+  1.000846764439149,
+  1.0010965613673035,
+  0.9984851800965869,
+  0.9998408332293071,
+  1.0002435225086088,
+  0.999811865746279
+ ],
+ "raw_unit_normalization": null,
+ "blocker": "The training file was standardized before training, so scaler.joblib is ~identity. The raw-unit mean/SD of each vital (mmHg, bpm, breaths/min, degC, %) and the scales of med_adherence and symptom_severity are needed before real patient values can be scored. Fill raw_unit_normalization as {column: {mean, sd}} from the original source data.",
+ "label": "UNKNOWN: binary 'label' (29% positive); event and horizon not documented"
+}

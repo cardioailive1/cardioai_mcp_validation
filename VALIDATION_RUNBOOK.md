@@ -29,14 +29,14 @@ Agents within a wave can run in parallel. Wave 1 also proves the pipeline end-to
 ## Step 1: Set up the workspace (once)
 
 1. In the MCP portal, open a **workspace**. Use a medium CPU configuration for waves 1–2; you'll need one with a GPU for wave 3. Choose **JupyterLab**.
-2. Bring the toolkit in. Use the workspace's Git integration to clone this repo (or upload a zip of it). Also clone the app repo, because the agents' input encodings (`app/validated_agents/preprocessing`) live there and are shared with production:
+2. Bring the toolkit in. Use the workspace's Git integration to clone this repo (or upload a zip of it). The app repo is **not** needed: the agents' input encoders are included here (`cardioai_mcp/encoders`, a byte-identical copy of the app's `app/validated_agents/preprocessing`).
    ```bash
    git clone https://github.com/cardioailive1/cardioai_mcp_validation.git
-   git clone -b Main_agent https://github.com/cardioailive1/cardioaimedconnect.git   # encoders + model lock file
    cd cardioai_mcp_validation
    pip install -r requirements.txt
+   python -c "from cardioai_mcp import encoders; print(encoders.fingerprint())"
    ```
-   Record both commit SHAs (`git rev-parse HEAD`) in the analysis log; they are part of the validation lock.
+   The printed fingerprint must equal `model_lock.encoders_fingerprint` in `config/study.yaml` (the tests check this too). Record it and this repo's commit SHA (`git rev-parse HEAD`) in the analysis log; they are part of the validation lock.
 3. Confirm Spark works from a notebook cell:
    ```python
    from pyspark.sql import SparkSession
@@ -143,12 +143,14 @@ The agent reads the locked analytic table and writes a predictions table that fo
 | ECG | The 12-lead waveform from the MCP ECG table (10 s, resampled to 500 Hz) | `ecg_predictions`: `person_id, agent_superclass, agent_stemi, agent_rhythm, agent_bbb, runtime_s` |
 | Echo | The A4C cine from the echo DICOM (112 px, ≥ 32 frames) | `echo_predictions`: `person_id, agent_lvef, agent_ef_category, agent_wall_motion, agent_lv_size, runtime_s` |
 
-Encode the model inputs with the **same code the app serves with**, so the validated encoding is the deployed one:
+Encode the model inputs with the **same code the app serves with**, so the validated encoding is the deployed one. `encode_cohort` renames the analytic columns into the app's request fields, applies the pre-specified missing-data rules and calls the shared encoders:
 ```python
-import sys; sys.path.insert(0, "../cardioaimedconnect")   # the app repo cloned in step 1
-from app.validated_agents import preprocessing as pp
-x, imputed = pp.cleveland_vector(pp.cleveland_codes(row))       # risk; pp.zalizadeh_vector(row) for CAD
+from cardioai_mcp.agent_inputs import encode_cohort
+analytic = spark.table("cardioai_work.risk_analytic_locked").toPandas()
+enc = encode_cohort("risk", analytic)        # person_id, scorable, reason, vector, imputed   ("cad" for CAD)
+X = list(enc.vector[enc.scorable])           # send each vector to the locked model; Risk: report 1 - output
 ```
+Patients with `scorable = False` (the `reason` column says why, e.g. more than 5 optional CAD labs missing) count as model failures in the accuracy denominators, per the protocol.
 The Longitudinal EHR vitals model can't be scored until its raw-unit normalization and label definition are known (`model_inputs.blockers` in `longitudinal.yaml`).
 
 A template for writing the table:
