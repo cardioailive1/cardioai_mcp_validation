@@ -29,12 +29,14 @@ Agents within a wave can run in parallel. Wave 1 also proves the pipeline end-to
 ## Step 1: Set up the workspace (once)
 
 1. In the MCP portal, open a **workspace**. Use a medium CPU configuration for waves 1–2; you'll need one with a GPU for wave 3. Choose **JupyterLab**.
-2. Bring the toolkit in. Use the workspace's Git integration to clone the repo branch, or upload `cardioai_mcp_validation.zip`:
+2. Bring the toolkit in. Use the workspace's Git integration to clone this repo (or upload a zip of it). Also clone the app repo, because the agents' input encodings (`app/validated_agents/preprocessing`) live there and are shared with production:
    ```bash
-   git clone -b Main_agent https://github.com/cardioailive1/cardioaimedconnect.git
-   cd cardioaimedconnect/cardioai_mcp_validation        # wherever the toolkit lives in the repo
+   git clone https://github.com/cardioailive1/cardioai_mcp_validation.git
+   git clone -b Main_agent https://github.com/cardioailive1/cardioaimedconnect.git   # encoders + model lock file
+   cd cardioai_mcp_validation
    pip install -r requirements.txt
    ```
+   Record both commit SHAs (`git rev-parse HEAD`) in the analysis log; they are part of the validation lock.
 3. Confirm Spark works from a notebook cell:
    ```python
    from pyspark.sql import SparkSession
@@ -76,7 +78,7 @@ For each cohort, review the files in `exports/`:
 - `*_sites.csv`: the number of sites
 - `*_completeness.csv`: elements below the deck's expected completeness (flag `BELOW TARGET`)
 
-Then put the **real rates** into `RATES` in `scripts/sample_size_report.py`: obstructive-CAD share among angiography patients, 5-year MACE rate, HF exacerbations per patient. Rerun:
+Then put the **real rates** into `RATES` in `scripts/sample_size_report.py`: obstructive-CAD share among angiography patients, the share of Risk-cohort patients with ≥ 50% stenosis at angiography, HF exacerbations per patient. Rerun:
 ```bash
 python scripts/sample_size_report.py
 ```
@@ -125,7 +127,7 @@ Several references come from report text: CAD stenosis %, echo wall motion / RV 
 | Cohort | Reference that needs adjudication (Plan C, 10%) |
 |---|---|
 | CAD | ~130 cath / CCTA reports: per-vessel stenosis %, CAD present |
-| Risk | MACE events from codes; review a sample of events and CV-death causes |
+| Risk | ~135 cath reports: maximum stenosis % → heart disease (≥ 50%) |
 | Longitudinal | HF exacerbation dates; review a sample of events |
 | ECG | ~200 ECG reads: superclass, rhythm, STEMI |
 | Echo | ~150 echo reports: wall motion, RV, valves (LVEF is a structured value) |
@@ -135,11 +137,19 @@ The agent reads the locked analytic table and writes a predictions table that fo
 
 | Agent | Input | Output table and columns |
 |---|---|---|
-| CAD | Tabular input elements, measured before the procedure | `cad_predictions`: `person_id, agent_cad_prob, agent_cad, agent_multivessel, agent_risk_category` |
-| Risk | Tabular baseline elements | `risk_predictions`: `person_id, agent_mace_prob, agent_high_risk, agent_risk_score` |
+| CAD | The 54 Z-Alizadeh Sani inputs (`model_inputs` in `cad.yaml`, `docs/model_input_mapping.csv`), measured before the procedure, encoded with `app/validated_agents/preprocessing` | `cad_predictions`: `person_id, agent_cad_prob, agent_cad, agent_multivessel, agent_risk_category` |
+| Risk | The 13 Cleveland inputs (`model_inputs` in `risk.yaml`); report **1 − model output** (training target 1 = no disease) | `risk_predictions`: `person_id, agent_hd_prob, agent_hd` |
 | Longitudinal | `longitudinal_series`, only data with `day ≤ t`, run daily for t = 0…179 | `longitudinal_predictions`: `person_id, day, risk_hf_7d, alert_hf_7d, risk_acute_24h, alert_acute_24h`; plus `longitudinal_predictions_patient`: `person_id, risk_mi_30d, risk_event_30d, pred_readmit_30d, pred_risk_90d` |
 | ECG | The 12-lead waveform from the MCP ECG table (10 s, resampled to 500 Hz) | `ecg_predictions`: `person_id, agent_superclass, agent_stemi, agent_rhythm, agent_bbb, runtime_s` |
 | Echo | The A4C cine from the echo DICOM (112 px, ≥ 32 frames) | `echo_predictions`: `person_id, agent_lvef, agent_ef_category, agent_wall_motion, agent_lv_size, runtime_s` |
+
+Encode the model inputs with the **same code the app serves with**, so the validated encoding is the deployed one:
+```python
+import sys; sys.path.insert(0, "../cardioaimedconnect")   # the app repo cloned in step 1
+from app.validated_agents import preprocessing as pp
+x, imputed = pp.cleveland_vector(pp.cleveland_codes(row))       # risk; pp.zalizadeh_vector(row) for CAD
+```
+The Longitudinal EHR vitals model can't be scored until its raw-unit normalization and label definition are known (`model_inputs.blockers` in `longitudinal.yaml`).
 
 A template for writing the table:
 ```python

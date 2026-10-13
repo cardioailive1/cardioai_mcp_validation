@@ -9,7 +9,7 @@ It runs inside a **Mayo Clinic Platform (MCP) Discover workspace**. There the EH
 | Echo | …-ECHO | 1,500 | 12 | 27 (19) | Expert LVEF and report findings on the index TTE |
 | ECG | …-ECG | 2,000 | 12 | 30 (22) | Confirmed ECG over-read, plus clinical STEMI/NSTEMI diagnosis |
 | CAD | …-CAD | 600 (Plan C: 1,300) | 8 | 41 (27) | Invasive angiography ≥50% stenosis (CCTA CAD-RADS ≥3 secondary) |
-| Risk | …-RISK | 1,000 (Plan C: 1,500) | 12 | 41 (33) | 5-year MACE (time-to-event); PCE comparator |
+| Risk | …-RISK | 1,000 (Plan C: 1,500) | 12 | 41 (33) | Heart disease at angiography (≥ 50% stenosis), Cleveland model; MACE out of scope |
 | Longitudinal | …-LONG | 1,000 (Plan C: 2,000) | 12 | 40 (27) | HF exacerbations and events over a 180-day monitoring window |
 
 All 179 elements are mapped. The loader refuses to start if any cohort's element count, REQ count or average expected completeness differs from the deck.
@@ -29,7 +29,7 @@ cardioai_mcp/
   extractors.py  14 element extractors (measurement, flag, outcome, death, visit_count, note NLP, modality, series ...)
   builder.py     candidates -> exclusions (attrition) -> 1/patient -> sites -> stratified sampling + weights -> elements
   evaluate.py    computes every endpoint (Wilson / bootstrap CI, DeLong, HL, NRI, C-index, alert-window metrics)
-  metrics.py, power.py, risk_scores.py (ACC/AHA PCE), qc.py (completeness, Table 1, small-cell suppression)
+  metrics.py, power.py, risk_scores.py (ACC/AHA PCE, descriptive only), qc.py (completeness, Table 1, small-cell suppression)
 scripts/
   discover_schema.py      onboarding inventory (tables, modality candidates, care sites, note titles)
   run_cohorts.py          build cohorts (spark | duckdb-synthetic)

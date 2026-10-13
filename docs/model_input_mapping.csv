@@ -1,0 +1,76 @@
+cohort,model,model_input,source,element_is_deck,extractor,concept_set,window_days
+cad,cadmodel-mlp,Age,age,True,person,,
+cad,cadmodel-mlp,Weight,weight,False,measurement,weight,"[-90, 0]"
+cad,cadmodel-mlp,Length,height,False,measurement,height,"[-1095, 0]"
+cad,cadmodel-mlp,Sex,gender,True,person,,
+cad,cadmodel-mlp,BMI,bmi,True,measurement,bmi,"[-365, 0]"
+cad,cadmodel-mlp,DM,diabetes,True,flag,diabetes,"[-36500, 0]"
+cad,cadmodel-mlp,HTN,hypertension,True,flag,hypertension,"[-36500, 0]"
+cad,cadmodel-mlp,Current Smoker,smoking_status = 'current',True,observation_value,smoking_status_obs,"[-730, 0]"
+cad,cadmodel-mlp,EX-Smoker,smoking_status = 'former',True,observation_value,smoking_status_obs,"[-730, 0]"
+cad,cadmodel-mlp,FH,family_history_cad,True,flag,family_history_ihd,"[-36500, 0]"
+cad,cadmodel-mlp,Obesity,mi_obesity,False,flag,obesity,"[-36500, 0]"
+cad,cadmodel-mlp,CRF,mi_crf,False,flag,chronic_renal_failure,"[-36500, 0]"
+cad,cadmodel-mlp,CVA,mi_cva,False,flag,cerebrovascular_accident,"[-36500, -1]"
+cad,cadmodel-mlp,Airway disease,mi_airway_disease,False,flag,airway_disease,"[-36500, 0]"
+cad,cadmodel-mlp,Thyroid Disease,mi_thyroid_disease,False,flag,thyroid_disease,"[-36500, 0]"
+cad,cadmodel-mlp,CHF,mi_chf,False,flag,heart_failure,"[-36500, 0]"
+cad,cadmodel-mlp,DLP,hyperlipidemia,True,flag,hyperlipidemia,"[-36500, 0]"
+cad,cadmodel-mlp,BP,mi_bp,False,measurement,sbp,"[-30, 0]"
+cad,cadmodel-mlp,PR,mi_pr,False,measurement,heart_rate,"[-30, 0]"
+cad,cadmodel-mlp,Edema,mi_edema,False,derived,,
+cad,cadmodel-mlp,Weak Peripheral Pulse,mi_weak_peripheral_pulse,False,derived,,
+cad,cadmodel-mlp,Lung rales,mi_lung_rales,False,derived,,
+cad,cadmodel-mlp,Systolic Murmur,mi_systolic_murmur,False,derived,,
+cad,cadmodel-mlp,Diastolic Murmur,mi_diastolic_murmur,False,derived,,
+cad,cadmodel-mlp,Typical Chest Pain,chest_pain_type = 'typical',True,derived,,
+cad,cadmodel-mlp,Dyspnea,mi_dyspnea,False,derived,,
+cad,cadmodel-mlp,Function Class,mi_function_class,False,derived,,
+cad,cadmodel-mlp,Atypical,chest_pain_type = 'atypical',True,derived,,
+cad,cadmodel-mlp,Nonanginal,chest_pain_type = 'non_anginal',True,derived,,
+cad,cadmodel-mlp,Exertional CP,exertional_symptoms,True,derived,,
+cad,cadmodel-mlp,LowTH Ang,mi_lowth_angina,False,derived,,
+cad,cadmodel-mlp,Q Wave,mi_q_wave,False,derived,,
+cad,cadmodel-mlp,St Elevation,mi_st_elevation,False,derived,,
+cad,cadmodel-mlp,St Depression,mi_st_depression,False,derived,,
+cad,cadmodel-mlp,Tinversion,mi_t_inversion,False,derived,,
+cad,cadmodel-mlp,LVH,mi_lvh,False,derived,,
+cad,cadmodel-mlp,Poor R Progression,mi_poor_r_progression,False,derived,,
+cad,cadmodel-mlp,FBS,fasting_glucose,True,measurement,glucose_fasting,"[-365, 0]"
+cad,cadmodel-mlp,CR,creatinine,True,measurement,creatinine,"[-90, 0]"
+cad,cadmodel-mlp,TG,triglycerides,True,measurement,triglycerides,"[-365, 0]"
+cad,cadmodel-mlp,LDL,ldl_cholesterol,True,measurement,ldl,"[-365, 0]"
+cad,cadmodel-mlp,HDL,hdl_cholesterol,True,measurement,hdl,"[-365, 0]"
+cad,cadmodel-mlp,BUN,mi_bun,False,measurement,bun,"[-90, 0]"
+cad,cadmodel-mlp,ESR,mi_esr,False,measurement,esr,"[-180, 0]"
+cad,cadmodel-mlp,HB,mi_hb,False,measurement,hemoglobin,"[-90, 0]"
+cad,cadmodel-mlp,K,mi_k,False,measurement,potassium,"[-90, 0]"
+cad,cadmodel-mlp,Na,mi_na,False,measurement,sodium,"[-90, 0]"
+cad,cadmodel-mlp,WBC,mi_wbc,False,measurement,wbc,"[-90, 0]"
+cad,cadmodel-mlp,Lymph,mi_lymph,False,measurement,lymph_pct,"[-90, 0]"
+cad,cadmodel-mlp,Neut,mi_neut,False,measurement,neut_pct,"[-90, 0]"
+cad,cadmodel-mlp,PLT,mi_plt,False,measurement,platelets,"[-90, 0]"
+cad,cadmodel-mlp,EF-TTE,mi_ef_tte,False,measurement,lvef,"[-180, 0]"
+cad,cadmodel-mlp,Region RWMA,mi_region_rwma,False,derived,,
+cad,cadmodel-mlp,VHD,mi_vhd,False,derived,,
+risk,heartmodel-mlp,age,age,True,person,,
+risk,heartmodel-mlp,sex,gender = 'Male' -> 1,True,person,,
+risk,heartmodel-mlp,cp,cl_cp,False,derived,,
+risk,heartmodel-mlp,trestbps,systolic_bp,True,measurement,sbp,"[-30, 0]"
+risk,heartmodel-mlp,chol,total_cholesterol,True,measurement,total_chol,"[-365, 0]"
+risk,heartmodel-mlp,fbs,fasting_glucose > 120 -> 1,True,measurement,glucose_fasting,"[-365, 0]"
+risk,heartmodel-mlp,restecg,cl_restecg,False,derived,,
+risk,heartmodel-mlp,thalach,max_heart_rate_achieved,True,derived,,
+risk,heartmodel-mlp,exang,exercise_induced_angina,True,derived,,
+risk,heartmodel-mlp,oldpeak,st_depression_exercise,True,derived,,
+risk,heartmodel-mlp,slope,cl_slope,False,derived,,
+risk,heartmodel-mlp,ca,cl_ca,False,derived,,
+risk,heartmodel-mlp,thal,cl_thal,False,derived,,
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,bp_systolic,mi_bp_systolic,False,measurement,sbp,"[-7, 0]"
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,bp_diastolic,mi_bp_diastolic,False,measurement,dbp,"[-7, 0]"
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,heart_rate,mi_heart_rate,False,measurement,heart_rate,"[-7, 0]"
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,respiratory_rate,mi_respiratory_rate,False,measurement,resp_rate,"[-7, 0]"
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,temperature,mi_temperature,False,measurement,body_temp,"[-7, 0]"
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,oxygen_saturation,mi_oxygen_saturation,False,measurement,spo2,"[-7, 0]"
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,med_adherence,mi_med_adherence,False,derived,,
+longitudinal,Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint,symptom_severity,mi_symptom_severity,False,derived,,

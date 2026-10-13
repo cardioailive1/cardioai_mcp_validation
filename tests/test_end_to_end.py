@@ -53,10 +53,9 @@ def simulate_predictions(key: str, a: pd.DataFrame) -> pd.DataFrame:
         p["agent_multivessel"] = _flip(a.ref_multivessel.fillna(0).astype(int), 0.06, [0, 1])
         p["agent_risk_category"] = _flip(a.ref_risk_category.fillna("low"), 0.06, ["low", "intermediate", "high"])
     elif key == "risk":
-        y = a.mace_event.fillna(0).astype(int)
-        p["agent_mace_prob"] = np.clip(0.06 + 0.5 * y + RNG.normal(0, 0.08, len(a)), 0.001, 0.999)
-        p["agent_high_risk"] = (p.agent_mace_prob >= 0.3).astype(int)
-        p["agent_risk_score"] = p.agent_mace_prob
+        y = a.ref_heart_disease.fillna(0).astype(int)
+        p["agent_hd_prob"] = np.clip(0.2 + 0.55 * y + RNG.normal(0, 0.12, len(a)), 0.001, 0.999)
+        p["agent_hd"] = (p.agent_hd_prob >= 0.5).astype(int)
     elif key == "longitudinal":
         p["risk_mi_30d"] = np.clip(0.8 * a.ref_mi_30d.fillna(0) + RNG.normal(0.1, 0.1, len(a)), 0, 1)
         p["risk_event_30d"] = np.clip(0.6 * a.ref_event_30d.fillna(0) + RNG.normal(0.2, 0.15, len(a)), 0, 1)

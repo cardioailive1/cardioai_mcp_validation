@@ -36,6 +36,23 @@ def build_all(engine: Engine, cohorts: list[str], study: dict | None = None, exp
     return out
 
 
+def model_input_map(cohorts: list[str]) -> pd.DataFrame:
+    """One row per trained-model input: which cohort element (or expression over elements) supplies it."""
+    rows = []
+    for key in cohorts:
+        c = load_cohort(key)
+        mi = c.raw.get("model_inputs")
+        if not mi:
+            continue
+        by_name = {e.name: e for e in c.elements}
+        for feat, spec in mi["columns"].items():
+            el = by_name.get(str(spec).split()[0]) if spec else None
+            rows.append(dict(cohort=key, model=mi.get("model", ""), model_input=feat, source=spec,
+                             element_is_deck=bool(el and not el.aux), extractor=el.src["type"] if el else "expression",
+                             concept_set=(el.src.get("set", "") if el else ""), window_days=str(el.src.get("window", "")) if el else ""))
+    return pd.DataFrame(rows)
+
+
 def data_dictionary(cohorts: list[str]) -> pd.DataFrame:
     """One row per deck data element with its OMOP source specification."""
     rows = []

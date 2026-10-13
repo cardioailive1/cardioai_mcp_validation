@@ -1,0 +1,12 @@
+spark-warehouse/
+metastore_db/
+derby.log
+__pycache__/
+.pytest_cache/
+exports/synthetic_test/
+exports/spark_local_check/
+
+# Real MCP outputs never leave the workspace and are never committed (data use agreement).
+exports/*
+!exports/sample_size_plans.csv
+docs/governance/*.pdf

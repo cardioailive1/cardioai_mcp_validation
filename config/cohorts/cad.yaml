@@ -131,6 +131,50 @@ elements:
   - {name: egfr, domain: laboratory, description: "Estimated GFR (reported, else CKD-EPI 2021 from creatinine)", required: true, expected_completeness: 0.90,
      src: {type: measurement, set: egfr, window: [-90, 0], range: [2, 200]},
      fill: "CASE WHEN creatinine IS NULL OR gender IS NULL THEN NULL WHEN gender = 'Female' THEN 142 * POWER(LEAST(creatinine / 0.7, 1), -0.241) * POWER(GREATEST(creatinine / 0.7, 1), -1.200) * POWER(0.9938, age) * 1.012 ELSE 142 * POWER(LEAST(creatinine / 0.9, 1), -0.302) * POWER(GREATEST(creatinine / 0.9, 1), -1.200) * POWER(0.9938, age) END"}
+  # ===================== MODEL INPUTS (aux) — cadmodel-mlp, Z-Alizadeh Sani 54 raw columns ===============
+  # Extracted so the locked model receives every input it was trained on (see model_inputs below).
+  - {name: hp_note, aux: true, src: {type: note_text, note: hp_note_title, window: [-30, 0], max_chars: 12000}}
+  - {name: echo_report_pre, aux: true, src: {type: note_text, note: echo_report_title, window: [-180, 0], max_chars: 8000}}
+  - {name: mi_bp, aux: true, src: {type: measurement, set: sbp, window: [-30, 0], range: [60, 260]}}
+  - {name: mi_pr, aux: true, src: {type: measurement, set: heart_rate, window: [-30, 0], range: [25, 220]}}
+  # Z-Alizadeh 'Obesity' is exactly BMI >= 25 in the training file (92 N all < 25; 211 Y all >= 25), so derive it from BMI.
+  - {name: mi_obesity, aux: true, src: {type: derived, expr: "CASE WHEN bmi IS NULL THEN NULL WHEN bmi >= 25 THEN 1 ELSE 0 END"}}
+  - {name: mi_crf, aux: true, src: {type: flag, set: chronic_renal_failure, window: [-36500, 0]}}
+  - {name: mi_cva, aux: true, src: {type: flag, set: cerebrovascular_accident, window: [-36500, -1]}}
+  - {name: mi_airway_disease, aux: true, src: {type: flag, set: airway_disease, window: [-36500, 0]}}
+  - {name: mi_thyroid_disease, aux: true, src: {type: flag, set: thyroid_disease, window: [-36500, 0]}}
+  - {name: mi_chf, aux: true, src: {type: flag, set: heart_failure, window: [-36500, 0]}}
+  - {name: mi_edema, aux: true, src: {type: derived, expr: "CASE WHEN hp_note IS NULL THEN NULL WHEN hp_note RLIKE '(no|without|denies) [a-z ]{0,20}edema' THEN 0 WHEN hp_note RLIKE '(pedal|peripheral|leg|ankle|pitting)? ?edema' THEN 1 ELSE 0 END"}}
+  - {name: mi_weak_peripheral_pulse, aux: true, src: {type: derived, expr: "CASE WHEN hp_note IS NULL THEN NULL WHEN hp_note RLIKE '(diminished|weak|decreased|absent) [a-z ]{0,15}(pedal |peripheral |distal )?pulses?' THEN 1 ELSE 0 END"}}
+  - {name: mi_lung_rales, aux: true, src: {type: derived, expr: "CASE WHEN hp_note IS NULL THEN NULL WHEN hp_note RLIKE '(no|without) (rales|crackles)' THEN 0 WHEN hp_note RLIKE '(rales|crackles)' THEN 1 ELSE 0 END"}}
+  - {name: mi_systolic_murmur, aux: true, src: {type: derived, expr: "CASE WHEN hp_note IS NULL THEN NULL WHEN hp_note RLIKE 'no murmur' THEN 0 WHEN hp_note RLIKE 'systolic (ejection )?murmur' THEN 1 ELSE 0 END"}}
+  - {name: mi_diastolic_murmur, aux: true, src: {type: derived, expr: "CASE WHEN hp_note IS NULL THEN NULL WHEN hp_note RLIKE 'no murmur' THEN 0 WHEN hp_note RLIKE 'diastolic murmur' THEN 1 ELSE 0 END"}}
+  - {name: mi_dyspnea_dx, aux: true, src: {type: flag, set: dyspnea, window: [-90, 0], require_lookback: false}}
+  - {name: mi_dyspnea, aux: true, src: {type: derived, expr: "CASE WHEN mi_dyspnea_dx = 1 OR COALESCE(hp_note, '') RLIKE '(dyspnea|shortness of breath|sob)' AND NOT COALESCE(hp_note, '') RLIKE '(denies|no) (dyspnea|shortness of breath)' THEN 1 WHEN hp_note IS NULL AND mi_dyspnea_dx IS NULL THEN NULL ELSE 0 END"}}
+  - {name: mi_function_class, aux: true,
+     src: {type: derived, expr: "NULLIF(REGEXP_EXTRACT(COALESCE(hp_note, ''), '(nyha|ccs|functional) (functional )?class[: ]*(iv|iii|ii|i|[1-4])', 3), '')"},
+     transform: "CASE WHEN {v} IS NULL THEN 0 WHEN {v} IN ('iv', '4') THEN 4 WHEN {v} IN ('iii', '3') THEN 3 WHEN {v} IN ('ii', '2') THEN 2 ELSE 1 END"}
+  - {name: mi_lowth_angina, aux: true, src: {type: derived, expr: "CASE WHEN hp_note IS NULL THEN NULL WHEN hp_note RLIKE '(low[- ]threshold angina|angina (at|with) (rest|minimal|low))' THEN 1 ELSE 0 END"}}
+  - {name: mi_q_wave, aux: true, src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE '(q waves?|q-waves?)' AND NOT ecg_read_pre RLIKE 'no (pathologic )?q' THEN 1 ELSE 0 END"}}
+  - {name: mi_st_elevation, aux: true, src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE 'no (significant )?st[- ](segment )?elevation' THEN 0 WHEN ecg_read_pre RLIKE 'st[- ](segment )?elevation' THEN 1 ELSE 0 END"}}
+  - {name: mi_st_depression, aux: true, src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE 'no (significant )?st[- ](segment )?depression' THEN 0 WHEN ecg_read_pre RLIKE 'st[- ](segment )?depression' THEN 1 ELSE 0 END"}}
+  - {name: mi_t_inversion, aux: true, src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE '(t[- ]wave inversion|inverted t)' THEN 1 ELSE 0 END"}}
+  - {name: mi_lvh, aux: true, src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE '(left ventricular hypertrophy|lvh)' THEN 1 ELSE 0 END"}}
+  - {name: mi_poor_r_progression, aux: true, src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE 'poor r[- ]wave progression' THEN 1 ELSE 0 END"}}
+  - {name: mi_bun, aux: true, src: {type: measurement, set: bun, window: [-90, 0], range: [1, 200]}}
+  - {name: mi_esr, aux: true, src: {type: measurement, set: esr, window: [-180, 0], range: [0, 150]}}
+  - {name: mi_hb, aux: true, src: {type: measurement, set: hemoglobin, window: [-90, 0], range: [3, 25]}}
+  - {name: mi_k, aux: true, src: {type: measurement, set: potassium, window: [-90, 0], range: [1.5, 9.5]}}
+  - {name: mi_na, aux: true, src: {type: measurement, set: sodium, window: [-90, 0], range: [100, 180]}}
+  - {name: mi_wbc, aux: true, src: {type: measurement, set: wbc, window: [-90, 0], range: [0.5, 100]}, transform: "{v} * 1000"}
+  - {name: mi_lymph, aux: true, src: {type: measurement, set: lymph_pct, window: [-90, 0], range: [0, 100]}}
+  - {name: mi_neut, aux: true, src: {type: measurement, set: neut_pct, window: [-90, 0], range: [0, 100]}}
+  - {name: mi_plt, aux: true, src: {type: measurement, set: platelets, window: [-90, 0], range: [5, 1500]}}
+  - {name: mi_ef_tte, aux: true, src: {type: measurement, set: lvef, window: [-180, 0], range: [5, 90], pick: latest}}
+  - {name: mi_region_rwma, aux: true,
+     src: {type: derived, expr: "CASE WHEN echo_report_pre IS NULL THEN NULL WHEN echo_report_pre RLIKE '(normal (regional )?wall motion|no regional wall motion)' THEN 0 WHEN echo_report_pre RLIKE '(regional wall motion abnormalit|hypokines|akines|dyskines)' THEN 1 ELSE 0 END"}}
+  - {name: mi_vhd, aux: true,
+     src: {type: derived, expr: "CASE WHEN echo_report_pre IS NULL THEN NULL WHEN echo_report_pre RLIKE '(severe|critical) [a-z -]{0,25}(stenosis|regurgitation)' THEN 'Severe' WHEN echo_report_pre RLIKE 'moderate [a-z -]{0,25}(stenosis|regurgitation)' THEN 'Moderate' WHEN echo_report_pre RLIKE 'mild [a-z -]{0,25}(stenosis|regurgitation)' THEN 'mild' ELSE 'N' END"}}
   # ---------------- OUTCOME / REFERENCE STANDARD (11)  — ICA report NLP; 10% double manual adjudication
   - {name: angiography_performed, domain: outcome, description: Coronary angiography done, required: true, expected_completeness: 1.00,
      src: {type: derived, expr: "CASE WHEN index_modality = 'ICA' THEN 1 ELSE 0 END"}}
@@ -159,6 +203,75 @@ elements:
   - {name: ref_multivessel, aux: true, src: {type: derived, expr: "CASE WHEN number_vessels_diseased IS NULL THEN NULL WHEN number_vessels_diseased >= 2 THEN 1 ELSE 0 END"}}
   - {name: ref_risk_category, aux: true,
      src: {type: derived, expr: "CASE WHEN stenosis_severity IS NULL THEN NULL WHEN stenosis_severity < 50 THEN 'low' WHEN number_vessels_diseased >= 2 OR COALESCE(lm_stenosis, 0) >= 50 THEN 'high' ELSE 'intermediate' END"}}
+
+# Locked model input map: Z-Alizadeh Sani training column -> cohort element (+ encoding the
+# training code applied).  Mirrors app/validated_agents/preprocessing/cad_zalizadeh.json in MedConnect.
+model_inputs:
+  model: cadmodel-mlp
+  encoding: "Y/N -> 1/0; Sex Male=1 Fmale=0; one-hot Region RWMA (1-4) and VHD (N, Severe, mild; Moderate = reference); StandardScaler (training artifact)"
+  columns:
+    Age: age
+    Weight: weight
+    Length: height
+    Sex: gender
+    BMI: bmi
+    DM: diabetes
+    HTN: hypertension
+    Current Smoker: "smoking_status = 'current'"
+    EX-Smoker: "smoking_status = 'former'"
+    FH: family_history_cad
+    Obesity: mi_obesity
+    CRF: mi_crf
+    CVA: mi_cva
+    Airway disease: mi_airway_disease
+    Thyroid Disease: mi_thyroid_disease
+    CHF: mi_chf
+    DLP: hyperlipidemia
+    BP: mi_bp
+    PR: mi_pr
+    Edema: mi_edema
+    Weak Peripheral Pulse: mi_weak_peripheral_pulse
+    Lung rales: mi_lung_rales
+    Systolic Murmur: mi_systolic_murmur
+    Diastolic Murmur: mi_diastolic_murmur
+    Typical Chest Pain: "chest_pain_type = 'typical'"
+    Dyspnea: mi_dyspnea
+    Function Class: mi_function_class
+    Atypical: "chest_pain_type = 'atypical'"
+    Nonanginal: "chest_pain_type = 'non_anginal'"
+    Exertional CP: exertional_symptoms
+    LowTH Ang: mi_lowth_angina
+    Q Wave: mi_q_wave
+    St Elevation: mi_st_elevation
+    St Depression: mi_st_depression
+    Tinversion: mi_t_inversion
+    LVH: mi_lvh
+    Poor R Progression: mi_poor_r_progression
+    FBS: fasting_glucose
+    CR: creatinine
+    TG: triglycerides
+    LDL: ldl_cholesterol
+    HDL: hdl_cholesterol
+    BUN: mi_bun
+    ESR: mi_esr
+    HB: mi_hb
+    K: mi_k
+    Na: mi_na
+    WBC: mi_wbc
+    Lymph: mi_lymph
+    Neut: mi_neut
+    PLT: mi_plt
+    EF-TTE: mi_ef_tte
+    Region RWMA: mi_region_rwma
+    VHD: mi_vhd
+  missing_rule: >-
+    Pre-specified (same as app/validated_agents): history, exam, symptom and ECG flags not documented -> 0 (as in training);
+    BUN, ESR, Hb, K, Na, WBC, Lymph, Neut, PLT, EF-TTE missing -> training mean (0 after scaling), at most 5 of these 10 per patient,
+    otherwise the patient is not scored (counted as a model failure in the accuracy denominator).
+  known_limitations:
+    - "Region RWMA in Z-Alizadeh is the NUMBER of regions (0-4); the EHR proxy is 0/1 from the echo report."
+    - "Exam findings (edema, rales, murmurs, pulses), function class and low-threshold angina come from note NLP; adjudicate them in the 10% sample."
+    - "Training population: 303 patients, one Iranian centre; missing inputs at training were median/0-filled."
 
 predictions:
   table: cad_predictions

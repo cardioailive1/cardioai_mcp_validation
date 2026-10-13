@@ -19,10 +19,10 @@ A,goal,cad,2200,ppv,Positive predictive value,False,0.91,0.88,0.88,1200,0.912,0.
 A,goal,cad,2200,npv,Negative predictive value,False,0.96,0.95,0.95,800,0.211,0.069
 A,goal,cad,2200,multivessel,Multi-vessel CAD detection accuracy,False,0.88,0.85,0.85,1200,0.846,0.294
 A,goal,cad,2200,risk_agreement,Risk stratification agreement (kappa),False,0.87,0.82,0.82,2000,1.0,0.687
-A,goal,risk,2000,auc_mace,AUC-ROC for 5-y MACE,True,0.89,0.85,0.85,238+/1462-,0.807,0.261
-A,goal,risk,2000,accuracy,Overall classification accuracy,True,0.884,0.85,0.85,1700,0.986,0.515
-A,goal,risk,2000,sens_high,Sensitivity for high-risk,False,0.86,0.82,0.82,238,0.375,0.121
-A,goal,risk,2000,spec_low,Specificity for low-risk,False,0.91,0.88,0.88,1462,0.964,0.436
+A,goal,risk,2000,auc_hd,AUC-ROC for heart disease (angiography >= 50%),True,0.89,0.85,0.85,990+/810-,0.999,0.671
+A,goal,risk,2000,accuracy,Overall classification accuracy,True,0.884,0.85,0.85,1800,0.989,0.534
+A,goal,risk,2000,sens_hd,Sensitivity for heart disease,False,0.86,0.82,0.82,990,0.926,0.371
+A,goal,risk,2000,spec_hd,Specificity for heart disease,False,0.91,0.88,0.88,810,0.793,0.265
 A,goal,longitudinal,4000,hf_sens_7d,HF exacerbation prediction (7-day) — event-level sensitivity,True,0.867,0.84,0.84,1400,0.814,0.285
 A,goal,longitudinal,4000,mi_auc_30d,MI risk prediction (30-day AUC),False,0.843,0.82,0.82,100+/3900-,0.152,0.066
 A,goal,longitudinal,4000,readmission,Readmission prediction accuracy (30 d),False,0.829,0.8,0.8,4000,0.997,0.637
@@ -49,10 +49,10 @@ B,margin,cad,600,ppv,Positive predictive value,False,0.91,0.88,0.86,300,0.764,0.
 B,margin,cad,600,npv,Negative predictive value,False,0.96,0.95,0.91,200,0.82,0.709
 B,margin,cad,600,multivessel,Multi-vessel CAD detection accuracy,False,0.88,0.85,0.83,300,0.678,0.375
 B,margin,cad,600,risk_agreement,Risk stratification agreement (kappa),False,0.87,0.82,0.82,500,0.755,0.231
-B,margin,risk,1000,auc_mace,AUC-ROC for 5-y MACE,True,0.89,0.85,0.84,119+/731-,0.704,0.287
-B,margin,risk,1000,accuracy,Overall classification accuracy,True,0.884,0.85,0.834,850,0.986,0.745
-B,margin,risk,1000,sens_high,Sensitivity for high-risk,False,0.86,0.82,0.81,119,0.292,0.126
-B,margin,risk,1000,spec_low,Specificity for low-risk,False,0.91,0.88,0.86,731,0.987,0.794
+B,margin,risk,1000,auc_hd,AUC-ROC for heart disease (angiography >= 50%),True,0.89,0.85,0.84,495+/405-,0.996,0.722
+B,margin,risk,1000,accuracy,Overall classification accuracy,True,0.884,0.85,0.834,900,0.991,0.78
+B,margin,risk,1000,sens_hd,Sensitivity for heart disease,False,0.86,0.82,0.81,495,0.825,0.375
+B,margin,risk,1000,spec_hd,Specificity for heart disease,False,0.91,0.88,0.86,405,0.888,0.571
 B,margin,longitudinal,1000,hf_sens_7d,HF exacerbation prediction (7-day) — event-level sensitivity,True,0.867,0.84,0.817,350,0.684,0.401
 B,margin,longitudinal,1000,mi_auc_30d,MI risk prediction (30-day AUC),False,0.843,0.82,0.793,25+/975-,0.172,0.115
 B,margin,longitudinal,1000,readmission,Readmission prediction accuracy (30 d),False,0.829,0.8,0.779,1000,0.979,0.793
@@ -79,10 +79,10 @@ C,margin,cad,1300,ppv,Positive predictive value,False,0.91,0.88,0.86,720,0.987,0
 C,margin,cad,1300,npv,Negative predictive value,False,0.96,0.95,0.91,480,0.993,0.97
 C,margin,cad,1300,multivessel,Multi-vessel CAD detection accuracy,False,0.88,0.85,0.83,720,0.965,0.721
 C,margin,cad,1300,risk_agreement,Risk stratification agreement (kappa),False,0.87,0.82,0.82,1200,0.984,0.475
-C,margin,risk,1500,auc_mace,AUC-ROC for 5-y MACE,True,0.89,0.85,0.84,179+/1096-,0.865,0.403
-C,margin,risk,1500,accuracy,Overall classification accuracy,True,0.884,0.85,0.834,1275,0.999,0.904
-C,margin,risk,1500,sens_high,Sensitivity for high-risk,False,0.86,0.82,0.81,179,0.377,0.147
-C,margin,risk,1500,spec_low,Specificity for low-risk,False,0.91,0.88,0.86,1096,0.999,0.934
+C,margin,risk,1500,auc_hd,AUC-ROC for heart disease (angiography >= 50%),True,0.89,0.85,0.84,743+/607-,1.0,0.877
+C,margin,risk,1500,accuracy,Overall classification accuracy,True,0.884,0.85,0.834,1350,1.0,0.923
+C,margin,risk,1500,sens_hd,Sensitivity for heart disease,False,0.86,0.82,0.81,743,0.957,0.569
+C,margin,risk,1500,spec_hd,Specificity for heart disease,False,0.91,0.88,0.86,607,0.972,0.739
 C,margin,longitudinal,2000,hf_sens_7d,HF exacerbation prediction (7-day) — event-level sensitivity,True,0.867,0.84,0.817,700,0.954,0.74
 C,margin,longitudinal,2000,mi_auc_30d,MI risk prediction (30-day AUC),False,0.843,0.82,0.793,50+/1950-,0.298,0.188
 C,margin,longitudinal,2000,readmission,Readmission prediction accuracy (30 d),False,0.829,0.8,0.779,2000,1.0,0.975
