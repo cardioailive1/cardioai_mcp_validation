@@ -2,8 +2,6 @@ plan,rule,cohort,cohort_n,endpoint,label,primary,phase1,deck_goal,threshold,deno
 A,goal,echo,1500,ef_correlation,EF correlation (Pearson r),True,0.96,0.9,0.9,1500,1.0,1.0
 A,goal,echo,1500,ef_mae,EF mean absolute error (EF points),True,3.2,5.0,5.0,1500,1.0,1.0
 A,goal,echo,1500,clinical_agreement,Clinical agreement — EF category (Cohen's kappa),True,0.91,0.85,0.85,1500,1.0,0.815
-A,goal,echo,1500,wall_motion_sens,Wall motion abnormality — sensitivity,False,0.88,0.85,0.85,600,0.531,0.155
-A,goal,echo,1500,wall_motion_spec,Wall motion abnormality — specificity,False,0.88,0.85,0.85,900,0.75,0.249
 A,goal,echo,1500,chamber_size,Chamber size agreement (kappa),False,0.84,0.8,0.8,1275,0.87,0.31
 A,goal,ecg,2000,overall_accuracy,Overall accuracy (PTB-XL superclass),True,0.973,0.95,0.95,2000,1.0,0.663
 A,goal,ecg,2000,stemi_sensitivity,STEMI sensitivity,True,0.947,0.92,0.92,730,0.832,0.279
@@ -32,8 +30,6 @@ A,goal,longitudinal,4000,risk_90d,90-day risk stratification accuracy,False,0.81
 B,margin,echo,1500,ef_correlation,EF correlation (Pearson r),True,0.96,0.9,0.9,1500,1.0,1.0
 B,margin,echo,1500,ef_mae,EF mean absolute error (EF points),True,3.2,5.0,5.0,1500,1.0,1.0
 B,margin,echo,1500,clinical_agreement,Clinical agreement — EF category (Cohen's kappa),True,0.91,0.85,0.85,1500,1.0,0.815
-B,margin,echo,1500,wall_motion_sens,Wall motion abnormality — sensitivity,False,0.88,0.85,0.83,600,0.924,0.622
-B,margin,echo,1500,wall_motion_spec,Wall motion abnormality — specificity,False,0.88,0.85,0.83,900,0.988,0.811
 B,margin,echo,1500,chamber_size,Chamber size agreement (kappa),False,0.84,0.8,0.79,1275,0.971,0.594
 B,margin,ecg,2000,overall_accuracy,Overall accuracy (PTB-XL superclass),True,0.973,0.95,0.923,2000,1.0,1.0
 B,margin,ecg,2000,stemi_sensitivity,STEMI sensitivity,True,0.947,0.92,0.897,730,0.999,0.945
@@ -62,8 +58,6 @@ B,margin,longitudinal,1000,risk_90d,90-day risk stratification accuracy,False,0.
 C,margin,echo,1500,ef_correlation,EF correlation (Pearson r),True,0.96,0.9,0.9,1500,1.0,1.0
 C,margin,echo,1500,ef_mae,EF mean absolute error (EF points),True,3.2,5.0,5.0,1500,1.0,1.0
 C,margin,echo,1500,clinical_agreement,Clinical agreement — EF category (Cohen's kappa),True,0.91,0.85,0.85,1500,1.0,0.815
-C,margin,echo,1500,wall_motion_sens,Wall motion abnormality — sensitivity,False,0.88,0.85,0.83,600,0.924,0.622
-C,margin,echo,1500,wall_motion_spec,Wall motion abnormality — specificity,False,0.88,0.85,0.83,900,0.988,0.811
 C,margin,echo,1500,chamber_size,Chamber size agreement (kappa),False,0.84,0.8,0.79,1275,0.971,0.594
 C,margin,ecg,2000,overall_accuracy,Overall accuracy (PTB-XL superclass),True,0.973,0.95,0.923,2000,1.0,1.0
 C,margin,ecg,2000,stemi_sensitivity,STEMI sensitivity,True,0.947,0.92,0.897,730,0.999,0.945

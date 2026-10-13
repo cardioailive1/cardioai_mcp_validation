@@ -1,6 +1,8 @@
 # =============================================================================
 # Echocardiography External Validation Cohort — CA-AGENTS-VAL-PHASE2-ECHO
-# Agent under test: Echo agent (Phase 1 trained on EchoNet-Dynamic, Stanford, 10,000 pts)
+# Agent under test: Echo agent = EchoNet-Dynamic LV segmentation (MobileNetV3-UNet 3D, Vertex `mobilenetv3`)
+#   -> per-frame area-length volumes -> median per-beat EF (echo branch, echo_pipeline.py v2.0.0)
+#   Phase 1 trained on EchoNet-Dynamic (Stanford, 10,000 pts)
 # Deck: 1,500 patients · 12 sites · 27 elements (19 REQ / 8 OPT) · 86.6% avg completeness
 # =============================================================================
 key: echo
@@ -130,15 +132,24 @@ elements:
   - {name: bsa, aux: true, src: {type: derived, expr: "SQRT(height * weight / 3600.0)"}}
   - {name: ref_lv_size, aux: true, src: {type: derived, expr: "CASE WHEN lv_end_diastolic_volume IS NULL OR bsa IS NULL THEN NULL WHEN lv_end_diastolic_volume / bsa > CASE WHEN gender = 'Male' THEN 74 ELSE 61 END THEN 'dilated' ELSE 'normal' END"}}
 
-# Agent output contract (agent runs inside the MCP workspace on the A4C cine for each index echo)
+# Agent output contract (agent runs inside the MCP workspace on the A4C cine for each index echo).
+# Run the SAME pipeline the Vertex container serves (echo branch: echo_pipeline.run) on the DICOM:
+# it crops/resizes to 112x112, resamples to 50 fps, segments with training-style 16-frame clips and
+# reports the median EF over detected beats. Clips shorter than ~1.5 s cannot be scored.
 predictions:
   table: echo_predictions
   columns:
-    agent_lvef: "predicted LVEF (%)"
+    agent_lvef: "predicted LVEF (%) = summary.ef"
     agent_ef_category: "reduced | mildly_reduced | normal  (<=40, 41-49, >=50)"
-    agent_wall_motion: "normal | abnormal"
-    agent_lv_size: "normal | dilated"
+    agent_edv_ml: "summary.edv_ml (NULL unless the DICOM carries PhysicalDeltaX; single-plane A4C area-length)"
+    agent_esv_ml: "summary.esv_ml"
+    agent_lv_size: "derived by evaluate(): agent_edv_ml / bsa > 74 (men) / 61 (women) mL/m2 -> dilated (same rule as ref_lv_size)"
     runtime_s: "wall-clock seconds from DICOM load to output"
+    pipeline_version: "summary.pipeline_version (must equal the locked version)"
+  known_limitations:
+    - "The model segments the LV only: wall motion is not produced (endpoints marked not applicable below)."
+    - "Agent EDV is single-plane (A4C) area-length; the reference EDV is usually biplane Simpson. Expect a systematic offset; report Bland-Altman for EDV alongside the chamber-size kappa."
+    - "Phase 1 EF values (r 0.96, MAE 3.2, kappa 0.91) are not supported by the training repo, which reports only Dice on one traced frame. Replace them with evaluate_echonet_ef.py output (EchoNet TEST split) before the validation lock; under Plan C the pass threshold depends on them."
 
 endpoints:
   primary:
@@ -146,9 +157,10 @@ endpoints:
     - {id: ef_mae, label: "EF mean absolute error (EF points)", metric: mae, pred: agent_lvef, ref: lvef_expert, goal: 5.0, direction: le, phase1: 3.2}
     - {id: clinical_agreement, label: "Clinical agreement — EF category (Cohen's kappa)", metric: kappa, pred: agent_ef_category, ref: ref_ef_category, goal: 0.85, direction: ge, phase1: 0.91}
   secondary:
-    - {id: wall_motion_sens, label: "Wall motion abnormality — sensitivity", metric: sensitivity, pred: agent_wall_motion, ref: wall_motion, positive: abnormal, goal: 0.85, direction: ge, phase1: 0.88}
-    - {id: wall_motion_spec, label: "Wall motion abnormality — specificity", metric: specificity, pred: agent_wall_motion, ref: wall_motion, positive: abnormal, goal: 0.85, direction: ge, phase1: 0.88}
     - {id: chamber_size, label: "Chamber size agreement (kappa)", metric: kappa, pred: agent_lv_size, ref: ref_lv_size, goal: 0.80, direction: ge, phase1: 0.84}
     - {id: processing_time, label: "Processing time (median s)", metric: median, pred: runtime_s, goal: 60, direction: le, phase1: 45}
     - {id: data_completeness, label: "Data completeness (required elements)", metric: completeness, goal: 0.95, direction: ge, phase1: 0.98}
+  not_applicable:            # deck endpoints this agent cannot produce; reported as N/A, not as failures
+    - {id: wall_motion_sens, label: "Wall motion abnormality — sensitivity", reason: "model outputs an LV mask only, no regional wall-motion assessment", deck_goal: 0.85}
+    - {id: wall_motion_spec, label: "Wall motion abnormality — specificity", reason: "model outputs an LV mask only, no regional wall-motion assessment", deck_goal: 0.85}
   subgroups: [gender, age_group, race, site, image_quality, ref_ef_category]

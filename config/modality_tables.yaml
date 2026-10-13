@@ -52,10 +52,13 @@ echo:
     name: measurement_name
     value: measurement_value
     unit: measurement_unit
-  requirements:           # agent input spec (EchoNet-Dynamic–trained model)
+  requirements:           # agent input spec (EchoNet-Dynamic–trained model; echo_pipeline v2.0.0)
     view: A4C
-    min_frames: 32
-    resize_px: 112
+    mode: greyscale B-mode   # colour Doppler cines are refused
+    min_seconds: 1.5         # first/last 0.3 s cannot sit at the supervised centre of a 16-frame, period-2 clip
+    resize_px: 112           # done by the pipeline (crop to ultrasound region, pad square, resize)
+    fps: 50                  # done by the pipeline (resampling)
+    pixel_spacing: DICOM SequenceOfUltrasoundRegions.PhysicalDeltaX (needed for EDV / chamber size)
 
 # NOTE table conventions used for NLP fall-backs (OMOP NOTE / NOTE_NLP).
 # Titles are matched case-insensitively with these regexes.
