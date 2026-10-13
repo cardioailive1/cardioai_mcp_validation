@@ -108,9 +108,9 @@ def validate_cohort(c: Cohort) -> None:
         n_req = sum(e.required for e in deck)
         if n_req != exp["required"]:
             raise ValueError(f"{c.key}: {n_req} required, deck says {exp['required']}")
-        avg = round(100 * sum(e.expected_completeness for e in deck) / len(deck), 1)
-        if abs(avg - exp["avg_completeness"]) > 0.05:
-            raise ValueError(f"{c.key}: avg completeness {avg} != deck {exp['avg_completeness']}")
+        avg = 100 * sum(e.expected_completeness for e in deck) / len(deck)
+        if abs(avg - exp["avg_completeness"]) > 0.05 + 1e-9:  # deck reports to 0.1; 85.95 -> 86.0 must pass on every float platform
+            raise ValueError(f"{c.key}: avg completeness {avg:.2f} != deck {exp['avg_completeness']}")
     for e in c.elements:
         for key in ("pattern", "title_regex"):
             pat = e.src.get(key)

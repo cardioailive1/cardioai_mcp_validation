@@ -1,6 +1,8 @@
 # =============================================================================
 # Longitudinal Cardiac Monitoring Cohort — CA-AGENTS-VAL-PHASE2-LONG
-# Agent under test: Longitudinal monitoring agent (Phase 1: Kaggle EHR time-series, historical cohort)
+# Agent under test: Longitudinal monitoring agent = EHR vitals model (Vertex ehr-model; EHR_branch ehr_models2)
+#   Keras MLP 128-64-32 on 8 standardized inputs: bp_systolic, bp_diastolic, heart_rate, respiratory_rate,
+#   temperature, oxygen_saturation, med_adherence, symptom_severity  (see model_inputs below)
 # Deck: 1,000 patients · 12 sites · 40 elements (27 REQ / 13 OPT) · 86.0% avg completeness
 # Monitoring period: 180 days after index; serial elements stored long-format in longitudinal_series
 # =============================================================================
@@ -145,6 +147,19 @@ elements:
      src: {type: new_drug_count, set: cardiovascular_drugs, window: [1, 180]}}
   - {name: procedure_dates, domain: outcome, description: Cardiac procedures performed (dates), required: true, expected_completeness: 0.90,
      src: {type: event_series, set: cardiac_procedure_any, domain: Procedure, window: [1, 180]}}
+  # ---------------- EHR vitals model inputs (aux; do not count toward the deck's 40 elements)
+  # Baseline (day-0) value = latest in [-7, 0]; daily landmark values come from {k}_series (latest value with day <= landmark).
+  - {name: mi_bp_systolic, aux: true, src: {type: measurement, set: sbp, window: [-7, 0], range: [50, 260], pick: latest}}
+  - {name: mi_bp_diastolic, aux: true, src: {type: measurement, set: dbp, window: [-7, 0], range: [20, 160], pick: latest}}
+  - {name: mi_heart_rate, aux: true, src: {type: measurement, set: heart_rate, window: [-7, 0], range: [20, 250], pick: latest}}
+  - {name: mi_respiratory_rate, aux: true, src: {type: measurement, set: resp_rate, window: [-7, 0], range: [4, 60], pick: latest}}
+  - {name: mi_temperature, aux: true, src: {type: measurement, set: body_temp, window: [-7, 0], range: [30, 43], pick: latest}}
+  - {name: mi_oxygen_saturation, aux: true, src: {type: measurement, set: spo2, window: [-7, 0], range: [50, 100], pick: latest}}
+  - {name: respiratory_rate_series, aux: true, src: {type: measurement_series, set: resp_rate, window: [-30, 180], range: [4, 60]}}
+  - {name: temperature_series, aux: true, src: {type: measurement_series, set: body_temp, window: [-30, 180], range: [30, 43]}}
+  # med_adherence and symptom_severity have no OMOP source (no adherence score / symptom scale in the CDM).
+  - {name: mi_med_adherence, aux: true, src: {type: derived, expr: "CAST(NULL AS DOUBLE)"}}
+  - {name: mi_symptom_severity, aux: true, src: {type: derived, expr: "CAST(NULL AS DOUBLE)"}}
   # ---------------- reference helpers (aux)
   - {name: acute_cardiac_dates, aux: true, src: {type: event_series, set: cardiac_dx, window: [1, 180], visit_concepts: [9201, 262, 9203]}}
   - {name: readmission_30d, aux: true, src: {type: visit_count, visit_concepts: [9201, 262], window: [1, 30]}}
@@ -154,6 +169,26 @@ elements:
   - {name: ref_readmit_30d, aux: true, src: {type: derived, expr: "CASE WHEN readmission_30d IS NULL THEN NULL WHEN readmission_30d > 0 THEN 1 ELSE 0 END"}}
   - {name: ref_event_30d, aux: true, src: {type: derived, expr: "CASE WHEN cardiac_event_30d IS NULL THEN NULL WHEN cardiac_event_30d > 0 THEN 1 ELSE 0 END"}}
   - {name: ref_event_90d, aux: true, src: {type: derived, expr: "CASE WHEN cardiac_event_90d IS NULL THEN NULL WHEN cardiac_event_90d > 0 THEN 1 ELSE 0 END"}}
+
+model_inputs:
+  model: "Vertex ehr-model (EHR_branch ehr_models2/model.keras + scaler.joblib) — CONFIRM endpoint"
+  feature_order: [bp_systolic, bp_diastolic, heart_rate, respiratory_rate, temperature, oxygen_saturation, med_adherence, symptom_severity]
+  columns:
+    bp_systolic: mi_bp_systolic
+    bp_diastolic: mi_bp_diastolic
+    heart_rate: mi_heart_rate
+    respiratory_rate: mi_respiratory_rate
+    temperature: mi_temperature            # degC (LOINC 8310-5 / 8331-1)
+    oxygen_saturation: mi_oxygen_saturation
+    med_adherence: mi_med_adherence        # NO OMOP SOURCE
+    symptom_severity: mi_symptom_severity  # NO OMOP SOURCE
+  series_source: "{k}_series rows for systolic_bp_series, diastolic_bp_series, heart_rate_series, respiratory_rate_series, temperature_series, spo2_series (last observation carried forward to each landmark day)"
+  blockers:
+    - "Training file (ehr_dataset.csv, 60,000 rows) is already standardized (mean~0, sd~1); scaler.joblib is ~identity. The raw-unit means/SDs used to standardize it are not in the repo, so real vitals cannot be put on the model's scale. Need the original raw data or the normalization parameters."
+    - "Label meaning (29% positive) is undocumented: which event, over what horizon? The deck endpoints (HF exacerbation 7 d, 24-h acute event, MI 30 d, readmission 30 d) can only be scored once this is known."
+    - "med_adherence and symptom_severity have no OMOP equivalent. Options: (a) retrain without them, (b) pre-specify an imputation (training mean = 0 on the standardized scale) and report it as a protocol deviation, (c) derive adherence from drug_exposure refill gaps (PDC) — only if the training definition was PDC."
+    - "The data look synthetic (independent Gaussian features). Confirm provenance before treating the Phase 1 metrics as a benchmark."
+  missing_rule: "Pre-specified until resolved: missing vital -> 0 on the standardized scale (= training mean); med_adherence and symptom_severity -> 0. Patients with fewer than 4 of the 6 vitals at a landmark are not scored."
 
 predictions:
   table: longitudinal_predictions          # one row per patient-day the agent is run (daily landmark)

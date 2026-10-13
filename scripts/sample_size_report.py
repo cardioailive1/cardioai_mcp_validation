@@ -25,8 +25,8 @@ from cardioai_mcp.evaluate import phase1_scaled, success_threshold  # noqa: E402
 
 RATES = dict(
     cad_obstructive=0.60,      # obstructive CAD among suspected-CAD ICA
-    risk_complete_fu=0.85,     # share with complete 5-y follow-up or event
-    risk_mace_5y=0.14,         # 5-y MACE among those
+    risk_ref_avail=0.90,       # angiography report with a readable stenosis grade
+    risk_hd_prev=0.55,         # >= 50% stenosis among chest-pain patients referred to angiography
     hf_events_per_pt=0.35,     # HF exacerbations per patient per 180 d
     mi_30d=0.025, event_30d=0.15, acute_events_per_pt=0.30,
     echo_wma=0.40, echo_size_avail=0.85,
@@ -50,9 +50,9 @@ def denominators(key: str, c) -> dict:
         return {"accuracy": ica, "sensitivity": pos, "specificity": neg, "auc": {"n_pos": pos, "n_neg": neg},
                 "ppv": pos, "npv": neg, "multivessel": pos, "risk_agreement": ica}
     if key == "risk":
-        comp = round(N * R["risk_complete_fu"])
-        ev = round(comp * R["risk_mace_5y"])
-        return {"auc_mace": {"n_pos": ev, "n_neg": comp - ev}, "accuracy": comp, "sens_high": ev, "spec_low": comp - ev}
+        comp = round(N * R["risk_ref_avail"])
+        pos = round(comp * R["risk_hd_prev"])
+        return {"auc_hd": {"n_pos": pos, "n_neg": comp - pos}, "accuracy": comp, "sens_hd": pos, "spec_hd": comp - pos}
     if key == "longitudinal":
         return {"hf_sens_7d": round(N * R["hf_events_per_pt"]),
                 "mi_auc_30d": {"n_pos": round(N * R["mi_30d"]), "n_neg": round(N * (1 - R["mi_30d"]))},

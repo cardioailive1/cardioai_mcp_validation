@@ -2,7 +2,9 @@
 # Cardiovascular Risk Stratification Cohort — CA-AGENTS-VAL-PHASE2-RISK
 # Agent under test: Risk-stratification agent (Phase 1 trained on UCI Cleveland Clinic, 303 pts)
 # Deck: 1,000 patients · 12 sites · 41 elements (33 REQ / 8 OPT) · 88.5% avg completeness
-# Outcome: 5-year MACE (time-to-event); comparator: ACC/AHA Pooled Cohort Equations
+# Agent task (clarified 2026-10-13): GENERAL HEART DISEASE PREDICTION (Cleveland model), i.e. prevalent
+# obstructive CAD on angiography (>= 50% stenosis) — the label the model was trained on. MACE prediction is a
+# separate model, out of scope. The deck's MACE outcome elements are still extracted (descriptive, secondary).
 # =============================================================================
 key: risk
 study_id: CA-AGENTS-VAL-PHASE2-RISK
@@ -15,12 +17,12 @@ horizon_days: 1825
 expected: {total_elements: 41, required: 33, avg_completeness: 88.5}
 
 calendar:
-  index_end_risk: '2020-12-31'     # guarantees >= 5 y potential follow-up to data_cutoff
-  min_age_risk: 40                 # PCE comparator valid 40-79
+  index_end_risk: '2020-12-31'     # keeps 5-y descriptive MACE follow-up available (not required for the primary endpoint)
+  min_age_risk: 40                 # Cleveland training range 29-77; deck population 40-79
   max_age_risk: 79
 
 index:
-  description: "adult 40-79 outpatient evaluation for chest pain / suspected angina with lipid panel in prior year, no prior ASCVD"
+  description: "adult 40-79 outpatient chest-pain / suspected-angina evaluation, lipid panel in prior year, invasive angiography 1-90 d later, no prior ASCVD"
   one_per_person: earliest
   keep_columns: [index_visit_concept_id]
   sql: |
@@ -38,10 +40,13 @@ index:
       AND EXISTS (SELECT 1 FROM {{cdm}}.measurement m WHERE m.person_id = v.person_id
                   AND (m.measurement_concept_id IN {{cs:total_chol}} OR m.measurement_source_concept_id IN {{cs:total_chol}})
                   AND DATEDIFF(m.measurement_date, v.index_date) BETWEEN -365 AND 0)
+      AND EXISTS (SELECT 1 FROM {{cdm}}.procedure_occurrence po WHERE po.person_id = v.person_id
+                  AND (po.procedure_concept_id IN {{cs:coronary_angiography}} OR po.procedure_source_concept_id IN {{cs:coronary_angiography}})
+                  AND DATEDIFF(po.procedure_date, v.index_date) BETWEEN 1 AND 90)
     GROUP BY v.person_id, v.index_date
 
 exclusions:
-  - name: "prior ASCVD before index (MI, stroke, PCI/CABG) — PCE comparator population"
+  - name: "prior ASCVD before index (MI, stroke, PCI/CABG) — suspected (not established) CAD population"
     where: |
       EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence x WHERE x.person_id = c.person_id AND x.condition_start_date < c.index_date
               AND (x.condition_concept_id IN {{cs:mi_any}} OR x.condition_source_concept_id IN {{cs:mi_any}}
@@ -55,7 +60,7 @@ exclusions:
                   AND op.observation_period_end_date >= c.index_date)
 
 sampling:
-  method: "simple random sample (natural MACE prevalence — required for calibration)"
+  method: "simple random sample (natural disease prevalence among referred patients — required for calibration)"
   strata_expr: "'all'"
   quotas: {all: 1000}
 
@@ -69,6 +74,12 @@ elements:
   - {name: smoking_former_dx, aux: true, src: {type: flag, set: smoking_former, window: [-3650, 0], require_lookback: false}}
   - {name: weight, aux: true, src: {type: measurement, set: weight, window: [-180, 0], range: [25, 300]}}
   - {name: height, aux: true, src: {type: measurement, set: height, window: [-1095, 0], range: [120, 230]}}
+  # ---------------- reference standard (aux): angiographic heart disease, the Cleveland label
+  - {name: cath_report, aux: true, src: {type: note_text, note: cath_report_title, window: [1, 90], max_chars: 8000}}
+  - {name: hp_note, aux: true, src: {type: note_text, note: hp_note_title, window: [-30, 0], max_chars: 12000}}
+  - {name: ref_max_stenosis, aux: true,
+     src: {type: derived, expr: "COALESCE(GREATEST(CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(lad|left anterior descending)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE), CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(lcx|circumflex)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE), CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(rca|right coronary)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE), CAST(NULLIF(REGEXP_EXTRACT(cath_report, '(left main|lmca)[^.]{0,60}?([0-9]{1,3}) ?%', 2), '') AS DOUBLE)), CASE WHEN cath_report RLIKE '(angiographically normal|normal coronar|no (significant|obstructive) (coronary )?(artery )?disease)' THEN 0 END)"}}
+  - {name: ref_heart_disease, aux: true, src: {type: derived, expr: "CASE WHEN ref_max_stenosis IS NULL THEN NULL WHEN ref_max_stenosis >= 50 THEN 1 ELSE 0 END"}}
   # ---------------- DEMOGRAPHICS (5)
   - {name: age, domain: demographics, description: Patient age at baseline, required: true, expected_completeness: 1.00, src: {type: person, field: age}}
   - {name: gender, domain: demographics, description: Male / Female, required: true, expected_completeness: 1.00, src: {type: person, field: gender}}
@@ -139,28 +150,60 @@ elements:
      src: {type: derived, expr: "CASE WHEN GREATEST(cv_mortality, myocardial_infarction, stroke, heart_failure_hospitalization, revascularization_pci, revascularization_cabg, unstable_angina_hospitalization) = 1 THEN 1 WHEN cv_mortality IS NULL OR myocardial_infarction IS NULL OR stroke IS NULL OR heart_failure_hospitalization IS NULL OR revascularization_pci IS NULL OR revascularization_cabg IS NULL OR unstable_angina_hospitalization IS NULL THEN NULL ELSE 0 END"}}
   - {name: days_to_event, domain: outcome, role: reference, description: Time to first MACE or censoring (days), required: true, expected_completeness: 0.90,
      src: {type: derived, expr: "CASE WHEN composite_mace = 1 THEN LEAST(CASE WHEN cv_mortality = 1 THEN cv_mortality_days END, CASE WHEN myocardial_infarction = 1 THEN myocardial_infarction_days END, CASE WHEN stroke = 1 THEN stroke_days END, CASE WHEN heart_failure_hospitalization = 1 THEN heart_failure_hospitalization_days END, CASE WHEN revascularization_pci = 1 THEN revascularization_pci_days END, CASE WHEN revascularization_cabg = 1 THEN revascularization_cabg_days END, CASE WHEN unstable_angina_hospitalization = 1 THEN unstable_angina_hospitalization_days END) ELSE all_cause_mortality_days END"}}
+  # ---------------- MODEL INPUTS (aux) — heartmodel-mlp, Cleveland 13, in the TRAINING DATA's coding
+  # (Kaggle heart.csv variant; verified against heart_disease_data.json: cp 0=asymptomatic 1=atypical 2=non-anginal
+  #  3=typical; restecg 0=LVH 1=normal 2=ST-T abnormality; slope 0=downsloping 1=flat 2=upsloping; ca 0-3 vessels, 4=missing;
+  #  thal 1=fixed 2=normal 3=reversible 0=missing).  Missing exercise-test inputs follow the pre-specified rule in model_inputs.
+  - {name: cl_cp, aux: true,
+     src: {type: derived, expr: "CASE WHEN COALESCE(hp_note, '') RLIKE 'atypical (angina|chest pain)' THEN 1 WHEN COALESCE(hp_note, '') RLIKE 'typical angina' THEN 3 WHEN COALESCE(hp_note, '') RLIKE 'non-?anginal' THEN 2 WHEN COALESCE(hp_note, '') RLIKE 'asymptomatic' THEN 0 WHEN angina_dx = 1 THEN 3 ELSE 2 END"}}
+  - {name: cl_restecg, aux: true,
+     src: {type: derived, expr: "CASE WHEN ecg_read_pre IS NULL THEN NULL WHEN ecg_read_pre RLIKE '(left ventricular hypertrophy|lvh)' THEN 0 WHEN ecg_read_pre RLIKE '(st[- ](segment )?(depression|elevation)|t[- ]wave (inversion|abnormal)|inverted t|nonspecific st)' THEN 2 ELSE 1 END"}}
+  - {name: cl_slope, aux: true,
+     src: {type: derived, expr: "CASE WHEN stress_report IS NULL THEN NULL WHEN stress_report RLIKE 'downsloping' THEN 0 WHEN stress_report RLIKE '(horizontal|flat)' THEN 1 WHEN stress_report RLIKE 'upsloping' THEN 2 END"}}
+  - {name: cl_thal, aux: true,
+     src: {type: derived, expr: "CASE WHEN stress_report IS NULL OR NOT stress_report RLIKE '(perfusion|spect|thallium|sestamibi|myoview|nuclear)' THEN 0 WHEN stress_report RLIKE '(reversible|ischemi)' THEN 3 WHEN stress_report RLIKE '(fixed (perfusion )?defect|infarct|scar)' THEN 1 WHEN stress_report RLIKE '(normal (myocardial )?perfusion|no (perfusion )?defect)' THEN 2 ELSE 0 END"}}
+  - {name: cl_ca, aux: true, src: {type: derived, expr: "4"}}
   - {name: mace_event, aux: true, src: {type: derived, expr: "CASE WHEN GREATEST(cv_mortality, myocardial_infarction, stroke, heart_failure_hospitalization, revascularization_pci, revascularization_cabg, unstable_angina_hospitalization) = 1 THEN 1 ELSE 0 END"}}
+
+# Locked model input map: Cleveland column -> cohort element (training-data coding).
+# Mirrors app/validated_agents/preprocessing/risk_cleveland.json in MedConnect.
+model_inputs:
+  model: heartmodel-mlp
+  output: "sigmoid = P(target = 1) = P(NO heart disease) in this training file; agent heart-disease probability = 1 - output"
+  columns:
+    age: age
+    sex: "gender = 'Male' -> 1"
+    cp: cl_cp
+    trestbps: systolic_bp
+    chol: total_cholesterol
+    fbs: "fasting_glucose > 120 -> 1"
+    restecg: cl_restecg
+    thalach: max_heart_rate_achieved
+    exang: exercise_induced_angina
+    oldpeak: st_depression_exercise
+    slope: cl_slope
+    ca: cl_ca
+    thal: cl_thal
+  missing_rule: >-
+    Pre-specified: thalach / oldpeak missing (no exercise test) -> training mean (150.1 bpm, 1.1 mm), i.e. 0 after scaling;
+    exang / slope / restecg missing -> unknown category (all-zero one-hot, OneHotEncoder handle_unknown='ignore');
+    ca not recorded in EHR -> 4 and thal without nuclear imaging -> 0, the training file's own 'missing' codes.
+    Sensitivity analysis: patients with exercise ECG and nuclear perfusion results only.
 
 predictions:
   table: risk_predictions
   columns:
-    agent_mace_prob: "predicted 5-y MACE probability"
-    agent_high_risk: "0/1 high-risk call at locked threshold"
-    agent_risk_score: "continuous risk score (for C-index)"
-
-comparator:
-  name: "ACC/AHA Pooled Cohort Equations (10-y ASCVD) — computed by cardioai_mcp.risk_scores.pce"
-  categories: [0.05, 0.075, 0.20]   # <5% low, 5-7.5 borderline, 7.5-20 intermediate, >=20 high
+    agent_hd_prob: "probability of heart disease (= 1 - raw model output)"
+    agent_hd: "0/1 at the locked threshold"
 
 endpoints:
+  # Deck MACE-specific endpoints (NRI vs PCE, C-statistic vs PCE, time-to-event C-index) are not applicable:
+  # the agent predicts prevalent heart disease; MACE prediction is a separate model (out of scope).
   primary:
-    - {id: auc_mace, label: "AUC-ROC for 5-y MACE", metric: auc, pred: agent_mace_prob, ref: composite_mace, goal: 0.85, direction: ge, phase1: 0.89}
-    - {id: accuracy, label: "Overall classification accuracy", metric: accuracy, pred: agent_high_risk, ref: composite_mace, goal: 0.85, direction: ge, phase1: 0.884}
-    - {id: calibration, label: "Calibration (Hosmer-Lemeshow p)", metric: hosmer_lemeshow, pred: agent_mace_prob, ref: composite_mace, goal: 0.05, direction: gt, phase1: null}
+    - {id: auc_hd, label: "AUC-ROC for heart disease (angiography >= 50%)", metric: auc, pred: agent_hd_prob, ref: ref_heart_disease, goal: 0.85, direction: ge, phase1: 0.89}
+    - {id: accuracy, label: "Overall classification accuracy", metric: accuracy, pred: agent_hd, ref: ref_heart_disease, goal: 0.85, direction: ge, phase1: 0.884}
+    - {id: calibration, label: "Calibration (Hosmer-Lemeshow p)", metric: hosmer_lemeshow, pred: agent_hd_prob, ref: ref_heart_disease, goal: 0.05, direction: gt, phase1: null}
   secondary:
-    - {id: sens_high, label: "Sensitivity for high-risk", metric: sensitivity, pred: agent_high_risk, ref: composite_mace, positive: 1, goal: 0.82, direction: ge, phase1: 0.86}
-    - {id: spec_low, label: "Specificity for low-risk", metric: specificity, pred: agent_high_risk, ref: composite_mace, positive: 1, goal: 0.88, direction: ge, phase1: 0.91}
-    - {id: nri, label: "Net reclassification improvement vs PCE", metric: nri, pred: agent_mace_prob, ref: composite_mace, comparator: pce_risk, goal: 0.10, direction: ge, phase1: 0.15}
-    - {id: cstat_vs_pce, label: "C-statistic vs PCE (non-inferiority, margin 0.05)", metric: auc_difference, pred: agent_mace_prob, ref: composite_mace, comparator: pce_risk, goal: -0.05, direction: ge, phase1: null}
-    - {id: c_index, label: "Time-to-event C-index", metric: c_index, pred: agent_risk_score, time: days_to_event, event: mace_event, goal: 0.83, direction: ge, phase1: 0.87}
-  subgroups: [gender, age_group, race, site, diabetes_diagnosis]
+    - {id: sens_hd, label: "Sensitivity for heart disease", metric: sensitivity, pred: agent_hd, ref: ref_heart_disease, positive: 1, goal: 0.82, direction: ge, phase1: 0.86}
+    - {id: spec_hd, label: "Specificity for heart disease", metric: specificity, pred: agent_hd, ref: ref_heart_disease, positive: 1, goal: 0.88, direction: ge, phase1: 0.91}
+  subgroups: [gender, age_group, race, site, diabetes_diagnosis, exercise_test_done]

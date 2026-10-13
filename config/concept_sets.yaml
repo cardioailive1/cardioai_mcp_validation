@@ -325,3 +325,38 @@ cardiac_dx:
 natriuretic_peptides:
   domain: Measurement
   include: [{vocab: LOINC, codes: ["30934-4", "33762-6", "83107-3"]}]
+
+# ---------------------------------------------------------------- model-input sets (2026-10-13)
+# CAD agent (cadmodel-mlp, Z-Alizadeh Sani 54 raw inputs) and Risk agent (Cleveland 13)
+bun:           {domain: Measurement, include: [{vocab: LOINC, codes: ["3094-0", "6299-2"]}]}
+esr:           {domain: Measurement, include: [{vocab: LOINC, codes: ["4537-7", "30341-2"]}]}
+hemoglobin:    {domain: Measurement, include: [{vocab: LOINC, codes: ["718-7", "30313-1"]}]}
+wbc:           {domain: Measurement, include: [{vocab: LOINC, codes: ["6690-2", "26464-8"]}]}
+lymph_pct:     {domain: Measurement, include: [{vocab: LOINC, codes: ["736-9", "26478-8"]}]}
+neut_pct:      {domain: Measurement, include: [{vocab: LOINC, codes: ["770-8", "26511-6"]}]}
+platelets:     {domain: Measurement, include: [{vocab: LOINC, codes: ["777-3", "26515-7"]}]}
+resp_rate:     {domain: Measurement, include: [{vocab: LOINC, codes: ["9279-1"]}]}
+body_temp:     {domain: Measurement, include: [{vocab: LOINC, codes: ["8310-5", "8331-1"]}]}
+obesity:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["E66%", "Z68.3%", "Z68.4%"]}]
+  descendants: true
+chronic_renal_failure:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["N18.3%", "N18.4", "N18.5", "N18.6", "N19", "Z99.2"]}]
+  descendants: true
+cerebrovascular_accident:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["I63%", "I61%", "I60%", "I69%", "Z86.73"]}]
+  descendants: true
+airway_disease:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["J44%", "J45%", "J43%"]}]
+  descendants: true
+thyroid_disease:
+  domain: Condition
+  include: [{vocab: ICD10CM, codes: ["E00%", "E01%", "E02%", "E03%", "E04%", "E05%", "E06%", "E07%"]}]
+  descendants: true
+nuclear_stress:
+  domain: Procedure
+  include: [{vocab: CPT4, codes: ["78451", "78452", "78453", "78454", "78491", "78492", "78431", "78432", "78433"]}]

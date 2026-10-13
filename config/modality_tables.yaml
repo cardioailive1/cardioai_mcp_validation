@@ -66,3 +66,4 @@ notes:
   ccta_report_title: '(?i)(ccta|coronary ct|cardiac ct)'
   stress_report_title: '(?i)(stress|treadmill|exercise test|nuclear)'
   hf_note_title: '(?i)(cardio|heart failure|progress|discharge)'
+  hp_note_title: '(?i)(history and physical|h&p|admission|consult|cardiology|progress)'

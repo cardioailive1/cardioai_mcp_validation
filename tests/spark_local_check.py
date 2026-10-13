@@ -6,6 +6,7 @@ so {{cdm}} = global_temp.  Every cohort is built through SparkEngine exactly as 
 """
 import os
 import sys
+import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,11 +21,10 @@ from tests.synthetic_omop import build  # noqa: E402
 
 t0 = time.time()
 spark = (SparkSession.builder.master("local[2]").appName("cardioai-check")
-         .config("spark.sql.shuffle.partitions", "8").config("spark.driver.memory", os.environ.get("DRIVER_MEM", "4g"))
+         .config("spark.sql.shuffle.partitions", "8").config("spark.sql.warehouse.dir", tempfile.mkdtemp(prefix="spark_wh_")).config("spark.driver.memory", os.environ.get("DRIVER_MEM", "4g"))
          .config("spark.sql.execution.arrow.pyspark.enabled", "true").getOrCreate())
 spark.sparkContext.setLogLevel("ERROR")
 con = build(int(os.environ.get("N_PERSONS", "3000")))
-import tempfile  # noqa: E402
 
 pq = tempfile.mkdtemp(prefix="omop_pq_")
 for (t,) in con.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='main'").fetchall():

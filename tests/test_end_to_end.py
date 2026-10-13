@@ -53,10 +53,9 @@ def simulate_predictions(key: str, a: pd.DataFrame) -> pd.DataFrame:
         p["agent_multivessel"] = _flip(a.ref_multivessel.fillna(0).astype(int), 0.06, [0, 1])
         p["agent_risk_category"] = _flip(a.ref_risk_category.fillna("low"), 0.06, ["low", "intermediate", "high"])
     elif key == "risk":
-        y = a.mace_event.fillna(0).astype(int)
-        p["agent_mace_prob"] = np.clip(0.06 + 0.5 * y + RNG.normal(0, 0.08, len(a)), 0.001, 0.999)
-        p["agent_high_risk"] = (p.agent_mace_prob >= 0.3).astype(int)
-        p["agent_risk_score"] = p.agent_mace_prob
+        y = a.ref_heart_disease.fillna(0).astype(int)
+        p["agent_hd_prob"] = np.clip(0.2 + 0.55 * y + RNG.normal(0, 0.12, len(a)), 0.001, 0.999)
+        p["agent_hd"] = (p.agent_hd_prob >= 0.5).astype(int)
     elif key == "longitudinal":
         p["risk_mi_30d"] = np.clip(0.8 * a.ref_mi_30d.fillna(0) + RNG.normal(0.1, 0.1, len(a)), 0, 1)
         p["risk_event_30d"] = np.clip(0.6 * a.ref_event_30d.fillna(0) + RNG.normal(0.2, 0.15, len(a)), 0, 1)
@@ -127,6 +126,17 @@ def test_endpoints_evaluate(built):
         assert errs.empty, errs.to_string()
         assert ep.estimate.notna().sum() >= len(ep) - 1, ep.to_string()
         ep.to_csv(os.path.join(ROOT, "exports", "synthetic_test", f"{k}_endpoints_SIMULATED.csv"), index=False)
+
+
+def test_analytic_rows_encode_through_app_encoders(built):
+    from cardioai_mcp.agent_inputs import encode_cohort
+    _, res = built
+    for k, width in (("cad", 59), ("risk", 30)):
+        e = encode_cohort(k, res[k]["analytic"])
+        assert len(e) == len(res[k]["analytic"]) and e.scorable.any(), e.reason.value_counts().to_string()
+        assert all(len(v) == width for v in e.vector[e.scorable])
+    lon = encode_cohort("longitudinal", res["longitudinal"]["analytic"])
+    assert not lon.scorable.any()          # blocked until the raw-unit normalization is supplied
 
 
 if __name__ == "__main__":

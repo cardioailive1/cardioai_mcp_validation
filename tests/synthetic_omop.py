@@ -300,6 +300,18 @@ def build(n_persons: int = 6000, seed: int = 7, config_dir: str | None = None) -
                                   ("glucose_fasting", 100, 20), ("creatinine", 1.0, .25)]:
                     meas(pid, s, d - dt.timedelta(days=rnd.randint(0, 200)), abs(rnd.gauss(mu, sd)), vid)
                 meas(pid, "sbp", d, rnd.gauss(135, 18), vid)
+                # CAD model (Z-Alizadeh Sani) inputs: vitals, extra labs (some missing), H&P exam findings
+                meas(pid, "weight", d, wt + rnd.gauss(0, 2), vid, 9529, "kg")
+                meas(pid, "heart_rate", d, rnd.gauss(76, 11), vid)
+                for s2, mu, sd in [("bun", 17, 6), ("esr", 18, 14), ("hemoglobin", 13.2, 1.5), ("wbc", 7.5, 2.0),
+                                   ("lymph_pct", 32, 9), ("neut_pct", 60, 9), ("platelets", 225, 60),
+                                   ("potassium", 4.2, .4), ("sodium", 140, 3)]:
+                    if rnd.random() < .85:
+                        meas(pid, s2, d - dt.timedelta(days=rnd.randint(0, 60)), abs(rnd.gauss(mu, sd)) + 0.1, vid)
+                note(pid, d, "History and Physical", "Chief complaint: " + rnd.choice(["typical angina", "atypical chest pain", "non-anginal chest pain"])
+                     + ". " + rnd.choice(["Denies dyspnea.", "Dyspnea on exertion."]) + " " + rnd.choice(["No edema.", "Bilateral pedal edema."])
+                     + " " + rnd.choice(["No murmur.", "Grade 2/6 systolic ejection murmur."]) + " " + rnd.choice(["Lungs clear.", "Bibasilar rales."])
+                     + f" CCS class {rnd.choice(['I', 'II', 'III'])}.", vid)
                 proc(pid, "ecg_12lead", d, vid)
                 note(pid, d, "ECG report", rnd.choice(["Normal sinus rhythm.", "Sinus rhythm. ST depression in V4-V6.", "Sinus rhythm. T wave inversion."]), vid)
                 if rnd.random() < .4:
@@ -310,6 +322,11 @@ def build(n_persons: int = 6000, seed: int = 7, config_dir: str | None = None) -
                 if rnd.random() < .45:
                     d3 = d + dt.timedelta(days=rnd.randint(10, 90))
                     vid3 = visit(pid, d3, 9201, cs_id, 1)
+                    # pre-procedure admission vitals and labs (always recorded before a cath)
+                    meas(pid, "sbp", d3, rnd.gauss(134, 18), vid3)
+                    meas(pid, "heart_rate", d3, rnd.gauss(75, 11), vid3)
+                    if rnd.random() < .95:
+                        meas(pid, "creatinine", d3, abs(rnd.gauss(1.0, .25)) + 0.2, vid3)
                     if rnd.random() < .8:
                         proc(pid, "coronary_angiography", d3, vid3)
                         st = [rnd.choice([0, 20, 30, 50, 70, 90, 100]) for _ in range(4)]
@@ -347,6 +364,8 @@ def build(n_persons: int = 6000, seed: int = 7, config_dir: str | None = None) -
                     meas(pid, "heart_rate", dd, rnd.gauss(78, 10), v2)
                     meas(pid, "sbp", dd, rnd.gauss(120, 15), v2)
                     meas(pid, "dbp", dd, rnd.gauss(72, 9), v2)
+                    meas(pid, "resp_rate", dd, rnd.gauss(18, 3), v2)
+                    meas(pid, "body_temp", dd, rnd.gauss(36.8, .3), v2)
                     meas(pid, "weight", dd, wt + rnd.gauss(0, 2.5), v2, 9529, "kg")
                     if rnd.random() < .3:
                         meas(pid, rnd.choice(["bnp", "creatinine", "potassium", "sodium", "troponin"]), dd, abs(rnd.gauss(5, 3)), v2)

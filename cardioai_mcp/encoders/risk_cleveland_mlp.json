@@ -1,0 +1,160 @@
+{
+ "model": "heartmodel-mlp",
+ "source": "cardioailive1/cardioaimedconnect@EHR_branch cb18da0c cardioai_heart_mlf/heart_disease_mlp.py + preprocessor.joblib",
+ "preprocessor_sha256": "c419ff44b34d60dfcc139fb3432ffa04bf486b23749232a64b395bf77d8152ba",
+ "training_data": {
+  "file": "datasets/heart_disease_data.json (UCI Cleveland as distributed on Kaggle, 303 rows)",
+  "sha256": "ae8b9c77ecff0b88d7372bb980e139e6c4acfe51d0c49acca964fe7b47ab569b"
+ },
+ "scaler_provenance": "EXACT: copied from the fitted ColumnTransformer in preprocessor.joblib",
+ "numeric": {
+  "columns": [
+   "age",
+   "trestbps",
+   "chol",
+   "thalach",
+   "oldpeak"
+  ],
+  "mean": [
+   54.289256198347104,
+   131.70661157024793,
+   244.88429752066116,
+   150.12396694214877,
+   1.0719008264462808
+  ],
+  "scale": [
+   9.134385146726768,
+   17.95726900188743,
+   47.748426495236316,
+   21.9324923110465,
+   1.2037629115359054
+  ]
+ },
+ "categorical": {
+  "columns": [
+   "sex",
+   "cp",
+   "fbs",
+   "restecg",
+   "exang",
+   "slope",
+   "ca",
+   "thal"
+  ],
+  "categories": [
+   [
+    0,
+    1
+   ],
+   [
+    0,
+    1,
+    2,
+    3
+   ],
+   [
+    0,
+    1
+   ],
+   [
+    0,
+    1,
+    2
+   ],
+   [
+    0,
+    1
+   ],
+   [
+    0,
+    1,
+    2
+   ],
+   [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   [
+    0,
+    1,
+    2,
+    3
+   ]
+  ],
+  "handle_unknown": "ignore"
+ },
+ "feature_names_out": [
+  "num__age",
+  "num__trestbps",
+  "num__chol",
+  "num__thalach",
+  "num__oldpeak",
+  "cat__sex_0",
+  "cat__sex_1",
+  "cat__cp_0",
+  "cat__cp_1",
+  "cat__cp_2",
+  "cat__cp_3",
+  "cat__fbs_0",
+  "cat__fbs_1",
+  "cat__restecg_0",
+  "cat__restecg_1",
+  "cat__restecg_2",
+  "cat__exang_0",
+  "cat__exang_1",
+  "cat__slope_0",
+  "cat__slope_1",
+  "cat__slope_2",
+  "cat__ca_0",
+  "cat__ca_1",
+  "cat__ca_2",
+  "cat__ca_3",
+  "cat__ca_4",
+  "cat__thal_0",
+  "cat__thal_1",
+  "cat__thal_2",
+  "cat__thal_3"
+ ],
+ "coding": {
+  "sex": {
+   "1": "male",
+   "0": "female"
+  },
+  "cp": {
+   "0": "asymptomatic",
+   "1": "atypical angina",
+   "2": "non-anginal pain",
+   "3": "typical angina"
+  },
+  "fbs": {
+   "1": "fasting glucose > 120 mg/dL"
+  },
+  "restecg": {
+   "0": "left ventricular hypertrophy",
+   "1": "normal",
+   "2": "ST-T wave abnormality"
+  },
+  "exang": {
+   "1": "exercise-induced angina"
+  },
+  "slope": {
+   "0": "downsloping",
+   "1": "flat",
+   "2": "upsloping"
+  },
+  "ca": {
+   "0-3": "major vessels coloured by fluoroscopy",
+   "4": "missing"
+  },
+  "thal": {
+   "1": "fixed defect",
+   "2": "normal",
+   "3": "reversible defect",
+   "0": "missing"
+  }
+ },
+ "output": "sigmoid = P(target = 1). In this file target 1 = NO heart disease (165/303), so P(heart disease) = 1 - output."
+}
