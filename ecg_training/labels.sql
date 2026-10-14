@@ -4,7 +4,7 @@ WITH e AS (
   SELECT CAST(x.{{c_person_id}} AS BIGINT)                 AS person_id,
          CAST(x.{{c_ecg_id}} AS STRING)                    AS ecg_id,
          CAST(x.{{c_acquisition_datetime}} AS DATE)        AS ecg_date,
-         x.{{c_waveform_uri}}                              AS waveform_uri,
+         {{waveform_select}}                               AS waveform_uri,   -- NULL for Base64 storage: filled by extract_waveforms
          x.{{c_read_statement}}                            AS read_text,
          CAST(x.{{c_is_confirmed}} AS INT)                 AS confirmed
   FROM {{ecg_table}} x
@@ -35,7 +35,10 @@ SELECT e.*,
               AND DATEDIFF(m.measurement_date, e.ecg_date) BETWEEN {{win_lo}} AND {{win_hi}}
               AND (m.measurement_concept_id IN {{cs:troponin}} OR m.measurement_source_concept_id IN {{cs:troponin}})
               AND m.value_as_number > COALESCE(m.range_high,
-                    CASE WHEN LOWER(TRIM(m.unit_source_value)) IN ('ng/l', 'pg/ml') THEN {{trop_ng_per_l}}
+                    CASE WHEN LOWER(TRIM(m.unit_source_value)) IN ('ng/l', 'pg/ml') THEN
+                              CASE p.gender_concept_id WHEN 8507 THEN {{trop_ng_per_l_male}}
+                                                       WHEN 8532 THEN {{trop_ng_per_l_female}}
+                                                       ELSE {{trop_ng_per_l}} END
                          WHEN LOWER(TRIM(m.unit_source_value)) IN ('ng/ml', 'ug/l') THEN {{trop_ng_per_ml}} END))
             THEN 1 ELSE 0 END                              AS trop_pos
 FROM e JOIN {{cdm}}.person p ON p.person_id = e.person_id
