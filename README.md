@@ -14,13 +14,21 @@ It runs inside a **Mayo Clinic Platform (MCP) Discover workspace**. There the EH
 
 All 179 elements are mapped. The loader refuses to start if any cohort's element count, REQ count or average expected completeness differs from the deck.
 
+A sixth cohort, **Cardiac MRI** (`…-MRI`, 1,000 patients, `config/cohorts/mri.yaml`), validates the MRI agent added after the deck. It covers infarct confirmation after STEMI, infarct size, MVO and LVEF, STEMI mimics, LV thrombus and aneurysm, and 1-year MACE. It has no deck targets, so it is listed in `EXTRA_COHORTS` and is built with `--cohorts mri`.
+
+Models trained inside MCP, with MobileNetV3 weights approved for export, live next to the toolkit:
+- `ecg_training/`: acute MI, STEMI and AF from 12-lead ECGs;
+- `mri_training/`: infarct, scar extent and STEMI work-up from cardiac MRI.
+
+Each has its own README.
+
 ## Layout
 ```
 config/
   study.yaml              schemas, study window, sites, small-cell rule, unit conversions
   concept_sets.yaml       92 concept sets (ICD-10-CM/ICD-9-CM -> SNOMED via 'Maps to', LOINC, CPT4, ATC -> RxNorm)
   modality_tables.yaml    MCP ECG-waveform / echo-DICOM table names (fill at onboarding)
-  cohorts/{echo,ecg,cad,risk,longitudinal}.yaml
+  cohorts/{echo,ecg,cad,risk,longitudinal,mri}.yaml
                           index event, exclusions, sampling quotas, every data element, agent
                           output contract, endpoints with goals and Phase 1 values
 cardioai_mcp/

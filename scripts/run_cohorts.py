@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cardioai_mcp import COHORTS  # noqa: E402
+from cardioai_mcp import COHORTS, EXTRA_COHORTS  # noqa: E402
 from cardioai_mcp.config import load_study  # noqa: E402
 from cardioai_mcp.pipeline import build_all  # noqa: E402
 
@@ -22,7 +22,7 @@ from cardioai_mcp.pipeline import build_all  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", choices=["spark", "duckdb-synthetic"], default="spark")
-    ap.add_argument("--cohorts", nargs="+", default=COHORTS)
+    ap.add_argument("--cohorts", nargs="+", default=COHORTS, choices=COHORTS + EXTRA_COHORTS)
     ap.add_argument("--export-dir", default=None)
     ap.add_argument("--save-tables", action="store_true", help="persist analytic + series tables to the work schema (spark)")
     a = ap.parse_args()

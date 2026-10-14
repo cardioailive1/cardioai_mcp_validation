@@ -29,9 +29,9 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        # ECG model tests need torch: CPU build keeps CI small (tests skip if torch is absent, so install it)
+        # ECG and MRI model tests need torch: CPU build keeps CI small (tests skip if torch is absent, so install it)
         pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install scipy pyarrow flask
+        pip install scipy pyarrow flask pydicom nibabel
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
