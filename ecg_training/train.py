@@ -168,6 +168,10 @@ def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = read_any, d
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    n_no_waveform = int(m.waveform_uri.isna().sum()) if "waveform_uri" in m else 0
+    if n_no_waveform:                       # Base64 rows that extract_waveforms could not decode
+        log(f"dropping {n_no_waveform} ECGs without a decoded waveform")
+        m = m[m.waveform_uri.notna()]
     tr, tu = m[m.split == "train"], m[m.split == "tune"]
     ds_tr = ECGDataset(tr, heads, loader, augment=tc.get("augment"), seed=seed)
     ds_tu = ECGDataset(tu, heads, loader)
@@ -231,6 +235,7 @@ def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = read_any, d
         "weights_sha256": hashlib.sha256((out / "weights.pt").read_bytes()).hexdigest(),
         "thresholds": thresholds, "threshold_rule": how, "label_definitions": cfg["labels"], "splits": cfg["splits"],
         "manifest_sha256": manifest_hash(m, heads), "data_summary": summary(m, heads).to_dict("records"),
+        "ecgs_without_waveform": n_no_waveform,
         "training": {k: v for k, v in tc.items()}, "history": history, "best_tune_score": best,
         "metrics": {k: v.to_dict("records") for k, v in metrics.items()},
         "environment": {"python": platform.python_version(), "torch": torch.__version__, "device": device},

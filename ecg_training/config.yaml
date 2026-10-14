@@ -15,9 +15,13 @@ labels:
   # acute_mi = 0 : no MI diagnosis of any kind (mi_any) within +/- clear_days
   # otherwise NULL (ambiguous: diagnosis without troponin, or the reverse) -> masked in the loss
   clear_days: 30
-  # Used only when the lab row has no range_high (assumption, shown in the model card); matched on
-  # measurement.unit_source_value. CONFIRM Mayo's troponin assays and unit strings at onboarding.
-  troponin_url_fallback: {ng_per_ml: 0.04, ng_per_l: 14}
+  # Used only when the lab row has no range_high (shown in the model card); matched on measurement.unit_source_value.
+  # Mayo's troponin is Troponin T, 5th generation (test TRPS, reporting name "Troponin T, 5th gen, P",
+  # LOINC 67151-1), in ng/L with sex-specific reference values: males <= 15, females <= 10
+  # (mayocliniclabs.com, confirmed by MCP 2026-10-14). ng_per_l = sex not recorded (assay-wide 99th pct, 14).
+  # ng_per_ml is only for older non-high-sensitivity rows: CONFIRM their assay by reporting name in the
+  # Mayo Clinic Labs catalogue before training.
+  troponin_url_fallback: {ng_per_l_male: 15, ng_per_l_female: 10, ng_per_l: 14, ng_per_ml: 0.04}
   # stemi = 1 : acute_mi = 1 AND a STEMI diagnosis (concept set stemi) within window_days
   # stemi = 0 : acute_mi = 0, or acute_mi = 1 with NSTEMI and no STEMI diagnosis; else NULL
   # af    = 1 : confirmed (over-read) statement says atrial fibrillation or flutter; 0 otherwise

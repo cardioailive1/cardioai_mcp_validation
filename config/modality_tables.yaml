@@ -19,7 +19,7 @@ ecg:
     person_id: person_id
     ecg_id: ecg_id
     acquisition_datetime: acquisition_datetime
-    waveform_uri: waveform_path        # path to XML / HDF5 / .npy waveform inside workspace storage
+    waveform_uri: waveform_path        # the waveform column: a Base64 string (MCP) or a file path (see waveform_storage)
     sample_rate_hz: sample_rate
     n_leads: lead_count
     read_statement: diagnosis_statement   # confirmed (over-read) interpretation text
@@ -30,7 +30,14 @@ ecg:
     qt_interval: qt_interval
     qtc_interval: qtc_interval
     qrs_axis: r_axis
-  requirements:            # agent input spec (PTB-XL–trained model)
+  # MCP (Adam Resnick, 2026-10-14): the ECG waveform table stores each waveform as a Base64-encoded string.
+  # base64 -> ecg_training.extract_waveforms decodes them once into .npz files for training;
+  # file   -> the column holds a path (MUSE XML / WFDB / .npz).
+  waveform_storage: base64
+  # Only used if the Base64 holds raw samples (no XML / gzip / npz / JSON inside): CONFIRM on real rows
+  # with `python -m ecg_training.probe_waveforms` before extraction.
+  waveform_raw: {dtype: "<i2", units_per_bit: 4.88, units: uV, layout: auto}
+  requirements:            # agent input spec (MobileNetV3-1D; any rate, 8 or 12 leads, >= 9.5 s)
     n_leads: 12
     duration_s: 10
     resample_to_hz: 500
