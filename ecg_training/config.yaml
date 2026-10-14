@@ -1,0 +1,59 @@
+# =============================================================================
+# CardioAI ECG model: MobileNetV3-1D, 12-lead, trained inside the Mayo Clinic Platform workspace.
+# MobileNetV3 weights are approved for export under the CardioAI MCP agreement.
+# Every value here is recorded in the model card; changing any of them after the
+# test set is opened = a new model version.
+# =============================================================================
+model_name: cardioai-ecg-mobilenetv3
+heads: [acute_mi, stemi, af]
+
+labels:
+  # Per ECG, from OMOP around the ECG date (days; negative = before the ECG)
+  window_days: [-1, 3]
+  # acute_mi = 1 : acute MI diagnosis (concept set mi_acute) AND troponin above the upper
+  #                reference limit, both within window_days
+  # acute_mi = 0 : no MI diagnosis of any kind (mi_any) within +/- clear_days
+  # otherwise NULL (ambiguous: diagnosis without troponin, or the reverse) -> masked in the loss
+  clear_days: 30
+  # Used only when the lab row has no range_high (assumption, shown in the model card); matched on
+  # measurement.unit_source_value. CONFIRM Mayo's troponin assays and unit strings at onboarding.
+  troponin_url_fallback: {ng_per_ml: 0.04, ng_per_l: 14}
+  # stemi = 1 : acute_mi = 1 AND a STEMI diagnosis (concept set stemi) within window_days
+  # stemi = 0 : acute_mi = 0, or acute_mi = 1 with NSTEMI and no STEMI diagnosis; else NULL
+  # af    = 1 : confirmed (over-read) statement says atrial fibrillation or flutter; 0 otherwise
+  #             NULL when there is no confirmed read
+  af_regex: '(?i)(atrial fibrillation|atrial flutter|\bafib\b|\ba-fib\b)'
+  af_negation_regex: '(?i)(no (evidence of )?atrial (fibrillation|flutter)|history of atrial (fibrillation|flutter)|(rule out|r/o) atrial)'
+  require_confirmed_read: true
+
+splits:
+  # Patient-disjoint. A patient's split is set by the date of their FIRST ECG; only that
+  # split's ECGs are kept for them. Held-out sites go entirely to test_site.
+  tune_start: '2020-01-01'
+  test_start: '2021-01-01'
+  heldout_sites: []                 # fill with care_site_ids agreed before training, or use fraction:
+  heldout_site_fraction: 0.15       # deterministic by hash of site id when heldout_sites is empty
+  max_ecgs_per_patient: 20          # train/tune only; keeps frequent-ECG patients from dominating
+  # Phase 2 validation patients (ECG cohort) never enter train or tune:
+  exclude_persons_table: ecg_analytic_locked
+  seed: 20261014
+
+arch: {width: 1.0, dropout: 0.2}
+
+train:
+  epochs: 40
+  batch_size: 128
+  lr: 0.001
+  weight_decay: 0.0001
+  patience: 6                       # early stopping on mean tuning AUROC across heads
+  num_workers: 8
+  augment: {amplitude: [0.9, 1.1], shift_s: 0.2, noise_mv: 0.02, lead_dropout_p: 0.05}
+
+thresholds:
+  # Fitted on the TUNING split only: highest threshold whose tuning sensitivity >= target.
+  # Targets carry headroom above the Phase 2 goals (STEMI 0.92, AF 0.94, acute MI 0.90): success
+  # needs the LOWER 95% CI bound to clear the goal, so a threshold tuned to land exactly on the
+  # goal fails about half the time. The cost is specificity; review it on the tuning split.
+  acute_mi: {target_sensitivity: 0.94}
+  stemi: {target_sensitivity: 0.96}
+  af: {target_sensitivity: 0.97}

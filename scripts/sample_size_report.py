@@ -41,8 +41,7 @@ def denominators(key: str, c) -> dict:
         return {"ef_correlation": N, "ef_mae": N, "clinical_agreement": N,
                 "chamber_size": round(N * R["echo_size_avail"])}
     if key == "ecg":
-        return {"overall_accuracy": N, "stemi_sensitivity": q.get("stemi"), "af_sensitivity": q.get("af"),
-                "vt_sensitivity": q.get("vt"), "bbb_accuracy": N, "nsr_accuracy": N}
+        return {"stemi_sensitivity": q.get("stemi"), "af_sensitivity": q.get("af")}
     if key == "cad":
         ica = q.get("ICA", N)
         pos, neg = round(ica * R["cad_obstructive"]), round(ica * (1 - R["cad_obstructive"]))

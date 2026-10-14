@@ -41,11 +41,11 @@ def simulate_predictions(key: str, a: pd.DataFrame) -> pd.DataFrame:
         p["agent_edv_ml"] = a.lv_end_diastolic_volume * 0.92 + RNG.normal(0, 6, len(a))
         p["runtime_s"] = RNG.gamma(9, 5, len(a))
     elif key == "ecg":
-        p["agent_superclass"] = _flip(a.ref_superclass.fillna("NORM"), 0.03, ["NORM", "MI", "STTC", "CD", "HYP"])
-        p["agent_stemi"] = _flip(a.ref_stemi.fillna(0).astype(int), 0.03, [0, 1])
-        p["agent_rhythm"] = _flip(a.rhythm_classification.fillna("SR"), 0.03, ["SR", "AFIB", "VT", "OTHER"])
-        p["agent_bbb"] = _flip(a.bundle_branch_block.fillna("NONE"), 0.03, ["NONE", "LBBB", "RBBB"])
-        p["runtime_s"] = RNG.gamma(4, 0.5, len(a))
+        for head, ref in (("acute_mi", "ref_acute_mi"), ("stemi", "ref_stemi"), ("af", "ref_af_any")):
+            y = a[ref].fillna(0).astype(int)
+            p[f"agent_{head}_prob"] = np.clip(0.8 * y + RNG.normal(0.1, 0.1, len(a)), 0, 1)
+            p[f"agent_{head}"] = (p[f"agent_{head}_prob"] >= 0.5).astype(int)
+        p["runtime_s"] = RNG.gamma(4, 0.05, len(a))
     elif key == "cad":
         y = a.cad_present.fillna(0).astype(int)
         p["agent_cad_prob"] = np.clip(0.75 * y + RNG.normal(0.12, 0.15, len(a)), 0, 1)
@@ -129,6 +129,10 @@ def test_endpoints_evaluate(built):
         if k == "echo":
             assert set(ep[ep.tier == "not_applicable"].endpoint) == {"wall_motion_sens", "wall_motion_spec"}
             assert ep.set_index("endpoint").loc["chamber_size", "estimate"] == ep.set_index("endpoint").loc["chamber_size", "estimate"]  # not NaN
+        if k == "ecg":
+            assert {"stemi_sensitivity", "af_sensitivity"} <= set(ep[ep.tier == "primary"].endpoint)
+            assert len(ep[ep.tier == "not_applicable"]) == 5
+            assert not ep[ep.tier != "not_applicable"].estimate.isna().all()
         ep.to_csv(os.path.join(ROOT, "exports", "synthetic_test", f"{k}_endpoints_SIMULATED.csv"), index=False)
 
 

@@ -105,6 +105,12 @@ Patient data cannot leave MCP, so the agents must come to the data. Upload each 
 
 ---
 
+## Step 6b: Train the ECG model (ECG agent only, before its validation)
+
+The ECG agent is a new MobileNetV3-1D model (acute MI, STEMI, AF), trained here on Mayo ECGs. MobileNetV3 export is approved under the agreement. Follow [`ecg_training/README.md`](ecg_training/README.md). Two rules:
+- **Lock the ECG validation cohort before training.** Its patients are excluded from training, and it only uses ECGs from 2021 on, while training uses earlier years.
+- **Export only `weights.pt`, `thresholds.json` and `model_card.json`.**
+
 ## Step 7: Validate each agent (repeat per agent, by wave)
 
 Each agent goes through the same six sub-steps, **a → f**. Swap `<cohort>` for `cad`, `risk`, `longitudinal`, `ecg` or `echo`.
