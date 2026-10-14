@@ -24,7 +24,9 @@ def load_tasks(path: Optional[str] = None) -> dict:
     return yaml.safe_load(Path(path or HERE / "tasks.yaml").read_text())
 
 
-def _assign(w: pd.DataFrame, readers: List[str], double: float, rng: np.random.Generator) -> pd.DataFrame:
+def _assign(w: pd.DataFrame, readers: List[str], double: float, rng: np.random.Generator, max_readers: int = 5) -> pd.DataFrame:
+    if len(readers) > max_readers:
+        raise ValueError(f"{len(readers)} readers but MCP allows {max_readers} annotator seats")
     if len(readers) < (2 if double > 0 else 1):
         raise ValueError("need at least two readers for double reads")
     w = w.reset_index(drop=True)
@@ -54,7 +56,7 @@ def select_mri(m: pd.DataFrame, readers: List[str], task: dict, seed: int = 2026
         chosen += rest.study_id.head(k - len(chosen)).tolist()
         picks.append(part[part.study_id.isin(chosen)])
     w = pd.concat(picks)[["study_id", "person_id", "split", "stratum", "dicom_uri"]]
-    return _assign(w, readers, float(task["double_read_fraction"]), rng)
+    return _assign(w, readers, float(task["double_read_fraction"]), rng, int(task.get("max_readers", 5)))
 
 
 def select_echo(studies: pd.DataFrame, readers: List[str], task: dict, seed: int = 20261014, n: Optional[int] = None) -> pd.DataFrame:
@@ -62,7 +64,7 @@ def select_echo(studies: pd.DataFrame, readers: List[str], task: dict, seed: int
     n = int(n or task["target_studies"])
     s = studies.sample(frac=1.0, random_state=seed).drop_duplicates("person_id").head(n)
     w = s[["study_id", "person_id", "dicom_uri"]].assign(split="qc", stratum="random")
-    return _assign(w, readers, float(task["double_read_fraction"]), rng)
+    return _assign(w, readers, float(task["double_read_fraction"]), rng, int(task.get("max_readers", 5)))
 
 
 def main():

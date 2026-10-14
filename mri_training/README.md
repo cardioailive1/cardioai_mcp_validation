@@ -40,19 +40,25 @@ GroupNorm replaces MobileNetV3's BatchNorm. Each training step is one study's sl
    ```
    The build refuses to continue if any patient appears in two splits.
 4. **Contour about 300 studies** with the annotation kit (`annotation/README.md`: worklist, pre-drawn outlines, tool options, reader protocol, checks and double-read agreement). Readers draw LV pool, myocardium, scar, MVO and RV on the short-axis LGE, and LV pool, myocardium and RV on cine at ED and ES. Spread the studies across splits and over-sample post-STEMI studies. Save one `.npz` per study: `lge` (S, H, W) in `read_study()` slice order, and optionally `cine` (K, S, H, W) with `cine_phases` (K,). Put its path in the manifest's `label_uri` column.
-5. **List the public sets** in a CSV with columns `source,image_uri,label_uri` (NIfTI).
-6. **Train on the GPU workspace:**
+5. **List the public sets** in a CSV with columns `source,image_uri,label_uri` (NIfTI), on the machine **outside** MCP where they are stored.
+6. **Train.** MCP asks that the public datasets stay **outside** the workspace (2026-10-14), so Stage A on public data runs outside and only its weights come in:
    ```bash
+   # outside MCP (CardioAI GPU): segmentation on the public sets only
+   python -m mri_training.train --public public.csv --out runs/public_v1
+   # bring runs/public_v1/weights.pt + model_card.json into the workspace (MCP import process), then on an A100:
    pip install -r requirements-mri.txt      # CUDA build of torch matching the workspace driver
-   python -m mri_training.train --manifest /workspace/mri/manifest.parquet --public /workspace/mri/public.csv \
-          --out /workspace/mri/runs/v1 --cache-dir /workspace/mri/cache
+   python -m mri_training.train --manifest /workspace/mri/manifest.parquet --init runs/public_v1 \
+          --out /workspace/mri/runs/v1 --cache-dir /workspace/mri/cache --device cuda
    ```
-   Thresholds are fitted on the `tune` split only, with headroom above the Phase 2 goals. Metrics are reported on `test_time` (2021 on) and `test_site`:
-   - finding AUROC, sensitivity and specificity;
-   - Dice per structure;
-   - infarct size, MVO and LVEF against reader contours;
-   - LVEF and infarct size against the report;
-   - MVO presence against the report.
+   - `--init` loads the public-data weights strictly. Their hash and the public sets they came from are recorded in the model card (`initialised_from`).
+   - Inside MCP, Stage A then fine-tunes on the Mayo reader outlines, and Stage B adds the report labels.
+   - The same public-data bundle pre-draws outlines for the readers (`annotation/README.md`).
+   - Thresholds are fitted on the `tune` split only, with headroom above the Phase 2 goals. Metrics are reported on `test_time` (2021 on) and `test_site`:
+     - finding AUROC, sensitivity and specificity;
+     - Dice per structure;
+     - infarct size, MVO and LVEF against reader contours;
+     - LVEF and infarct size against the report;
+     - MVO presence against the report.
 7. **Review `model_card.json`** and copy the `test_time` values into the `phase1` fields of `config/cohorts/mri.yaml`.
 8. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Manifests, contours and per-study predictions stay in MCP.
 9. **Run Phase 2 on the locked cohort.** Run `pipeline.analyse` and `interpret` with the exported bundle and write `mri_predictions` following the cohort's `predictions` contract. Add the EMIDEC test set as the external check.

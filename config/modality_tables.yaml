@@ -53,6 +53,10 @@ echo:
     has_a4c_cine: a4c_available           # apical-4-chamber cine present (EchoNet-Dynamic input)
     image_quality: image_quality
     report_text: report_text
+  # MCP (2026-10-14): echo notes are in FACT_ECHO_TEST.ECHO_NOTE. CONFIRM the schema prefix and the
+  # join columns in the workspace (and the Resource Hub training); the echo DICOM location is still to confirm.
+  note_table: "{modality}.FACT_ECHO_TEST"
+  note_column: ECHO_NOTE
   measurement_table: "{modality}.echo_measurement"   # PLACEHOLDER — structured echo report values
   measurement_columns:
     study_id: study_uid
@@ -76,6 +80,10 @@ mri:
     study_datetime: study_datetime
     dicom_uri: dicom_path               # folder or zip of the study's DICOM files in workspace storage
     report_text: report_text            # final signed CMR report (else the NOTE fall-back below)
+  # MCP (2026-10-14): radiology reports, including cardiac MRI, are in FACT_RADIOLOGY ("Radiology" slides in
+  # the MCP Resource Hub). CONFIRM its columns (patient, exam date, exam/procedure name, report text,
+  # accession or study UID) and where the CMR DICOM pixel data sit, then point `table` / `columns` there.
+  report_table: "{modality}.FACT_RADIOLOGY"
   requirements:            # MRI agent input spec (mri_training/, runtime 1.0.0)
     sequences: [LGE short axis (required), cine SSFP short axis (for LVEF)]
     min_slices: 3

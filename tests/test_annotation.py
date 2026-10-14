@@ -137,6 +137,8 @@ def test_worklist_selection():
     assert len(d) == 30 and (d.reader_1 != d.reader_2).all()
     assert w.reader_1.value_counts().max() - w.reader_1.value_counts().min() <= 1
     assert select_mri(m, ["r1", "r2", "r3"], TASKS["mri_contours"]).equals(w)                 # deterministic
+    with pytest.raises(ValueError, match="annotator seats"):                                    # MCP: 5 seats
+        select_mri(m, [f"r{i}" for i in range(6)], TASKS["mri_contours"])
 
 
 def _echo_dicom(frames):
@@ -238,3 +240,18 @@ def test_public_only_training_gives_a_prelabel_bundle(tmp_path):
     train(m, cfg, str(tmp_path), loader=loader, device="cpu", log=lambda s: None, n_boot=0)
     model, prov = load_prelabel_model(str(tmp_path))
     assert model is not None and len(prov["weights_sha256"]) == 64
+    # inside MCP: Mayo-only training starts from the imported public-data weights (public sets stay outside)
+    mayo = pd.DataFrame([dict(study_id=f"m{i}", person_id=i, split="train" if i < 2 else "tune", seed=10 + i, infarct=1.0,
+                              nonischemic_lge=0.0, lv_thrombus=0.0, lv_aneurysm=0.0, label_uri="") for i in range(3)])
+
+    def mayo_loader(r, _c):
+        lge, _, _ = S.study(seed=int(r.seed), n_slices=5)
+        return Example(lge=lge)
+    card = train(mayo, cfg, str(tmp_path / "inside"), loader=mayo_loader, device="cpu", log=lambda s: None, n_boot=0,
+                 init=str(tmp_path))
+    assert card["initialised_from"]["weights_sha256"] == prov["weights_sha256"]
+    assert card["initialised_from"]["public_studies"]                                   # provenance carried over
+    with pytest.raises(RuntimeError):                                                   # strict: wrong architecture refused
+        cfg2 = copy.deepcopy(cfg)
+        cfg2["arch"]["width"] = 0.5
+        train(mayo, cfg2, str(tmp_path / "bad"), loader=mayo_loader, device="cpu", log=lambda s: None, n_boot=0, init=str(tmp_path))

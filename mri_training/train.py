@@ -445,8 +445,26 @@ def public_rows(csv_path: str, cfg: dict, tune_fraction: float = 0.1, seed: Opti
     return p
 
 
+def load_init(model, init: str, log: Callable[[str], None]) -> dict:
+    """Start from weights trained elsewhere (e.g. on the public sets OUTSIDE MCP): plain state_dict, strict."""
+    p = Path(init)
+    wpath = p / "weights.pt" if p.is_dir() else p
+    state = torch.load(wpath, map_location="cpu", weights_only=True)
+    if not isinstance(state, dict) or not all(isinstance(v, torch.Tensor) for v in state.values()):
+        raise TypeError("--init must be a plain state_dict (weights.pt from mri_training.train)")
+    model.load_state_dict(state, strict=True)
+    info = {"weights_sha256": hashlib.sha256(wpath.read_bytes()).hexdigest(), "path": str(wpath)}
+    card = wpath.parent / "model_card.json"
+    if card.exists():                                   # provenance of the starting point (which public sets)
+        c = json.loads(card.read_text())
+        info.update({k: c.get(k) for k in ("model_name", "runtime_fingerprint", "public_studies", "public_datasets", "code_commit")})
+    log(f"initialised from {wpath} ({info['weights_sha256'][:12]})")
+    return info
+
+
 def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = load_example, device: Optional[str] = None,
-          log: Callable[[str], None] = print, cache_dir: Optional[str] = None, n_boot: int = 1000) -> dict:
+          log: Callable[[str], None] = print, cache_dir: Optional[str] = None, n_boot: int = 1000,
+          init: Optional[str] = None) -> dict:
     heads, tc = cfg["study_heads"], cfg["train"]
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -466,7 +484,9 @@ def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = load_exampl
     tr = [int(i) for i in m.index[m.split == "train"]]
     tu = [int(i) for i in m.index[m.split == "tune"]]
     cache = PartCache(m, cfg, loader, cache_dir)
-    model = build_model({**cfg["arch"], "study_heads": heads}).to(device)
+    model = build_model({**cfg["arch"], "study_heads": heads})
+    init_info = load_init(model, init, log) if init else None
+    model = model.to(device)
     prev = np.nan_to_num(np.nanmean(m.loc[mayo & (m.split == "train"), heads].to_numpy(dtype=float), axis=0)
                          if (mayo & (m.split == "train")).any() else np.full(len(heads), np.nan), nan=0.5).clip(1e-3, 1 - 1e-3)
     pos_weight = torch.tensor(np.clip((1 - prev) / prev, 1.0, 50.0), dtype=torch.float32, device=device)
@@ -519,6 +539,7 @@ def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = load_exampl
         "unreadable_studies": len(cache.failed),
         "training": dict(tc), "history": hist,
         "metrics": {k: v.to_dict("records") for k, v in metrics.items()},
+        "initialised_from": init_info,
         "environment": {"python": platform.python_version(), "torch": torch.__version__, "device": device},
         "code_commit": _git_commit(),
         "intended_use": ("Cardiac MRI (LGE + cine short axis) after suspected or confirmed STEMI: confirm infarct, quantify "
@@ -540,6 +561,8 @@ def main():
     ap.add_argument("--config", default=None)
     ap.add_argument("--device", default=None)
     ap.add_argument("--cache-dir", default=None)
+    ap.add_argument("--init", default=None,
+                    help="start from weights.pt (or its bundle folder) trained elsewhere, e.g. on the public sets outside MCP")
     a = ap.parse_args()
     cfg = load_config(a.config)
     if not (a.manifest or a.public):
@@ -548,7 +571,7 @@ def main():
     if a.public:
         parts.append(public_rows(a.public, cfg))
     m = pd.concat(parts, ignore_index=True)
-    card = train(m, cfg, a.out, device=a.device, cache_dir=a.cache_dir)
+    card = train(m, cfg, a.out, device=a.device, cache_dir=a.cache_dir, init=a.init)
     print(json.dumps({k: card[k] for k in ("parameters", "thresholds", "runtime_fingerprint", "weights_sha256")}, indent=2))
 
 
