@@ -206,3 +206,53 @@ def test_training_learns_and_writes_a_lockable_bundle(tmp_path):
     assert json.loads((tmp_path / "thresholds.json").read_text()) == card["thresholds"]
     reloaded = load_model(str(tmp_path / "weights.pt"), {**cfg["arch"], "heads": cfg["heads"]})
     assert n_params(reloaded) == card["parameters"]
+
+
+# --------------------------------------------------------------------------- serving container
+def _bundle(tmp_path, cfg):
+    """A bundle in the format train() writes (weights.pt, thresholds.json, model_card.json)."""
+    m = MobileNetV3ECG(width=0.25).eval()
+    torch.save(m.state_dict(), tmp_path / "weights.pt")
+    import hashlib
+    (tmp_path / "thresholds.json").write_text(json.dumps({"acute_mi": 0.5, "stemi": 0.5, "af": 0.5}))
+    (tmp_path / "model_card.json").write_text(json.dumps({
+        "model_name": "cardioai-ecg-mobilenetv3", "heads": ["acute_mi", "stemi", "af"], "arch": {"width": 0.25},
+        "runtime_fingerprint": runtime.fingerprint(),
+        "weights_sha256": hashlib.sha256((tmp_path / "weights.pt").read_bytes()).hexdigest()}))
+    return m
+
+
+def test_serving_container_matches_training_and_refuses_mismatches(tmp_path):
+    from ecg_training.serve.predictor import BundleError, ECGPredictor
+    cfg = load_config()
+    m = _bundle(tmp_path, cfg)
+    pred = ECGPredictor(tmp_path, device="cpu")
+    sig = S.ecg("af", fs=250, seed=9)
+    out = pred.predict([{"signal": sig.tolist(), "fs": 250, "leads": S.LEADS, "units": "mV"},
+                        {"signal": (sig * 1000).tolist(), "fs": 250, "leads": S.LEADS},          # uV sent as mV -> refused
+                        {"fs": 500}])
+    with torch.no_grad():
+        expect = torch.sigmoid(m(torch.from_numpy(preprocess(sig, 250, S.LEADS))[None]))[0].numpy()
+    assert np.allclose([out[0]["probabilities"][h] for h in ("acute_mi", "stemi", "af")], expect, atol=1e-5)
+    assert out[0]["runtime_fingerprint"] == runtime.fingerprint() and len(out[0]["weights_sha256"]) == 64
+    assert out[1]["error_type"] == "input" and out[2]["error_type"] == "input"
+    # tampered weights or a different runtime -> the container refuses to start
+    card = json.loads((tmp_path / "model_card.json").read_text())
+    (tmp_path / "model_card.json").write_text(json.dumps({**card, "runtime_fingerprint": "0" * 64}))
+    with pytest.raises(BundleError, match="runtime"):
+        ECGPredictor(tmp_path, device="cpu")
+    (tmp_path / "model_card.json").write_text(json.dumps({**card, "weights_sha256": "0" * 64}))
+    with pytest.raises(BundleError, match="weights"):
+        ECGPredictor(tmp_path, device="cpu")
+
+
+def test_serving_http_contract(tmp_path):
+    pytest.importorskip("flask")
+    from ecg_training.serve.predictor import ECGPredictor, create_app
+    _bundle(tmp_path, load_config())
+    client = create_app(ECGPredictor(tmp_path, device="cpu")).test_client()
+    assert client.get("/health").json["runtime_fingerprint"] == runtime.fingerprint()
+    r = client.post("/predict", json={"instances": [{"signal": S.ecg("normal").tolist(), "fs": 500, "leads": S.LEADS}]})
+    p = r.json["predictions"][0]
+    assert r.status_code == 200 and set(p["probabilities"]) == {"acute_mi", "stemi", "af"} and set(p["flags"]) == set(p["probabilities"])
+    assert client.post("/predict", json={}).status_code == 400
