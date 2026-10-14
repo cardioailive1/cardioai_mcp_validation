@@ -1,0 +1,32 @@
+# =============================================================================
+# Imaging annotation tasks for the CardioAI agents (done INSIDE the MCP workspace: Mayo images never leave).
+# Only imaging agents can need human annotation:
+#   * MRI  : required. Pixel contours for ~300 studies (Stage A training + contour-based test metrics).
+#   * Echo : optional QC. LV cavity traces at ED and ES on a sample of A4C cines, to check the EchoNet
+#            segmentation behind EF and volumes on Mayo data. Phase 2 echo endpoints use the report reference.
+#   ECG, CAD, Risk, Longitudinal: labels come from reports and EHR codes; no annotation.
+# =============================================================================
+mri_contours:
+  required: true
+  target_studies: 300
+  double_read_fraction: 0.10          # second, independent reader: agreement reported in the model card
+  # where the contoured studies go (patient-disjoint splits from mri_training.dataset.build_manifest)
+  split_share: {train: 0.70, tune: 0.15, test_time: 0.15}
+  enrich: {recent_stemi: 0.50, nonischemic_lge: 0.15}   # share of studies drawn from these strata (rest at random)
+  sequences:
+    lge:
+      file: lge                       # <study>/lge.nii.gz, label file lge_label.nii.gz
+      labels: {0: background, 1: lv_pool, 2: myocardium, 3: scar, 4: mvo, 5: rv_pool}
+    cine:
+      file: cine_ed / cine_es         # end-diastole and end-systole phases only
+      labels: {0: background, 1: lv_pool, 2: myocardium, 5: rv_pool}   # no scar on cine
+  min_minutes_per_study: 20           # planning figure for correcting pre-drawn outlines (confirm in the pilot)
+
+echo_lv_traces:
+  required: false
+  target_studies: 100
+  double_read_fraction: 0.10
+  view: A4C
+  labels: {0: background, 1: lv_cavity}
+  frames: "exactly two frames labelled per cine: end-diastole and end-systole (reader's choice)"
+  min_minutes_per_study: 5

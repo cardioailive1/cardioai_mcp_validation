@@ -377,7 +377,7 @@ def study_level(model, m: pd.DataFrame, idx: Sequence[int], cfg: dict, loader: L
             ref = np.stack([prepare_labels(ex.cine_labels[k], ex.cine.pixel_spacing, pc.order) for k in range(len(ex.cine_phases))])
             out["ref_lvef_pct"] = cine_function(ref, pc.slice_spacing_mm)["lvef_pct"]
         rows.append(out)
-    return pd.DataFrame(rows).set_index("row")
+    return pd.DataFrame(rows, columns=None if rows else ["row", "error"]).set_index("row")
 
 
 def _num(s) -> np.ndarray:
@@ -532,7 +532,9 @@ def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = load_exampl
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", required=True, help="Mayo manifest (build_manifest + label_uri for contoured studies)")
+    ap.add_argument("--manifest", default=None,
+                    help="Mayo manifest (build_manifest + label_uri for contoured studies); omit with --public to train "
+                         "the public-only model that pre-draws outlines for the readers (annotation/README.md)")
     ap.add_argument("--public", default=None, help="CSV of public annotated studies: source,image_uri,label_uri")
     ap.add_argument("--out", required=True)
     ap.add_argument("--config", default=None)
@@ -540,9 +542,12 @@ def main():
     ap.add_argument("--cache-dir", default=None)
     a = ap.parse_args()
     cfg = load_config(a.config)
-    m = pd.read_parquet(a.manifest)
+    if not (a.manifest or a.public):
+        ap.error("give --manifest, --public, or both")
+    parts = [pd.read_parquet(a.manifest).assign(source="mayo")] if a.manifest else []
     if a.public:
-        m = pd.concat([m.assign(source="mayo"), public_rows(a.public, cfg)], ignore_index=True)
+        parts.append(public_rows(a.public, cfg))
+    m = pd.concat(parts, ignore_index=True)
     card = train(m, cfg, a.out, device=a.device, cache_dir=a.cache_dir)
     print(json.dumps({k: card[k] for k in ("parameters", "thresholds", "runtime_fingerprint", "weights_sha256")}, indent=2))
 
