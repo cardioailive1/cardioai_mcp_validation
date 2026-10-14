@@ -256,3 +256,10 @@ def test_serving_http_contract(tmp_path):
     p = r.json["predictions"][0]
     assert r.status_code == 200 and set(p["probabilities"]) == {"acute_mi", "stemi", "af"} and set(p["flags"]) == set(p["probabilities"])
     assert client.post("/predict", json={}).status_code == 400
+
+
+if os.environ.get("CARDIOAI_APP_REPO"):  # cross-repo: the app must pin exactly this runtime
+    def test_app_lock_pins_this_runtime():
+        import yaml
+        reg = yaml.safe_load((Path(os.environ["CARDIOAI_APP_REPO"]) / "app" / "validated_agents" / "registry.yaml").read_text())
+        assert reg["agents"]["ecg"]["output_adapter"]["runtime_fingerprint"] == runtime.fingerprint()
