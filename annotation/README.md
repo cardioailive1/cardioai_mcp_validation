@@ -8,13 +8,32 @@ Mayo images can't leave the Mayo Clinic Platform workspace, so annotation happen
 | **Echo** | Optional QC. LV cavity traced on two frames (end-diastole, end-systole) of the A4C cine | Checks the EchoNet segmentation behind EF and volumes on Mayo data. The Phase 2 echo endpoints use the report reference, so they don't depend on this | 100 studies, 10% read twice |
 | ECG, CAD, Risk, Longitudinal | None | Labels come from reports, over-reads and EHR codes | — |
 
+## Set-up agreed with MCP (Adam Resnick, 2026-10-14)
+
+| Item | Answer | What it means for us |
+|---|---|---|
+| Desktop, 3D Slicer, ITK-SNAP | Already installed in the workspace | **Route A is the plan**: readers correct outlines in 3D Slicer (or ITK-SNAP) |
+| pip install (`monailabel`, `highdicom`) | Allowed | Option A2 (Slicer + MONAI Label on localhost) is open once the pre-drawing model is good |
+| Local web apps | Run on localhost in the environment | OHIF / MONAI Label server possible |
+| Docker | Runs, but `docker pull` doesn't fetch dependencies: images must be self-contained | Only needed for CVAT; build the image outside and import it as a tar, or skip CVAT |
+| Readers | Up to **5 annotator seats**, each with a **cardioailive.com** email; **Mayo readers can't annotate** in our environment | CardioAI hires outside cardiac MRI readers; `select` refuses more than 5 readers |
+| GPU | Shared reservation of **A100 40 GB** machines; other types on request | Training and pre-drawing run on an A100 (`--device cuda`) |
+| Reports | Radiology (incl. cardiac MRI) in **FACT_RADIOLOGY**; echo notes in **FACT_ECHO_TEST.ECHO_NOTE** | Report labels come from these (`config/modality_tables.yaml`; columns to confirm) |
+| Existing annotations | None: labels are what reports and echo notes say | As planned: report labels for every study, reader outlines for the 300 |
+| Public datasets | **Keep them outside the environment** if possible; import only on request if essential | The pre-drawing model is trained **outside** MCP on the public sets; only its weights come in (`--init`) |
+
+Still open with MCP: where the cardiac MRI and echo **DICOM images** sit (table or storage path, and the
+key that links an image study to its FACT_RADIOLOGY report), and the process for **importing model
+weights** (and, if needed, a self-contained Docker image) into the workspace.
+
 ## Workflow
 
 ```
 1. check    python -m annotation.check_workspace                       -> which tools can run here (send to MCP)
 2. select   python -m annotation.select mri --manifest manifest.parquet --readers r01,r02,r03 --out worklist.csv
-3. pre-draw (MRI) train a model on the public sets only, e.g.:
-            python -m mri_training.train --public public.csv --out runs/prelabel
+3. pre-draw (MRI) OUTSIDE MCP (our own GPU), train on the public sets only, then import the bundle:
+            python -m mri_training.train --public public.csv --out runs/prelabel      # outside MCP
+            (bring runs/prelabel/weights.pt + model_card.json into the workspace through MCP's import process)
 4. export   python -m annotation.export mri --worklist worklist.csv --out /workspace/annotation --bundle runs/prelabel
 5. annotate readers open <out>/<reader>/<study>/ in the tool and correct the *_label.nii.gz files (protocol below)
 6. collect  python -m annotation.collect mri --root /workspace/annotation --out /workspace/mri/contours

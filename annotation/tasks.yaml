@@ -1,5 +1,7 @@
 # =============================================================================
 # Imaging annotation tasks for the CardioAI agents (done INSIDE the MCP workspace: Mayo images never leave).
+# MCP (2026-10-14): up to 5 annotator seats, each with a cardioailive.com email; Mayo readers cannot annotate
+# in our environment, so readers are hired by CardioAI.
 # Only imaging agents can need human annotation:
 #   * MRI  : required. Pixel contours for ~300 studies (Stage A training + contour-based test metrics).
 #   * Echo : optional QC. LV cavity traces at ED and ES on a sample of A4C cines, to check the EchoNet
@@ -10,6 +12,7 @@ mri_contours:
   required: true
   target_studies: 300
   double_read_fraction: 0.10          # second, independent reader: agreement reported in the model card
+  max_readers: 5                      # MCP annotator seats
   # where the contoured studies go (patient-disjoint splits from mri_training.dataset.build_manifest)
   split_share: {train: 0.70, tune: 0.15, test_time: 0.15}
   enrich: {recent_stemi: 0.50, nonischemic_lge: 0.15}   # share of studies drawn from these strata (rest at random)
