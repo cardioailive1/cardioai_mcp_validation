@@ -1,0 +1,6 @@
+# ECG model training (ecg_training/). Inside the MCP GPU workspace install the CUDA build of torch
+# that matches the workspace driver; CI uses the CPU build.
+torch>=2.2
+scipy>=1.10
+pyarrow>=14          # manifest parquet
+wfdb>=4.1            # only for WFDB-format waveforms
