@@ -5,8 +5,9 @@
 #   cohort is an INTERNAL held-out validation: ECGs from 2021 on (training uses earlier years), and its
 #   patients are excluded from training (ecg_training/config.yaml: exclude_persons_table). Lock this
 #   cohort BEFORE training. An external public test set is reported alongside (protocol).
-# Deck's original agent was trained on PTB-XL (Germany, 21,837 pts); its superclass/VT/BBB/NSR
-#   endpoints are not produced by this model (not_applicable below).
+# Deck's original agent was trained on PTB-XL (Germany, 21,837 pts). Its superclass, VT, BBB and NSR
+#   endpoints are not produced by this model and were removed; the deck's STEMI, AF and speed goals are
+#   kept, and the new acute MI, specificity and AUROC endpoints carry goals at the deck's levels.
 # Deck: 2,000 patients · 12 sites · 30 elements (22 REQ / 8 OPT) · 90.1% avg completeness
 # =============================================================================
 key: ecg
@@ -141,15 +142,11 @@ elements:
      src: {type: flag, set: revasc_or_angio, domain: Procedure, window: [0, 30], require_lookback: false}}
   - {name: clinical_indication, domain: outcome, description: Indication for ECG, required: true, expected_completeness: 0.90,
      src: {type: derived, expr: "COALESCE(NULLIF(REGEXP_EXTRACT(ecg_read, 'indications?:[ ]*([^.;]{3,80})', 1), ''), CASE index_visit_concept_id WHEN 9203 THEN 'emergency' WHEN 262 THEN 'emergency' WHEN 9201 THEN 'inpatient' WHEN 9202 THEN 'outpatient' END)"}}
-  # ---------------- reference helpers (aux): PTB-XL diagnostic superclass from the confirmed read
-  - {name: ref_superclass, aux: true,
-     src: {type: derived, expr: "CASE WHEN ecg_read IS NULL THEN NULL WHEN st_elevation = 1 OR ecg_read RLIKE '(infarct|q waves)' THEN 'MI' WHEN bundle_branch_block <> 'NONE' OR ecg_read RLIKE '(av block|first degree|wpw|fascicular block)' THEN 'CD' WHEN ventricular_hypertrophy = 1 OR atrial_enlargement = 1 THEN 'HYP' WHEN st_depression = 1 OR t_wave_abnormality = 1 THEN 'STTC' WHEN ecg_read RLIKE '(normal ecg|normal electrocardiogram|within normal limits|normal sinus rhythm)' THEN 'NORM' ELSE 'OTHER' END"}}
+  # ---------------- reference helpers (aux)
   - {name: ref_stemi, aux: true, src: {type: derived, expr: "CASE WHEN clinical_diagnosis_stemi = 1 THEN 1 ELSE 0 END"}}
   - {name: ref_af, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification = 'AFIB' THEN 1 ELSE 0 END"}}
-  - {name: ref_vt, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification = 'VT' THEN 1 ELSE 0 END"}}
   - {name: ref_af_any, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification IN ('AFIB', 'AFLT') THEN 1 ELSE 0 END"}}
   - {name: ref_acute_mi, aux: true, src: {type: derived, expr: "CASE WHEN clinical_diagnosis_stemi = 1 OR clinical_diagnosis_nstemi = 1 THEN 1 ELSE 0 END"}}
-  - {name: ref_nsr, aux: true, src: {type: derived, expr: "CASE WHEN rhythm_classification IS NULL THEN NULL WHEN rhythm_classification = 'SR' THEN 1 ELSE 0 END"}}
 
 predictions:
   table: ecg_predictions
@@ -174,17 +171,16 @@ endpoints:
     - {id: stemi_sensitivity, label: "STEMI sensitivity", metric: sensitivity, pred: agent_stemi, ref: ref_stemi, positive: 1, goal: 0.92, direction: ge, phase1: null}
     - {id: af_sensitivity, label: "Atrial fibrillation / flutter sensitivity", metric: sensitivity, pred: agent_af, ref: ref_af_any, positive: 1, goal: 0.94, direction: ge, phase1: null}
   secondary:
-    - {id: stemi_specificity, label: "STEMI specificity", metric: specificity, pred: agent_stemi, ref: ref_stemi, positive: 1, goal: null, direction: ge, phase1: null}
-    - {id: af_specificity, label: "AF / flutter specificity", metric: specificity, pred: agent_af, ref: ref_af_any, positive: 1, goal: null, direction: ge, phase1: null}
-    - {id: acute_mi_sensitivity, label: "Acute MI sensitivity", metric: sensitivity, pred: agent_acute_mi, ref: ref_acute_mi, positive: 1, goal: null, direction: ge, phase1: null}
-    - {id: acute_mi_auc, label: "Acute MI AUROC", metric: auc, pred: agent_acute_mi_prob, ref: ref_acute_mi, goal: null, direction: ge, phase1: null}
-    - {id: stemi_auc, label: "STEMI AUROC", metric: auc, pred: agent_stemi_prob, ref: ref_stemi, goal: null, direction: ge, phase1: null}
-    - {id: af_auc, label: "AF / flutter AUROC", metric: auc, pred: agent_af_prob, ref: ref_af_any, goal: null, direction: ge, phase1: null}
+    # Goals carried over from the PTB-XL deck levels (set before training, 2026-10-14): acute MI sensitivity
+    # = the deck STEMI goal (0.92); specificity = the lowest deck accuracy goal (0.93, VT / BBB);
+    # AUROC = 0.93. The deck itself had no acute MI, specificity or AUROC endpoints.
+    - {id: stemi_specificity, label: "STEMI specificity", metric: specificity, pred: agent_stemi, ref: ref_stemi, positive: 1, goal: 0.93, direction: ge, phase1: null}
+    - {id: af_specificity, label: "AF / flutter specificity", metric: specificity, pred: agent_af, ref: ref_af_any, positive: 1, goal: 0.93, direction: ge, phase1: null}
+    - {id: acute_mi_sensitivity, label: "Acute MI sensitivity", metric: sensitivity, pred: agent_acute_mi, ref: ref_acute_mi, positive: 1, goal: 0.92, direction: ge, phase1: null}
+    - {id: acute_mi_auc, label: "Acute MI AUROC", metric: auc, pred: agent_acute_mi_prob, ref: ref_acute_mi, goal: 0.93, direction: ge, phase1: null}
+    - {id: stemi_auc, label: "STEMI AUROC", metric: auc, pred: agent_stemi_prob, ref: ref_stemi, goal: 0.93, direction: ge, phase1: null}
+    - {id: af_auc, label: "AF / flutter AUROC", metric: auc, pred: agent_af_prob, ref: ref_af_any, goal: 0.93, direction: ge, phase1: null}
     - {id: processing_speed, label: "Processing speed (median s / ECG)", metric: median, pred: runtime_s, goal: 3.0, direction: le, phase1: null}
-  not_applicable:             # deck endpoints this model does not produce; reported as N/A, never as failures
-    - {id: overall_accuracy, label: "Overall accuracy (PTB-XL superclass)", reason: "model outputs acute MI, STEMI and AF only, not PTB-XL superclasses", deck_goal: 0.95}
-    - {id: f1_macro, label: "Multi-class F1 (macro, superclass)", reason: "no superclass output", deck_goal: 0.94}
-    - {id: vt_sensitivity, label: "VT sensitivity", reason: "no ventricular tachycardia output", deck_goal: 0.93}
-    - {id: bbb_accuracy, label: "Bundle branch block accuracy", reason: "no bundle branch block output", deck_goal: 0.93}
-    - {id: nsr_accuracy, label: "Normal sinus rhythm accuracy", reason: "no sinus-rhythm output (AF head is not a rhythm classifier)", deck_goal: 0.95}
+  # PTB-XL deck indicators the new model does not produce (superclass accuracy, macro F1, VT, BBB,
+  # normal sinus rhythm) were removed on 2026-10-14; they are not reported.
   subgroups: [gender, age_group, race, site, pacemaker, clinical_indication]

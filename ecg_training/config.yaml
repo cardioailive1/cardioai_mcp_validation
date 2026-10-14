@@ -51,9 +51,10 @@ train:
 
 thresholds:
   # Fitted on the TUNING split only: highest threshold whose tuning sensitivity >= target.
-  # Targets carry headroom above the Phase 2 goals (STEMI 0.92, AF 0.94, acute MI 0.90): success
+  # Targets carry headroom above the Phase 2 goals (STEMI 0.92, AF 0.94, acute MI 0.92): success
   # needs the LOWER 95% CI bound to clear the goal, so a threshold tuned to land exactly on the
-  # goal fails about half the time. The cost is specificity; review it on the tuning split.
-  acute_mi: {target_sensitivity: 0.94}
+  # goal fails about half the time. The cost is specificity (goal 0.93 for STEMI and AF); review it on the
+  # tuning split before the test set is opened.
+  acute_mi: {target_sensitivity: 0.96}
   stemi: {target_sensitivity: 0.96}
   af: {target_sensitivity: 0.97}
