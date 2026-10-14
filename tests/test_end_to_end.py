@@ -131,7 +131,10 @@ def test_endpoints_evaluate(built):
             assert ep.set_index("endpoint").loc["chamber_size", "estimate"] == ep.set_index("endpoint").loc["chamber_size", "estimate"]  # not NaN
         if k == "ecg":
             assert {"stemi_sensitivity", "af_sensitivity"} <= set(ep[ep.tier == "primary"].endpoint)
-            assert len(ep[ep.tier == "not_applicable"]) == 5
+            assert ep[ep.tier == "not_applicable"].empty                      # PTB-XL-only indicators removed
+            goals = ep.set_index("endpoint").deck_goal
+            assert goals[["acute_mi_sensitivity", "stemi_specificity", "af_specificity", "acute_mi_auc", "stemi_auc",
+                          "af_auc"]].notna().all()
             assert not ep[ep.tier != "not_applicable"].estimate.isna().all()
         ep.to_csv(os.path.join(ROOT, "exports", "synthetic_test", f"{k}_endpoints_SIMULATED.csv"), index=False)
 
