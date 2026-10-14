@@ -128,6 +128,16 @@ def _ds(img, series_uid, desc, number, pos, orient, px, extra):
     return ds
 
 
+def _save(ds, buf):
+    """pydicom 3 (Python >= 3.10) and pydicom 2 (CI on Python 3.9) write APIs."""
+    import pydicom
+    if int(pydicom.__version__.split(".")[0]) >= 3:
+        ds.save_as(buf, enforce_file_format=True)
+    else:
+        ds.is_little_endian, ds.is_implicit_VR = True, False
+        ds.save_as(buf, write_like_original=False)
+
+
 def dicom_zip_cine_only(cine) -> bytes:
     """A study without LGE (cine + localisers only)."""
     return dicom_zip(None, cine)
@@ -164,7 +174,7 @@ def dicom_zip(lge, cine=None, distractors=True) -> bytes:
     with zipfile.ZipFile(buf, "w") as z:
         for i, ds in enumerate(files):
             b = io.BytesIO()
-            ds.save_as(b, enforce_file_format=True)
+            _save(ds, b)
             z.writestr(f"IMG{i:05d}.dcm", b.getvalue())
         z.writestr("DICOMDIR.txt", "not dicom")
     return buf.getvalue()
