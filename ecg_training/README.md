@@ -36,6 +36,22 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
 7. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Manifests and per-ECG predictions stay in MCP.
 8. **Run Phase 2 on the locked cohort** with the same runtime and bundle (step 7d of the runbook). Then add the external public test: MIMIC-IV-ECG for acute MI, and CODE-15 or Chapman-Shaoxing for AF.
 
+## Serving on Vertex (`serve/`)
+
+`serve/predictor.py` runs the same `runtime/` code as training. It **refuses to start** in three cases:
+- its runtime fingerprint differs from the model card;
+- `weights.pt` doesn't match the model card's hash;
+- the weights don't load strictly.
+
+Each answer carries `runtime_fingerprint` and `weights_sha256`. The app checks both against its lock file and refuses (409) on any mismatch.
+
+```bash
+gsutil cp weights.pt thresholds.json model_card.json gs://<bucket>/ecg/v1/
+BUNDLE_URI=gs://<bucket>/ecg/v1 IMAGE_TAG=v1 ecg_training/serve/deploy.sh    # builds from the repo root
+```
+
+The request is `{"instances": [{"signal": n_leads x N, "fs": Hz, "leads": [...], "units": "mV"}]}`. The container does all preprocessing, so callers send the raw recording.
+
 ## Label definitions (config.yaml)
 
 | Head | Positive | Negative | Not used (masked) |
