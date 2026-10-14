@@ -73,7 +73,7 @@ def _site_held_out(site, cfg: dict) -> bool:
     return h < float(sp.get("heldout_site_fraction", 0.0))
 
 
-def assign_splits(d: pd.DataFrame, cfg: dict, exclude_persons: Iterable[int] = ()) -> pd.DataFrame:
+def assign_splits(d: pd.DataFrame, cfg: dict, exclude_persons: Iterable[int] = (), date_col: str = "ecg_date") -> pd.DataFrame:
     """Patient-disjoint split.
 
     test_site : every ECG at a held-out site; those patients appear nowhere else
@@ -84,16 +84,16 @@ def assign_splits(d: pd.DataFrame, cfg: dict, exclude_persons: Iterable[int] = (
     sp = cfg["splits"]
     tune_start, test_start = pd.Timestamp(sp["tune_start"]), pd.Timestamp(sp["test_start"])
     d = d.copy()
-    d["ecg_date"] = pd.to_datetime(d.ecg_date)
+    d[date_col] = pd.to_datetime(d[date_col])
     d["_held_site"] = d.site.map(lambda s: _site_held_out(s, cfg))
     site_pts = set(d.loc[d._held_site, "person_id"])
     site_part = d[d._held_site].assign(split="test_site")
     rest = d[~d.person_id.isin(site_pts)].copy()
-    first = rest.groupby("person_id").ecg_date.transform("min")
+    first = rest.groupby("person_id")[date_col].transform("min")
     rest["split"] = np.where(first < tune_start, "train", np.where(first < test_start, "tune", "test_time"))
     in_window = np.select([rest.split == "train", rest.split == "tune"],
-                          [rest.ecg_date < tune_start, (rest.ecg_date >= tune_start) & (rest.ecg_date < test_start)],
-                          default=rest.ecg_date >= test_start)
+                          [rest[date_col] < tune_start, (rest[date_col] >= tune_start) & (rest[date_col] < test_start)],
+                          default=rest[date_col] >= test_start)
     rest = rest[in_window]
     excl = set(exclude_persons)
     rest = rest[~(rest.split.isin(["train", "tune"]) & rest.person_id.isin(excl))]
@@ -104,7 +104,7 @@ def assign_splits(d: pd.DataFrame, cfg: dict, exclude_persons: Iterable[int] = (
         capped = shuffled[shuffled.groupby("person_id").cumcount() < cap]
         rest = pd.concat([capped, rest[~trn]])
     out = pd.concat([rest, site_part]).drop(columns="_held_site")
-    return out.sort_values(["split", "person_id", "ecg_date"]).reset_index(drop=True)
+    return out.sort_values(["split", "person_id", date_col]).reset_index(drop=True)
 
 
 def check_disjoint(m: pd.DataFrame) -> dict:

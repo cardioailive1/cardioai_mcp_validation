@@ -6,4 +6,5 @@ Mayo Clinic Platform Discover workspace (SparkSQL), and computes the
 pre-specified validation endpoints.
 """
 __version__ = "0.1.0"
-COHORTS = ["echo", "ecg", "cad", "risk", "longitudinal"]
+COHORTS = ["echo", "ecg", "cad", "risk", "longitudinal"]          # the deck's five Phase 1 agents
+EXTRA_COHORTS = ["mri"]                                            # agents added after the deck (no deck targets)

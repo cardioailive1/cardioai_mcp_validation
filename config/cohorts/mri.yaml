@@ -1,0 +1,185 @@
+# =============================================================================
+# Cardiac MRI Infarct Validation Cohort — CA-AGENTS-VAL-PHASE2-MRI
+# Agent under test: CardioAI MRI model = MobileNetV3-UNet (mri_training/), short-axis LGE (+ cine).
+#   Outputs: infarct yes/no, infarct size (% LV), transmurality per AHA segment, MVO, LVEF, and the
+#   STEMI mimics / complications that need further work-up (non-ischaemic LGE pattern, LV thrombus,
+#   LV aneurysm, low LVEF).
+# Trained on Mayo CMR inside MCP (MobileNetV3 export approved), so this is an INTERNAL held-out
+#   validation: studies from 2021 on (training uses earlier years), and these patients are excluded
+#   from training (mri_training/config.yaml: exclude_persons_table). Lock this cohort BEFORE training.
+#   Report a public external set alongside (EMIDEC test set for infarct size / MVO).
+# Not one of the deck's five Phase 1 agents: no `expected` block, and not in cardioai_mcp.COHORTS
+#   (deck cohorts); listed in cardioai_mcp.EXTRA_COHORTS. Goals below are PROPOSED for the clinical
+#   lead to confirm before the cohort is locked.
+# =============================================================================
+key: mri
+study_id: CA-AGENTS-VAL-PHASE2-MRI
+title: Cardiac MRI Infarct and STEMI Work-up Validation Cohort
+agent: mri_agent
+phase1_source: "Mayo CMR before 2021 (mri_training) + public EMIDEC / MyoPS / ACDC for segmentation pre-training"
+target_n: 1000
+target_sites: 3
+
+calendar:
+  index_start_mri: '2021-01-01'   # = mri_training splits.test_start (temporal hold-out)
+
+index:
+  description: "adult contrast-enhanced cardiac MRI (CPT 75561 / 75563: LGE needs gadolinium) in the study window"
+  # Prefer the CMR after a STEMI, then after another acute MI, then the earliest.
+  one_per_person: "CASE WHEN c.stemi_recent = 1 THEN 0 WHEN c.ami_recent = 1 THEN 1 ELSE 2 END, c.index_date"
+  one_per_person_label: "prefer CMR within 30 days after STEMI > other acute MI, then earliest"
+  keep_columns: [index_visit_concept_id, stemi_recent, ami_recent]
+  sql: |
+    WITH cmr AS (
+      SELECT po.person_id, CAST(po.procedure_date AS DATE) AS index_date, po.visit_occurrence_id
+      FROM {{cdm}}.procedure_occurrence po
+      WHERE po.procedure_concept_id IN {{cs:cardiac_mri_contrast}} OR po.procedure_source_concept_id IN {{cs:cardiac_mri_contrast}}
+    ),
+    base AS (
+      SELECT e.person_id, e.index_date, MAX(COALESCE(v.care_site_id, p.care_site_id)) AS care_site_id,
+             MIN(v.visit_concept_id) AS index_visit_concept_id
+      FROM cmr e JOIN {{cdm}}.person p ON p.person_id = e.person_id
+      LEFT JOIN {{cdm}}.visit_occurrence v ON v.visit_occurrence_id = e.visit_occurrence_id
+      WHERE e.index_date BETWEEN CAST('{{index_start_mri}}' AS DATE) AND CAST('{{index_end}}' AS DATE)
+        AND YEAR(e.index_date) - p.year_of_birth >= {{min_age}}
+      GROUP BY e.person_id, e.index_date
+    ),
+    dx AS (   -- MI diagnosis in the 30 days before the CMR (enrichment strata only, not the reference)
+      SELECT b.person_id, b.index_date,
+        MAX(CASE WHEN co.condition_concept_id IN {{cs:stemi}} OR co.condition_source_concept_id IN {{cs:stemi}} THEN 1 ELSE 0 END) AS stemi_recent,
+        MAX(CASE WHEN co.condition_concept_id IN {{cs:mi_acute}} OR co.condition_source_concept_id IN {{cs:mi_acute}} THEN 1 ELSE 0 END) AS ami_recent
+      FROM base b JOIN {{cdm}}.condition_occurrence co ON co.person_id = b.person_id
+      WHERE DATEDIFF(b.index_date, co.condition_start_date) BETWEEN 0 AND 30
+      GROUP BY b.person_id, b.index_date
+    )
+    SELECT b.*, COALESCE(dx.stemi_recent, 0) AS stemi_recent, COALESCE(dx.ami_recent, 0) AS ami_recent
+    FROM base b LEFT JOIN dx ON dx.person_id = b.person_id AND dx.index_date = b.index_date
+
+exclusions:
+  - name: "no CMR report (reference standard missing)"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.note n WHERE n.person_id = c.person_id
+                  AND DATEDIFF(n.note_date, c.index_date) BETWEEN 0 AND 7
+                  AND n.note_title RLIKE '(?i)(cardiac mri|cardiac mr[^a-z]|cmr|cardiac magnetic|mri heart|mr heart)')
+  - name: "< 365 days of observation before index"
+    where: |
+      NOT EXISTS (SELECT 1 FROM {{cdm}}.observation_period op WHERE op.person_id = c.person_id
+                  AND op.observation_period_start_date <= DATE_SUB(c.index_date, {{min_prior_observation_days}})
+                  AND op.observation_period_end_date >= c.index_date)
+
+# Case-enriched: post-STEMI CMR is the intended use; other acute MI and non-MI referrals
+# (myocarditis, cardiomyopathy work-up) supply STEMI mimics and infarct-negative studies.
+# Inverse-probability sampling weights restore natural prevalence for overall accuracy.
+sampling:
+  method: "case-enriched stratified sampling (recent STEMI / other recent acute MI / other referral)"
+  strata_expr: |
+    CASE WHEN e.stemi_recent = 1 THEN 'stemi' WHEN e.ami_recent = 1 THEN 'other_ami' ELSE 'other' END
+  quotas: {stemi: 450, other_ami: 200, other: 350}
+
+elements:
+  # ---------------- DEMOGRAPHICS (4)
+  - {name: age, domain: demographics, description: Patient age at CMR, required: true, expected_completeness: 1.00, src: {type: person, field: age}}
+  - {name: gender, domain: demographics, description: Male / Female, required: true, expected_completeness: 1.00, src: {type: person, field: gender}}
+  - {name: race, domain: demographics, description: Race / ethnicity, required: true, expected_completeness: 0.95, src: {type: person, field: race}}
+  - {name: bmi, domain: demographics, description: Body mass index, required: false, expected_completeness: 0.85, src: {type: measurement, set: bmi, window: [-365, 30], range: [10, 90]}}
+  # ---------------- INDEX EVENT (5)
+  - {name: recent_stemi, domain: index_event, description: STEMI diagnosis in the 30 days before CMR, required: true, expected_completeness: 1.00,
+     src: {type: flag, set: stemi, window: [-30, 0], require_lookback: false}}
+  - {name: recent_acute_mi, domain: index_event, description: Acute MI (any) in the 30 days before CMR, required: true, expected_completeness: 1.00,
+     src: {type: flag, set: mi_acute, window: [-30, 0], require_lookback: false}}
+  - {name: days_from_mi, domain: index_event, description: Days from the acute MI to CMR, required: false, expected_completeness: 0.50,
+     src: {type: days_since, set: mi_acute, window: [-30, 0]}}
+  - {name: recent_pci, domain: index_event, description: PCI in the 30 days before CMR, required: false, expected_completeness: 0.95,
+     src: {type: flag, set: pci, domain: Procedure, window: [-30, 0], require_lookback: false}}
+  - {name: peak_troponin, domain: index_event, description: Peak troponin in the 30 days before CMR, required: false, expected_completeness: 0.50,
+     src: {type: measurement, set: troponin, window: [-30, 0], pick: max, range: [0, 1000000]}}
+  # ---------------- CLINICAL HISTORY (6)
+  - {name: prior_mi, domain: clinical_history, description: Myocardial infarction more than 30 days before CMR, required: true, expected_completeness: 0.95,
+     src: {type: flag, set: mi_any, window: [-36500, -31]}}
+  - {name: heart_failure, domain: clinical_history, description: Heart failure, required: true, expected_completeness: 0.95, src: {type: flag, set: heart_failure, window: [-36500, 0]}}
+  - {name: hypertension, domain: clinical_history, description: Hypertension, required: true, expected_completeness: 0.95, src: {type: flag, set: hypertension, window: [-36500, 0]}}
+  - {name: diabetes, domain: clinical_history, description: Diabetes mellitus, required: true, expected_completeness: 0.95, src: {type: flag, set: diabetes, window: [-36500, 0]}}
+  - {name: prior_revascularization, domain: clinical_history, description: PCI or CABG more than 30 days before CMR, required: false, expected_completeness: 0.95,
+     src: {type: flag, set: prior_revasc, domain: Procedure, window: [-36500, -31]}}
+  - {name: egfr, domain: clinical_history, description: "eGFR before gadolinium (mL/min/1.73 m2)", required: false, expected_completeness: 0.80,
+     src: {type: measurement, set: egfr, window: [-90, 0], range: [2, 200]}}
+  # ---------------- helper: CMR report text (signed report) — aux
+  - {name: cmr_report, aux: true, src: {type: modality, modality: mri, column: report_text, window: [0, 7],
+                                        fallback: {type: note_text, note: cmr_report_title, window: [0, 7], max_chars: 4000}}}
+  # ---------------- CMR REFERENCE (from the signed report; same rules as mri_training/config.yaml labels)
+  - {name: ref_infarct, domain: diagnostic, role: reference, description: "Ischaemic (infarct) LGE in the report", required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN cmr_report IS NULL OR LENGTH(cmr_report) < 20 THEN NULL WHEN LOWER(cmr_report) RLIKE '(ischa?emic (pattern|scar|lge|enhancement)|(subendocardial|transmural) (late )?(gadolinium )?enhancement|(consistent|compatible) with (an? )?(prior |remote |old |acute |recent )?(myocardial )?infarct|infarct(ion)? (scar|size)|lge in (an? )?(lad|lcx|rca|coronary) (territory|distribution))' THEN 1 WHEN LOWER(cmr_report) RLIKE '(no (evidence of )?(late gadolinium enhancement|lge|delayed (myocardial )?enhancement|myocardial (scar|fibrosis|infarct))|without (late gadolinium )?enhancement)' OR LOWER(cmr_report) RLIKE '((mid[- ]?wall|midmyocardial|mid-myocardial|subepicardial|epicardial|patchy|non[- ]?isch(a)?emic|nonisch(a)?emic|insertion[- ]point) (late )?(gadolinium )?enhancement|myocarditis|sarcoid|amyloid|hypertrophic cardiomyopathy)' THEN 0 ELSE NULL END"}}
+  - {name: ref_nonischemic_lge, domain: diagnostic, role: reference, description: "Non-ischaemic LGE pattern (myocarditis, cardiomyopathy, infiltrative)", required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN cmr_report IS NULL OR LENGTH(cmr_report) < 20 THEN NULL WHEN LOWER(cmr_report) RLIKE '((mid[- ]?wall|midmyocardial|mid-myocardial|subepicardial|epicardial|patchy|non[- ]?isch(a)?emic|nonisch(a)?emic|insertion[- ]point) (late )?(gadolinium )?enhancement|myocarditis|sarcoid|amyloid|hypertrophic cardiomyopathy)' THEN 1 WHEN ref_infarct IS NOT NULL THEN 0 ELSE NULL END"}}
+  - {name: ref_mvo, domain: diagnostic, role: reference, description: Microvascular obstruction in the report, required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN cmr_report IS NULL OR LENGTH(cmr_report) < 20 THEN NULL WHEN LOWER(cmr_report) RLIKE 'no (evidence of )?(microvascular obstruction|mvo|no[- ]reflow)' THEN 0 WHEN LOWER(cmr_report) RLIKE '(microvascular obstruction|(^|[^a-z])mvo([^a-z]|$)|no[- ]reflow)' THEN 1 ELSE 0 END"}}
+  - {name: ref_lv_thrombus, domain: diagnostic, role: reference, description: LV thrombus in the report, required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN cmr_report IS NULL OR LENGTH(cmr_report) < 20 THEN NULL WHEN LOWER(cmr_report) RLIKE 'no (evidence of )?(lv |left ventricular |apical |intracardiac |ventricular )?(mural )?thromb' THEN 0 WHEN LOWER(cmr_report) RLIKE '(lv|left ventricular|apical|ventricular) (mural )?thromb' THEN 1 ELSE 0 END"}}
+  - {name: ref_lv_aneurysm, domain: diagnostic, role: reference, description: LV aneurysm or pseudoaneurysm in the report, required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN cmr_report IS NULL OR LENGTH(cmr_report) < 20 THEN NULL WHEN LOWER(cmr_report) RLIKE 'no (evidence of )?(lv |left ventricular |apical )?(pseudo)?aneurysm' THEN 0 WHEN LOWER(cmr_report) RLIKE '(lv|left ventricular|apical|true|false|pseudo) ?aneurysm' THEN 1 ELSE 0 END"}}
+  - {name: lvef_report, domain: diagnostic, role: reference, description: LVEF stated in the CMR report (%), required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(LOWER(cmr_report), '(lvef|ejection fraction)[^0-9]{0,25}([1-8][0-9]([.][0-9])?) ?%', 2), '') AS DOUBLE)"}}
+  - {name: infarct_size_report, domain: diagnostic, role: reference, description: Infarct size stated in the report (% LV), required: false, expected_completeness: 0.40,
+     src: {type: derived, expr: "CAST(NULLIF(REGEXP_EXTRACT(LOWER(cmr_report), '(infarct size|scar burden|lge burden|extent of (late )?enhancement)[^0-9]{0,25}([0-9]{1,2}([.][0-9])?) ?%', 3), '') AS DOUBLE)"}}
+  # ---------------- OUTCOMES after CMR (MACE, 1 year)
+  - {name: death_1y, domain: outcome, description: Death within 1 year, required: true, expected_completeness: 0.95, src: {type: death, window: [1, 365]}}
+  - {name: recurrent_mi_1y, domain: outcome, description: Acute MI admission 31-365 days after CMR, required: true, expected_completeness: 0.90,
+     src: {type: outcome, set: mi_acute, window: [31, 365], visit_concepts: [9201, 262, 9203]}}
+  - {name: hf_hospitalisation_1y, domain: outcome, description: Heart failure admission within 1 year, required: true, expected_completeness: 0.90,
+     src: {type: outcome, set: hf_acute, window: [1, 365], visit_concepts: [9201, 262]}}
+  - {name: ventricular_arrhythmia_1y, domain: outcome, description: Ventricular tachycardia / fibrillation within 1 year, required: false, expected_completeness: 0.90,
+     src: {type: outcome, set: ventricular_tachycardia, window: [1, 365]}}
+  - {name: stroke_1y, domain: outcome, description: Stroke within 1 year (LV thrombus embolism), required: false, expected_completeness: 0.90,
+     src: {type: outcome, set: stroke, window: [1, 365]}}
+  - {name: icd_implant_1y, domain: outcome, description: ICD / pacemaker implant within 1 year, required: false, expected_completeness: 0.90,
+     src: {type: outcome, set: pacemaker_icd_implant, domain: Procedure, window: [1, 365]}}
+  - {name: mace_1y, domain: outcome, role: outcome, description: "MACE within 1 year (death, recurrent MI, HF admission, ventricular arrhythmia, stroke)", required: true, expected_completeness: 0.90,
+     src: {type: derived, expr: "CASE WHEN death_1y = 1 OR recurrent_mi_1y = 1 OR hf_hospitalisation_1y = 1 OR ventricular_arrhythmia_1y = 1 OR stroke_1y = 1 THEN 1 WHEN death_1y IS NULL OR recurrent_mi_1y IS NULL OR hf_hospitalisation_1y IS NULL THEN NULL ELSE 0 END"}}
+
+predictions:
+  table: mri_predictions
+  # Produced with the locked bundle via mri_training.runtime.pipeline.analyse + interpret (the code the
+  # serving container runs); thresholds and red-flag rules from the model card.
+  columns:
+    agent_infarct_prob: "P(ischaemic LGE / infarct)"
+    agent_infarct: "0/1 at the locked threshold"
+    agent_nonischemic_prob: "P(non-ischaemic LGE pattern)"
+    agent_nonischemic: "0/1 at the locked threshold"
+    agent_thrombus_prob: "P(LV thrombus)"
+    agent_thrombus: "0/1 at the locked threshold"
+    agent_aneurysm_prob: "P(LV aneurysm)"
+    agent_aneurysm: "0/1 at the locked threshold"
+    agent_infarct_size_pct: "infarct size, % of LV myocardium (segmentation)"
+    agent_mvo_pct: "MVO, % of LV myocardium"
+    agent_mvo: "0/1: red-flag rule mvo_present"
+    agent_lvef: "LVEF % from cine (NULL when no short-axis cine)"
+    agent_red_flags: "number of red flags raised"
+    runtime_s: "seconds per study"
+    runtime_fingerprint: "mri_training.runtime.fingerprint() (must equal the model card)"
+  known_limitations:
+    - "Internal validation: same institution as training, separated by time (2021+) and patient. Report the EMIDEC test set alongside for infarct size and MVO against expert contours."
+    - "The reference is the signed CMR report (reader's qualitative call); infarct size is stated in a minority of reports, so its agreement endpoint uses the subset where it is stated, plus the reader-contoured test studies in the model card."
+    - "Transmurality per AHA segment is compared with reader contours in the model card (test_time), not with reports, which rarely state all 16 segments."
+    - "LV thrombus and aneurysm are rare: their sensitivity estimates will have wide intervals at this N; reported, not powered."
+
+endpoints:
+  # PROPOSED goals (clinical lead to confirm before locking)
+  primary:
+    - {id: infarct_sensitivity, label: "Infarct (ischaemic LGE) sensitivity", metric: sensitivity, pred: agent_infarct, ref: ref_infarct, positive: 1, goal: 0.90, direction: ge, phase1: null}
+    - {id: infarct_specificity, label: "Infarct (ischaemic LGE) specificity", metric: specificity, pred: agent_infarct, ref: ref_infarct, positive: 1, goal: 0.85, direction: ge, phase1: null}
+    - {id: lvef_mae, label: "LVEF mean absolute error vs report (EF points)", metric: mae, pred: agent_lvef, ref: lvef_report, goal: 5.0, direction: le, phase1: null}
+  secondary:
+    - {id: infarct_auc, label: "Infarct AUROC", metric: auc, pred: agent_infarct_prob, ref: ref_infarct, goal: null, direction: ge, phase1: null}
+    - {id: infarct_size_mae, label: "Infarct size MAE vs report (% LV, where stated)", metric: mae, pred: agent_infarct_size_pct, ref: infarct_size_report, goal: 5.0, direction: le, phase1: null}
+    - {id: infarct_size_correlation, label: "Infarct size correlation vs report (Pearson r)", metric: pearson, pred: agent_infarct_size_pct, ref: infarct_size_report, goal: null, direction: ge, phase1: null}
+    - {id: lvef_correlation, label: "LVEF correlation vs report (Pearson r)", metric: pearson, pred: agent_lvef, ref: lvef_report, goal: 0.85, direction: ge, phase1: null}
+    - {id: mvo_sensitivity, label: "MVO sensitivity", metric: sensitivity, pred: agent_mvo, ref: ref_mvo, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: mvo_specificity, label: "MVO specificity", metric: specificity, pred: agent_mvo, ref: ref_mvo, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: nonischemic_sensitivity, label: "Non-ischaemic LGE (STEMI mimic) sensitivity", metric: sensitivity, pred: agent_nonischemic, ref: ref_nonischemic_lge, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: nonischemic_specificity, label: "Non-ischaemic LGE specificity", metric: specificity, pred: agent_nonischemic, ref: ref_nonischemic_lge, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: thrombus_sensitivity, label: "LV thrombus sensitivity", metric: sensitivity, pred: agent_thrombus, ref: ref_lv_thrombus, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: aneurysm_sensitivity, label: "LV aneurysm sensitivity", metric: sensitivity, pred: agent_aneurysm, ref: ref_lv_aneurysm, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: mace_auc_infarct_size, label: "1-year MACE discrimination by infarct size (AUROC)", metric: auc, pred: agent_infarct_size_pct, ref: mace_1y, goal: null, direction: ge, phase1: null}
+    - {id: processing_speed, label: "Processing speed (median s / study)", metric: median, pred: runtime_s, goal: 60, direction: le, phase1: null}
+    - {id: data_completeness, label: "Data completeness (required elements)", metric: completeness, goal: 0.95, direction: ge, phase1: null}
+  subgroups: [gender, age_group, race, site, recent_stemi]

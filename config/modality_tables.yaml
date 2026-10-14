@@ -60,6 +60,20 @@ echo:
     fps: 50                  # done by the pipeline (resampling)
     pixel_spacing: DICOM SequenceOfUltrasoundRegions.PhysicalDeltaX (needed for EDV / chamber size)
 
+mri:
+  enabled: false
+  table: "{modality}.cmr_study"        # PLACEHOLDER: one row per cardiac MRI study
+  columns:
+    person_id: person_id
+    study_id: study_uid
+    study_datetime: study_datetime
+    dicom_uri: dicom_path               # folder or zip of the study's DICOM files in workspace storage
+    report_text: report_text            # final signed CMR report (else the NOTE fall-back below)
+  requirements:            # MRI agent input spec (mri_training/, runtime 1.0.0)
+    sequences: [LGE short axis (required), cine SSFP short axis (for LVEF)]
+    min_slices: 3
+    pixel_mm: 1.25         # done by the pipeline (resample, 240 mm field of view)
+
 # NOTE table conventions used for NLP fall-backs (OMOP NOTE / NOTE_NLP).
 # Titles are matched case-insensitively with these regexes.
 notes:
@@ -70,3 +84,4 @@ notes:
   stress_report_title: '(?i)(stress|treadmill|exercise test|nuclear)'
   hf_note_title: '(?i)(cardio|heart failure|progress|discharge)'
   hp_note_title: '(?i)(history and physical|h&p|admission|consult|cardiology|progress)'
+  cmr_report_title: '(?i)(cardiac mri|cardiac mr[^a-z]|cmr|cardiac magnetic|mri heart|mr heart)'

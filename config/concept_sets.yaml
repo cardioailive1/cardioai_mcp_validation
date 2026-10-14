@@ -360,3 +360,14 @@ thyroid_disease:
 nuclear_stress:
   domain: Procedure
   include: [{vocab: CPT4, codes: ["78451", "78452", "78453", "78454", "78491", "78492", "78431", "78432", "78433"]}]
+
+# Cardiac MRI (MRI agent). 75557 morphology/function; 75559 with stress; 75561 with contrast (LGE);
+# 75563 with contrast + stress; 75565 velocity flow mapping (add-on).
+cardiac_mri:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["75557", "75559", "75561", "75563", "75565"]}
+cardiac_mri_contrast:
+  domain: Procedure
+  include:
+    - {vocab: CPT4, codes: ["75561", "75563"]}

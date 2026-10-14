@@ -1,0 +1,80 @@
+# =============================================================================
+# CardioAI MRI agent: MobileNetV3-UNet on short-axis cardiac MRI (LGE + cine), trained inside the
+# Mayo Clinic Platform workspace (MobileNetV3 encoder export approved under the CardioAI agreement).
+# Recorded in the model card; changing any value after the test set is opened = a new model version.
+# =============================================================================
+model_name: cardioai-mri-mobilenetv3-unet
+study_heads: [infarct, nonischemic_lge, lv_thrombus, lv_aneurysm]
+
+# Hybrid training data ---------------------------------------------------------------------------
+# Stage A (segmentation): public annotated sets + Mayo studies contoured by readers.
+# Stage B (whole model): Mayo report labels for every study + the contoured subset.
+public_datasets:
+  # label value in the dataset -> our class (0 bg, 1 LV pool, 2 myocardium, 3 scar, 4 MVO, 5 RV pool).
+  # `annotated` = classes the dataset labels. Other classes are unknown there and are counted under
+  # `merge` (class -> the annotated class whose label contains it; default background) by the marginal loss.
+  # CONFIRM label values against each dataset's README, and the licence for commercial use, before training.
+  emidec: {kind: lge, label_map: {1: 1, 2: 2, 3: 3, 4: 4}, annotated: [0, 1, 2, 3, 4]}                 # RV not drawn -> background
+  myops:  {kind: lge, label_map: {500: 1, 200: 2, 1220: 2, 2221: 3, 600: 5}, annotated: [0, 1, 2, 3, 5], merge: {4: 3}}   # MVO inside scar
+  acdc:   {kind: cine, label_map: {3: 1, 2: 2, 1: 5}, annotated: [0, 1, 2, 5], merge: {3: 2, 4: 2}}             # cine: scar looks like myocardium
+mayo_contours:
+  target_studies: 300               # reader-contoured Mayo LGE (+ cine ED/ES) studies, double-read 10%
+  # label file (manifest column label_uri, .npz): "lge" (S, H, W) in the slice order read_study() returns;
+  # optional "cine" (K, S, H, W) with "cine_phases" (K,) = phase indices (ED and ES)
+  lge: {annotated: [0, 1, 2, 3, 4, 5]}
+  cine: {annotated: [0, 1, 2, 5], merge: {3: 2, 4: 2}}
+
+labels:
+  # CMR report rules (confirmed final reports). NULL = not stated -> masked in the loss.
+  infarct_regex: '(?i)(ischa?emic (pattern|scar|lge|enhancement)|(subendocardial|transmural) (late )?(gadolinium )?enhancement|(consistent|compatible) with (an? )?(prior |remote |old |acute |recent )?(myocardial )?infarct|infarct(ion)? (scar|size)|lge in (an? )?(lad|lcx|rca|coronary) (territory|distribution))'
+  nonischemic_regex: '(?i)((mid[- ]?wall|midmyocardial|mid-myocardial|subepicardial|epicardial|patchy|non[- ]?isch(a)?emic|nonisch(a)?emic|insertion[- ]point) (late )?(gadolinium )?enhancement|myocarditis|sarcoid|amyloid|hypertrophic cardiomyopathy)'
+  no_lge_regex: '(?i)(no (evidence of )?(late gadolinium enhancement|lge|delayed (myocardial )?enhancement|myocardial (scar|fibrosis|infarct))|without (late gadolinium )?enhancement)'
+  thrombus_regex: '(?i)((lv|left ventricular|apical|ventricular) (mural )?thromb)'
+  thrombus_negation_regex: '(?i)(no (evidence of )?(lv |left ventricular |apical |intracardiac |ventricular )?(mural )?thromb)'
+  aneurysm_regex: '(?i)((lv|left ventricular|apical|true|false|pseudo) ?aneurysm)'
+  aneurysm_negation_regex: '(?i)(no (evidence of )?(lv |left ventricular |apical )?(pseudo)?aneurysm)'
+  mvo_regex: '(?i)(microvascular obstruction|\bmvo\b|no[- ]reflow)'
+  mvo_negation_regex: '(?i)(no (evidence of )?(microvascular obstruction|mvo|no[- ]reflow))'
+  lvef_regex: '(?i)(?:lvef|ejection fraction)[^0-9]{0,25}(?P<val>[1-8][0-9](?:\.[0-9])?) ?%'
+  infarct_size_regex: '(?i)(?:infarct size|scar burden|lge burden|extent of (?:late )?enhancement)[^0-9]{0,25}(?P<val>[0-9]{1,2}(?:\.[0-9])?) ?%'
+  thrombus_aneurysm_default_negative: true   # not mentioned in a full LGE report = absent (assumption, in model card)
+
+splits:
+  tune_start: '2020-01-01'
+  test_start: '2021-01-01'
+  heldout_sites: []
+  heldout_site_fraction: 0.15
+  max_ecgs_per_patient: 3           # max studies per patient (name shared with the ECG split code)
+  exclude_persons_table: mri_analytic_locked
+  seed: 20261014
+
+arch: {width: 1.0, dropout: 0.2}
+
+train:
+  stage_a_epochs: 60                # segmentation only (public + contoured Mayo)
+  stage_b_epochs: 30                # whole model (all Mayo studies)
+  lr: 0.0005
+  weight_decay: 0.0001
+  accumulate_studies: 8             # one study per step (variable slice count); gradient over 8 studies
+  patience: 8
+  seg_weight: 1.0
+  study_weight: 0.5
+  augment: {rotate_deg: 15, scale: [0.9, 1.1], gamma: [0.8, 1.25], noise: 0.02, flip: false}   # no flips: AHA handedness
+
+thresholds:
+  # Study heads: fitted on the TUNING split only, with headroom above the Phase 2 goals.
+  infarct: {target_sensitivity: 0.95}
+  nonischemic_lge: {target_sensitivity: 0.90}
+  lv_thrombus: {target_sensitivity: 0.90}
+  lv_aneurysm: {target_sensitivity: 0.90}
+
+# Findings that need further investigation. Clinical policy, NOT learned: values below are
+# placeholders for the CardioAI clinical lead to set before training; they are locked in the model card.
+red_flags:
+  large_infarct: {value: infarct_size_pct_lv, min: 10.0, text: "infarct >= 10% of LV mass (clinical lead to confirm cut-off)"}
+  mvo_present: {value: mvo_pct_lv, min: 0.5, text: "microvascular obstruction present"}
+  lvef_below_35: {value: lvef_pct, max: 35.0, text: "LVEF < 35%"}
+  lvef_below_50: {value: lvef_pct, max: 50.0, text: "LVEF < 50%"}
+  lv_thrombus: {prob: lv_thrombus, min: 0.5, text: "possible LV thrombus"}
+  lv_aneurysm: {prob: lv_aneurysm, min: 0.5, text: "possible LV aneurysm"}
+  nonischemic_pattern: {prob: nonischemic_lge, min: 0.5, text: "non-ischaemic LGE pattern: consider myocarditis, cardiomyopathy or infiltrative disease (STEMI mimic)"}

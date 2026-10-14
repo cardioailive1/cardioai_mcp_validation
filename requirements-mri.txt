@@ -1,0 +1,7 @@
+# Cardiac MRI model training (mri_training/). Inside the MCP GPU workspace install the CUDA build of torch
+# that matches the workspace driver; CI uses the CPU build.
+torch>=2.2
+scipy>=1.10
+pyarrow>=14          # manifest parquet
+pydicom>=2.4         # CMR studies (DICOM)
+nibabel>=5           # public annotated sets (EMIDEC, MyoPS, ACDC) in NIfTI
