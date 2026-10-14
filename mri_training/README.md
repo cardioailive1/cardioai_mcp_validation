@@ -39,7 +39,7 @@ GroupNorm replaces MobileNetV3's BatchNorm. Each training step is one study's sl
    summary(m, cfg["study_heads"]); m.to_parquet("/workspace/mri/manifest.parquet")
    ```
    The build refuses to continue if any patient appears in two splits.
-4. **Contour about 300 studies.** Readers draw LV pool, myocardium, scar, MVO and RV on the short-axis LGE, and LV pool, myocardium and RV on cine at ED and ES. Spread the studies across splits and over-sample post-STEMI studies. Save one `.npz` per study: `lge` (S, H, W) in `read_study()` slice order, and optionally `cine` (K, S, H, W) with `cine_phases` (K,). Put its path in the manifest's `label_uri` column.
+4. **Contour about 300 studies** with the annotation kit (`annotation/README.md`: worklist, pre-drawn outlines, tool options, reader protocol, checks and double-read agreement). Readers draw LV pool, myocardium, scar, MVO and RV on the short-axis LGE, and LV pool, myocardium and RV on cine at ED and ES. Spread the studies across splits and over-sample post-STEMI studies. Save one `.npz` per study: `lge` (S, H, W) in `read_study()` slice order, and optionally `cine` (K, S, H, W) with `cine_phases` (K,). Put its path in the manifest's `label_uri` column.
 5. **List the public sets** in a CSV with columns `source,image_uri,label_uri` (NIfTI).
 6. **Train on the GPU workspace:**
    ```bash
