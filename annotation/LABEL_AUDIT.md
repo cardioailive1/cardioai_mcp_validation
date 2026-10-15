@@ -5,7 +5,9 @@ Most training and test labels for the ECG and MRI agents are produced by code. R
 - **Tier 1, data scientists:** they check every sampled label against its source (the report text, the lab rows, the image), **without seeing the automatic value**, using written rule sheets.
 - **Tier 2, cardiologist:** they adjudicate everything the data scientists can't settle. That means every disagreement (automatic vs data scientist, or data scientist vs data scientist) and every case marked uncertain. The cardiologist also re-reads a **blinded 10% spot-check** of rows the data scientists settled, which measures whether the data scientists read the reports the way a cardiologist would.
 
-Data scientists do the volume and the cardiologist's time goes to the hard cases: typically 10–20% of the sample. Everything below runs **inside the MCP workspace**. The sheets contain report text and never leave it.
+Data scientists do the volume and the cardiologist's time goes to the hard cases: typically 10–20% of the sample.
+
+**Optional automatic first pass (tier 0).** An automatic auditor (`annotation/auto_audit.py`) can read the reports before the data scientists do. It either points them to the relevant sentences, or settles the reports where it agrees with the code, with a blinded share still checked by a person. See [Part 1b](#part-1b-optional-automatic-auditor). Everything below runs **inside the MCP workspace**. The sheets contain report text and never leave it.
 
 Code: `annotation/label_audit.py`. Numbers and pass rules: `annotation/tasks.yaml` → `label_audit`.
 
@@ -136,6 +138,44 @@ The output files are:
 - `audit_results.csv`: one row per label, with PPV and NPV and their CIs, kappa, the spot-check, hard-case accuracy and PASS/FAIL.
 - `resolved.csv`: every row × label, with who settled it.
 - `errors.csv`: the errors listed above.
+
+## Part 1b: optional automatic auditor
+
+This is a **second, independent reader** of the report text that runs before the data scientists. It doesn't reuse the training rules. It uses its own vocabulary (`tasks.yaml` → `label_audit.auto_terms`) and reads sentence by sentence, deciding with NegEx-style triggers whether each mention is:
+
+- **affirmed:** stated as present;
+- **negated:** "no", "without", "not seen", "resolved";
+- **uncertain:** "possible", "cannot be excluded", "suggestive of", "vs", "?";
+- **historical** (AF): "history of".
+
+It skips indication and history lines. A single hedged mention makes the whole sentence uncertain. It returns the same entries as the rule sheet: `1`, `0`, `U`, `NM` and numbers, where LVEF ranges and conflicting values give `U`. It runs in the workspace on the standard library only: no model, no network, and no text leaves MCP.
+
+Add `--auto` to the `sample` command:
+
+| `--auto` | What the data scientists read | What the automatic auditor does |
+|---|---|---|
+| `off` (default) | Every sampled report | Nothing |
+| `assist` | Every sampled report | Adds an **evidence** column to the sheets: the sentences that mention any label's words. This is not its answer, so the sheets stay blinded. Reading is faster |
+| `triage` | Reports it **cannot** settle, plus a **blinded 25%** of the ones it did settle (mixed in, indistinguishable) | Settles a report only when it agrees with the code on **every** label and number, and the report wasn't picked as hard, missing-value or rhythm-flagged. Also adds the evidence column |
+
+```bash
+python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --auto triage --out /workspace/audit/mri
+```
+
+In triage mode:
+
+- **Who reads what:**
+  - Every disagreement with the code, every `U`, every hard or flagged report and every missed number goes to the data scientists, then on to the cardiologist as before.
+  - The cardiologist's 10% spot-check also draws from the auto-settled reports.
+- **Extra pass rules:**
+  - On the verification reports, the automatic auditor must match the final reference on **≥ 98%** of entries for each label (`auto_audit.verify_min`).
+  - On the auto-settled reports the cardiologist spot-checks, it must match the cardiologist on ≥ 90%.
+
+  Below either level the label FAILs with "re-run with --auto assist". The automatic auditor isn't trusted for that label, so the audit is redone with every report read by a person.
+- **What gets reported:** `audit_results.csv` gains `auto_settled`, `auto_verify_n`, `auto_vs_reference` and `auto_vs_cardiologist`. Put them in the model card with the rest.
+- **The limit:** the automatic auditor and the code can share blind spots, because both read words. Agreement between them is evidence, not proof. That's why the verification share is blinded, random and scored, and why the rules for hard cases still send those reports to people.
+
+On synthetic reports, triage cut the data-scientist reading from about 530 reports to about 210. Real reports are more varied, so expect a smaller saving; the verification numbers show whether it was safe.
 
 ## Part 2: troponin, acute MI and STEMI (ECG)
 

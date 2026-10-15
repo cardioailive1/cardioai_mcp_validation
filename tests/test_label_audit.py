@@ -1,5 +1,6 @@
 """Label audit: blinded sampling, auditor sheets, cardiologist adjudication, PPV / NPV / kappa, troponin
 recomputation, RR irregularity for AF, and outline QC + grading."""
+import re
 import sys
 from pathlib import Path
 
@@ -60,7 +61,7 @@ def _fill(path, kinds, flip=()):
         aid = ws.cell(r, 1).value
         truth = T[kinds[aid]][1]
         for j, col in enumerate(head):
-            if col in ("audit_id", "text", "note"):
+            if col in ("audit_id", "text", "evidence", "note"):
                 continue
             v = truth.get(col)
             if aid in flip and col == "infarct" and v in (0, 1):
@@ -204,3 +205,79 @@ def test_outline_qc_and_grading(tmp_path):
     assert g.loc["s3", "action"].startswith("redraw") and "graded C" in g.loc["s3", "cardiologist_review"]
     assert "graded A despite automatic flags" in g.loc["s2", "cardiologist_review"]
     assert out["summary"]["C"] == 1 and (tmp_path / "qc" / "cardiologist_review.csv").exists()
+
+
+# --------------------------------------------------------------------------- automatic auditor
+def test_auto_auditor_reads_like_the_rule_sheet():
+    from annotation.auto_audit import AutoAuditor
+    aa = AutoAuditor("mri", CFG)
+    for k, (text, truth) in T.items():
+        r = aa.read(text)
+        assert {c: r[c] for c in truth} == truth, k
+    r = aa.read("Small area of subendocardial enhancement, possibly representing a small infarct. LVEF 55-60%.")
+    assert r["infarct"] == "U" and r["report_lvef"] == "U"                    # hedged sentence; range
+    r = aa.read("Indication: rule out myocarditis. No late gadolinium enhancement. Left atrial appendage thrombus. "
+                "LVEF 60 %. Echo LVEF 45%.")
+    assert (r["infarct"], r["nonischemic_lge"], r["lv_thrombus"], r["report_lvef"]) == (0.0, 0.0, 0.0, 60.0)
+    assert aa.read("No evidence of LV thrombus, aneurysm or microvascular obstruction.")["report_mvo"] == 0.0
+    assert aa.read("LGE in the inferolateral wall.")["infarct"] == "U"          # enhancement, pattern not named
+    e = AutoAuditor("ecg", CFG)
+    assert [e.read(t)["af"] for t in ["Atrial fibrillation with RVR", "Sinus rhythm. History of atrial fibrillation",
+                                      "Possible atrial flutter", "Sinus rhythm, no atrial fibrillation"]] == [1.0, 0.0, "U", 0.0]
+    assert "thrombus" in aa.evidence(T["E"][0]) and "LVEF" in aa.evidence(T["E"][0])
+    import inspect
+    import annotation.auto_audit as A
+    assert not re.search(r"^\s*(from|import) (mri|ecg)_training", inspect.getsource(A), re.M)   # independent of the training rules
+
+
+def test_triage_settles_agreeing_rows_and_verifies_a_blinded_share(tmp_path):
+    m = _manifest()
+    key = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="triage")
+    off = L.sample(m, "mri", ["ds1", "ds2"], CFG)
+    assert key.audit_id.tolist() == off.audit_id.tolist()                  # same sample, fewer rows to read
+    n_ds = (key.auditor_1 != "").sum()
+    assert n_ds < 0.6 * len(key)
+    settled = key[key.auto_settled]
+    assert abs(settled.ds_verify.mean() - CFG["auto_audit"]["verify_fraction"]) < 0.02
+    assert not key[key.picked.str.contains("hard:|missing:")].auto_settled.any()
+    k = m.set_index("study_id").kind
+    assert not any(k[s] == "E" for s in settled.study_id)                  # hedged thrombus never auto-settled
+    L.write_auditor_sheets(key, tmp_path, "mri", CFG)
+    sh = pd.read_excel(tmp_path / "sheet_ds1.xlsx", sheet_name="audit")
+    assert "evidence" in sh.columns and not any(c.startswith(("aa_", "auto_")) for c in sh.columns)
+    kinds = _kinds(tmp_path, m)
+    _fill(tmp_path / "sheet_ds1.xlsx", kinds)
+    _fill(tmp_path / "sheet_ds2.xlsx", kinds)
+    r1 = L.score(str(tmp_path), "mri", CFG, log=lambda s: None)
+    adj = pd.read_excel(r1["adjudication_sheet"], sheet_name="audit")
+    assert set(adj.audit_id) & set(key[key.auto_settled & ~key.ds_verify].audit_id)   # spot-check reaches auto rows
+    _fill(r1["adjudication_sheet"], kinds)
+    res = L.score(str(tmp_path), "mri", CFG, log=lambda s: None)["results"].set_index("column")
+    assert res.loc["lv_thrombus", "result"].startswith("FAIL")
+    for ok in ("infarct", "nonischemic_lge", "lv_aneurysm", "report_mvo", "report_lvef"):
+        assert res.loc[ok, "result"] == "PASS", (ok, res.loc[ok].to_dict())
+        assert res.loc[ok, "auto_vs_reference"] == 1.0 and res.loc[ok, "auto_verify_n"] > 0
+    assert res.loc["infarct", "auto_vs_cardiologist"] == 1.0
+
+
+def test_triage_fails_when_the_automatic_auditor_is_unreliable(tmp_path):
+    m = _manifest()
+    key = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="triage")
+    L.write_auditor_sheets(key, tmp_path, "mri", CFG)
+    kinds = _kinds(tmp_path, m)
+    for a in ("ds1", "ds2"):
+        _fill(tmp_path / f"sheet_{a}.xlsx", kinds)
+    k = pd.read_csv(tmp_path / "key.csv", dtype=str, keep_default_na=False)
+    ver = k.index[k.ds_verify == "True"][:10]                               # pretend it misread 10 verified rows
+    k.loc[ver, "aa_infarct"] = k.loc[ver, "aa_infarct"].map({"1.0": "0.0", "0.0": "1.0"}).fillna("U")
+    k.to_csv(tmp_path / "key.csv", index=False)
+    res = L.score(str(tmp_path), "mri", CFG, log=lambda s: None)["results"].set_index("column")
+    assert "automatic auditor" in res.loc["infarct", "result"] and res.loc["infarct", "auto_vs_reference"] < 0.98
+
+
+def test_assist_keeps_every_row_for_the_data_scientists(tmp_path):
+    key = L.sample(_manifest(), "mri", ["ds1"], CFG, auto="assist")
+    assert (key.auditor_1 == "ds1").all() and not key.auto_settled.any()
+    L.write_auditor_sheets(key, tmp_path, "mri", CFG)
+    sh = pd.read_excel(tmp_path / "sheet_ds1.xlsx", sheet_name="audit")
+    assert list(sh.columns[:3]) == ["audit_id", "text", "evidence"] and sh.evidence.notna().mean() > 0.9

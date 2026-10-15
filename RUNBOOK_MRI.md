@@ -92,12 +92,14 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 
 5. **Audit the automatic report labels** before any training. Data scientists check them first; the cardiologist adjudicates. The protocol is in [`annotation/LABEL_AUDIT.md`](annotation/LABEL_AUDIT.md).
    ```bash
-   python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --out /workspace/audit/mri
+   python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --auto triage --out /workspace/audit/mri
+   #   --auto: off (people read everything) | assist (relevant sentences shown) | triage (automatic auditor settles agreeing reports; 25% still verified)
    #   data scientists fill sheet_ds1.xlsx / sheet_ds2.xlsx (blinded: they never see the automatic labels)
    python -m annotation.label_audit score mri --dir /workspace/audit/mri    # -> adjudication_1.xlsx for the cardiologist
    #   cardiologist fills adjudication_1.xlsx (every disagreement and U, plus a blinded spot-check)
    python -m annotation.label_audit score mri --dir /workspace/audit/mri    # -> audit_results.csv: PASS / FAIL per label
    ```
+   - With `--auto triage`, the automatic auditor must also match the reference on at least 98% of the verification reports, or that label is re-audited with `--auto assist`.
    - Every label must PASS: PPV and NPV at least 0.95, with the lower 95% bound at least 0.90. Stated LVEF and infarct size must match in at least 98% of reports.
    - On a FAIL, fix the rule in `mri_training/config.yaml` → `labels`, rebuild the manifest and re-audit on a **fresh** sample (new `seed` in `annotation/tasks.yaml`).
    - Record the audit results and the rule version in the model card.

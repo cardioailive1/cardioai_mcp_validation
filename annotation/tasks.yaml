@@ -84,6 +84,40 @@ label_audit:
     rr_regular_cv: 0.08           # AF-labelled ECG with RR coefficient of variation below this -> flagged
     rr_irregular_cv: 0.20         # non-AF ECG with RR CV above this -> flagged (could also be ectopy)
   hedge: '\b(no|not|without|negative for|cannot (be )?(excluded?|ruled out)|can ?not exclude|possible|possibly|probable|probably|suspicious|suggestive|equivocal|questionable|history of|prior|previous|old|resolved|rule out|r/o|vs\.?|versus)\b'
+  auto_audit:                     # optional automatic first pass (sample --auto assist | triage)
+    verify_fraction: 0.25         # triage: share of auto-settled rows still read (blinded) by the data scientists
+    verify_min: 0.98              # automatic auditor vs data scientists on those rows, per label; below -> FAIL
+  auto_terms:                     # the automatic auditor's OWN vocabulary (independent of the training rules)
+    triggers:
+      pre_negation: '\b(no|not|without|negative for|free of|absence of|resolved|resolution of|no evidence of|no signs? of|ruled out)\b'
+      post_negation: '\b(not (seen|identified|present|demonstrated|visuali[sz]ed|detected)|(is|are|was|were) absent|absent|(has )?resolved|ruled out)\b'
+      pre_uncertain: '\b(possible|possibly|probable|probably|may|might|could|suspicious for|suspected|suggestive of|questionable|equivocal|cannot exclude|can ?not exclude|cannot rule out|consider|versus|vs\.?|r/o|rule out|query)\b'
+      post_uncertain: '((cannot|can ?not|could not) be (excluded|ruled out)|not (be )?excluded|(is|are) (possible|suspected|questioned)|\?)'
+      historical: '\b(history of|hx of|h/o|previous|prior history of|previously documented)\b'
+      terminators: '\b(but|however|although|though|except|apart from|aside from|whereas)\b|;'
+      pre_window_words: 8
+      post_window_words: 6
+    mri:
+      concepts:
+        lge: 'late gadolinium enhancement|\blge\b|delayed (myocardial )?enhancement|hyperenhancement|\benhancement\b|myocardial (scar|fibrosis)|\bscar\b'
+        ischemic: 'infarct(ion)?|\bmi\b|isch(a)?emic (pattern|scar|lge|enhancement)|\bsubendocardial\b|\btransmural\b|(lad|lcx|circumflex|rca) (territory|distribution)|coronary (territory|distribution)'
+        nonischemic: 'mid[- ]?wall|mid[- ]?myocardial|subepicardial|\bepicardial\b|\bpatchy\b|insertion[- ]point|non[- ]?isch(a)?emic|myocarditis|sarcoid(osis)?|amyloid(osis)?|hypertrophic cardiomyopathy|\bhcm\b'
+        lv_thrombus: 'thromb(us|i)\b'
+        lv_aneurysm: '(pseudo)?aneurysm'
+        report_mvo: 'microvascular obstruction|\bmvo\b|no[- ]reflow'
+      exclude:                    # sentences about other structures don't count for that label
+        lv_thrombus: 'left atri|\bla\b|appendage|\blaa\b|venous|vein|\bdvt\b|pulmonary'
+        lv_aneurysm: 'aort|septal aneurysm|atrial septal|sinus of valsalva|coronary'
+      values:
+        report_lvef: '\blvef\b|left ventricular ejection fraction|\bejection fraction\b|\bef\b'
+        report_infarct_size: 'infarct size|scar burden|lge burden|extent of (late )?(gadolinium )?enhancement|infarct (extent|burden)'
+      value_exclude:
+        report_lvef: '\b(rvef|right ventric|echo(cardiogra)?|previous|prior study|tte)\b'
+        report_infarct_size: '\bgrams?\b|\bg\b'
+    ecg:
+      concepts:
+        af: 'atrial fibrillation|atrial flutter|\ba-?fib\b|\bafl\b'
+      values: {}
   outlines:
     double_grade_fraction: 0.10
     cardiologist_spot_check_A: 0.10

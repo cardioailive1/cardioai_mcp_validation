@@ -6,6 +6,9 @@ Everything stays in the MCP workspace (the sheets contain report text).
 Report-derived labels (MRI report labels, ECG AF from confirmed reads)
     python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --out /workspace/audit/mri
         -> key.csv (automatic labels: NOT for the auditors), sheet_ds1.xlsx, sheet_ds2.xlsx (blinded)
+        add --auto assist  : the automatic auditor (annotation/auto_audit.py) adds the relevant sentences
+            --auto triage  : it also settles rows where it agrees with the code; the data scientists read the rest
+                             plus a blinded 25% of those rows to verify it
     ... data scientists fill their sheets by the rule sheet (1 / 0 / U; numbers as stated) ...
     python -m annotation.label_audit score mri --dir /workspace/audit/mri
         -> adjudication_1.xlsx for the cardiologist (every disagreement, every U, plus a blinded spot-check)
@@ -110,9 +113,21 @@ def _hard_mask(text: pd.Series, keywords: str, hedge: str) -> pd.Series:
     return text.fillna("").map(lambda t: bool(pat.search(t)))
 
 
+AUTO_MODES = ("off", "assist", "triage")
+
+
 def sample(m: pd.DataFrame, modality: str, auditors: List[str], cfg: Optional[dict] = None,
-           extra_ids: Iterable[str] = ()) -> pd.DataFrame:
-    """Rows to audit, with why each was picked. Deterministic (seeded)."""
+           extra_ids: Iterable[str] = (), auto: str = "off") -> pd.DataFrame:
+    """Rows to audit, with why each was picked. Deterministic (seeded).
+
+    auto = "off"   : data scientists read every row.
+           "assist": the automatic auditor adds an 'evidence' column (relevant sentences) to the sheets.
+           "triage": also settles rows where it agrees with the code on EVERY label and value, except hard,
+                     flagged and missing-value rows; data scientists read the rest plus a blinded
+                     verify_fraction of the auto-settled rows (tasks.yaml label_audit.auto_audit).
+    """
+    if auto not in AUTO_MODES:
+        raise ValueError(f"auto must be one of {AUTO_MODES}")
     cfg = cfg or load_tasks()["label_audit"]
     c = cfg[modality]
     if not auditors:
@@ -155,11 +170,41 @@ def sample(m: pd.DataFrame, modality: str, auditors: List[str], cfg: Optional[di
     for col in list((c.get("labels") or {})) + list((c.get("values") or {})):
         key[f"auto_{col}"] = [m.at[i, col] for i in key[idc]]
     key["text"] = [m.at[i, txt] for i in key[idc]]
-    key["auditor_1"] = [auditors[k % len(auditors)] for k in range(len(key))]
+    labels, values = _columns(cfg, modality)
+    key["auto_mode"] = auto
+    key["auto_settled"] = False
+    key["ds_verify"] = False
+    if auto != "off":
+        from .auto_audit import AutoAuditor
+        aa = AutoAuditor(modality, cfg)
+        reads = [aa.read(t) for t in key.text]
+        for col in labels + values:
+            key[f"aa_{col}"] = [r[col] for r in reads]
+        key["evidence"] = [aa.evidence(t) for t in key.text]
+        if auto == "triage":
+            tol = cfg["pass"]["value_tolerance"]
+
+            def agrees(r):
+                if any(w.split(":")[0] in ("hard", "missing", "flagged") for w in r.picked.split(";")):
+                    return False
+                for col in labels:
+                    code = _auto(r[f"auto_{col}"])
+                    if not same(NM if code is None else code, norm_label(r[f"aa_{col}"])):
+                        return False
+                return all(same(_auto(r[f"auto_{v}"]), norm_value(r[f"aa_{v}"]), tol) for v in values)
+            key["auto_settled"] = key.apply(agrees, axis=1)
+            settled = np.flatnonzero(key.auto_settled.values)
+            n_v = int(round(cfg["auto_audit"]["verify_fraction"] * len(settled)))
+            if n_v:
+                key.loc[rng.choice(settled, n_v, replace=False), "ds_verify"] = True
+    to_ds = np.flatnonzero((~key.auto_settled | key.ds_verify).values)
+    key["auditor_1"] = ""
     key["auditor_2"] = ""
-    if len(auditors) >= 2:
-        n2 = int(round(cfg["second_auditor_fraction"] * len(key)))
-        for k in sorted(rng.choice(len(key), n2, replace=False).tolist()):
+    for j, k in enumerate(to_ds):
+        key.at[k, "auditor_1"] = auditors[j % len(auditors)]
+    if len(auditors) >= 2 and len(to_ds):
+        n2 = int(round(cfg["second_auditor_fraction"] * len(to_ds)))
+        for k in sorted(rng.choice(to_ds, n2, replace=False).tolist()):
             a1 = auditors.index(key.at[k, "auditor_1"])
             key.at[k, "auditor_2"] = auditors[(a1 + 1) % len(auditors)]
     key["cardiologist_round"] = 0
@@ -214,34 +259,47 @@ def write_sheet(rows: pd.DataFrame, path: Path, labels: List[str], values: List[
     wb = Workbook()
     ws = wb.active
     ws.title = "audit"
-    head = ["audit_id", "text"] + labels + values + ["note"]
+    ev = "evidence" in rows.columns
+    fixed = ["audit_id", "text"] + (["evidence"] if ev else [])
+    head = fixed + labels + values + ["note"]
     ws.append(head)
     for _, r in rows.iterrows():
         t = str(r["text"])
-        ws.append([r["audit_id"], t[:32000] + (" [...truncated]" if len(t) > 32000 else "")] + [None] * (len(head) - 2))
+        cells = [r["audit_id"], t[:32000] + (" [...truncated]" if len(t) > 32000 else "")]
+        if ev:
+            cells.append(r["evidence"] or "")
+        ws.append(cells + [None] * (len(head) - len(fixed)))
+    f0 = len(fixed) + 1                                 # first column to fill
     bold, fill = Font(bold=True), PatternFill("solid", fgColor="FFF2CC")
     for cell in ws[1]:
         cell.font = bold
     ws.column_dimensions["A"].width = 10
     ws.column_dimensions["B"].width = 100
-    for k in range(3, len(head) + 1):
+    if ev:
+        ws.column_dimensions["C"].width = 60
+    for k in range(f0, len(head) + 1):
         col = ws.cell(1, k).column_letter
         ws.column_dimensions[col].width = 14 if k < len(head) else 40
         for r in range(2, ws.max_row + 1):
             ws.cell(r, k).fill = fill
     for r in range(2, ws.max_row + 1):
-        ws.cell(r, 2).alignment = Alignment(wrap_text=True, vertical="top")
+        for k in range(2, f0):
+            ws.cell(r, k).alignment = Alignment(wrap_text=True, vertical="top")
     if labels and ws.max_row > 1:
         dv = DataValidation(type="list", formula1='"1,0,U,NM"', allow_blank=True)
         ws.add_data_validation(dv)
-        a, b = ws.cell(1, 3).column_letter, ws.cell(1, 2 + len(labels)).column_letter
+        a, b = ws.cell(1, f0).column_letter, ws.cell(1, f0 - 1 + len(labels)).column_letter
         dv.add(f"{a}2:{b}{ws.max_row}")
-    ws.freeze_panes = "C2"
+    ws.freeze_panes = ws.cell(2, f0).coordinate
     rs = wb.create_sheet("rules")
     rs.append([title])
     rs.append([])
     for k, v in rule_text(modality):
         rs.append([k, v])
+    if ev:
+        rs.append(["evidence", "The sentences that mention any label's words, picked by the automatic auditor to save "
+                               "reading time. They are NOT its answer. Still read the whole text when the evidence "
+                               "is empty, cut short or unclear."])
     rs.column_dimensions["A"].width = 22
     rs.column_dimensions["B"].width = 120
     for row in rs.iter_rows(min_row=3):
@@ -272,17 +330,19 @@ def write_auditor_sheets(key: pd.DataFrame, out: Path, modality: str, cfg: Optio
     labels, values = _columns(cfg, modality)
     out.mkdir(parents=True, exist_ok=True)
     paths = []
-    for a in sorted(set(key.auditor_1) | set(key.auditor_2) - {""}):
+    for a in sorted((set(key.auditor_1) | set(key.auditor_2)) - {""}):
         rows = key[(key.auditor_1 == a) | (key.auditor_2 == a)]
+        rows = rows[["audit_id", "text"] + (["evidence"] if "evidence" in rows else [])]
         p = out / f"sheet_{a}.xlsx"
         if p.exists():
             raise FileExistsError(f"{p} exists: refusing to overwrite an auditor's work")
         write_sheet(rows, p, labels, values, modality, f"{modality.upper()} label audit - auditor {a} - {len(rows)} rows")
         paths.append(p)
-    key.drop(columns=["text"]).to_csv(out / "key.csv", index=False)
+    key.drop(columns=[c for c in ("text", "evidence") if c in key]).to_csv(out / "key.csv", index=False)
     key[["audit_id", "text"]].to_csv(out / "texts.csv.gz", index=False)
     (out / "README.txt").write_text(
-        "key.csv holds the automatic labels: do NOT open it or share it with the auditors or the cardiologist.\n"
+        "key.csv holds the automatic labels (the code's and the automatic auditor's): do NOT open it or share it\n"
+        "with the auditors or the cardiologist.\n"
         "Auditors fill sheet_<code>.xlsx using the 'rules' tab and annotation/LABEL_AUDIT.md.\n"
         "Then run: python -m annotation.label_audit score " + modality + " --dir " + str(out) + "\n")
     return paths
@@ -291,7 +351,7 @@ def write_auditor_sheets(key: pd.DataFrame, out: Path, modality: str, cfg: Optio
 # --------------------------------------------------------------------------- scoring
 def _load_entries(d: Path, key: pd.DataFrame, labels, values):
     sheets = {}
-    for a in sorted(set(key.auditor_1) | set(key.auditor_2) - {""}):
+    for a in sorted((set(key.auditor_1) | set(key.auditor_2)) - {""}):
         p = _find(d, f"sheet_{a}")
         if p is None:
             raise FileNotFoundError(f"sheet for auditor {a} not found in {d}")
@@ -310,7 +370,7 @@ def resolve(key: pd.DataFrame, sheets: dict, cardio: dict, labels, values, tol: 
     rows, unfilled = [], []
     for _, k in key.iterrows():
         aid = k.audit_id
-        e1 = sheets[k.auditor_1].loc[aid]
+        e1 = sheets[k.auditor_1].loc[aid] if k.auditor_1 else None
         e2 = sheets[k.auditor_2].loc[aid] if k.auditor_2 else None
         cr = cardio.get(aid)
         for col in labels + values:
@@ -318,6 +378,16 @@ def resolve(key: pd.DataFrame, sheets: dict, cardio: dict, labels, values, tol: 
             auto = _auto(k[f"auto_{col}"])
             if not is_val and auto is None:
                 auto = NM                               # label left unset by the code (masked in training)
+            aa = k.get(f"aa_{col}")
+            if e1 is None:                              # settled by the automatic auditor (triage), not read by a person
+                c = cr[col] if cr is not None else None
+                use_c = cr is not None and (c is not None or is_val)
+                rows.append({"audit_id": aid, "column": col, "kind": "value" if is_val else "label", "picked": k.picked,
+                             "auto": auto, "auto_auditor": aa, "ds1": None, "ds2": None,
+                             "cardiologist": c if cr is not None else None, "reference": c if use_c else aa,
+                             "status": "cardiologist" if use_c else "auto auditor", "reasons": "",
+                             "spot_check": bool(k.spot_check), "ds_verify": False})
+                continue
             d1 = e1[col]
             d2 = e2[col] if e2 is not None else None
             if not is_val and (d1 is None or (e2 is not None and d2 is None)):
@@ -340,12 +410,37 @@ def resolve(key: pd.DataFrame, sheets: dict, cardio: dict, labels, values, tol: 
             else:
                 ref, status = d1, "data scientists"
             rows.append({"audit_id": aid, "column": col, "kind": "value" if is_val else "label", "picked": k.picked,
-                         "auto": auto, "ds1": d1, "ds2": d2, "cardiologist": c if cr is not None else None,
+                         "auto": auto, "auto_auditor": aa, "ds1": d1, "ds2": d2, "cardiologist": c if cr is not None else None,
                          "reference": ref, "status": status, "reasons": "; ".join(reasons),
-                         "spot_check": bool(k.spot_check)})
+                         "spot_check": bool(k.spot_check), "ds_verify": bool(k.get("ds_verify", False))})
     if unfilled:
         raise ValueError(f"{len(unfilled)} label cells not filled, e.g. {unfilled[:8]}")
     return pd.DataFrame(rows)
+
+
+def _auto_checks(r: pd.DataFrame, done: pd.Series, tol: Optional[float]) -> Dict[str, float]:
+    """How far the automatic auditor can be trusted: on the auto-settled rows the data scientists still read
+    (blinded verification), and on auto-settled rows the cardiologist spot-checked."""
+    if "auto_auditor" not in r or r.auto_auditor.isna().all():
+        return {}
+    ver = r[r.ds_verify & done]
+    spot = r[r.spot_check & r.cardiologist.notna() & r.ds1.isna()]
+    agree = [same(a, b, tol) for a, b in zip(ver.auto_auditor, ver.reference)]
+    sp = [same(a, b, tol) for a, b in zip(spot.auto_auditor, spot.cardiologist)]
+    return {"auto_settled": int((r.status == "auto auditor").sum() + len(spot)), "auto_verify_n": len(ver),
+            "auto_vs_reference": float(np.mean(agree)) if agree else float("nan"),
+            "auto_vs_cardiologist": float(np.mean(sp)) if sp else float("nan"), "auto_spot_n": len(sp)}
+
+
+def _auto_fails(row: dict, cfg: dict) -> List[str]:
+    f = []
+    if row.get("auto_settled") and not row.get("auto_verify_n"):
+        f.append("automatic auditor settled rows but none were verified")
+    if row.get("auto_verify_n") and not row["auto_vs_reference"] >= cfg["auto_audit"]["verify_min"]:
+        f.append(f"automatic auditor {row['auto_vs_reference']:.3f} on the verification rows: re-run with --auto assist")
+    if row.get("auto_spot_n") and not row["auto_vs_cardiologist"] >= cfg["pass"]["ds_vs_cardiologist_min"]:
+        f.append(f"automatic auditor vs cardiologist {row['auto_vs_cardiologist']:.2f}")
+    return f
 
 
 def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
@@ -364,7 +459,7 @@ def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
         npv = kn / len(neg) if len(neg) else float("nan")
         both = r[r.ds2.notna()]
         kap = cohen_kappa(both.ds1.tolist(), both.ds2.tolist()) if len(both) else float("nan")
-        spot = r[r.spot_check & r.cardiologist.notna()]
+        spot = r[r.spot_check & r.cardiologist.notna() & r.ds1.notna()]
         dsc = float(np.mean([same(a, b) for a, b in zip(spot.ds1, spot.cardiologist)])) if len(spot) else float("nan")
         hard = r[r.picked.str.contains(f"hard:{col}") & done & r.auto.isin([0.0, 1.0])]
         missed = r[rand & done & (r.auto == NM) & r.reference.isin([0.0, 1.0])]
@@ -375,7 +470,8 @@ def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
                "labelled_but_not_mentioned": int(((r.reference == NM) & r.auto.isin([0.0, 1.0])).sum()),
                "hard_accuracy": float(np.mean([same(a, b) for a, b in zip(hard.auto, hard.reference)])) if len(hard) else float("nan"),
                "hard_n": len(hard), "masked_but_stated": len(missed),
-               "kappa_ds1_ds2": kap, "kappa_n": len(both), "ds_vs_cardiologist": dsc, "spot_n": len(spot)}
+               "kappa_ds1_ds2": kap, "kappa_n": len(both), "ds_vs_cardiologist": dsc, "spot_n": len(spot),
+               **_auto_checks(r, done, None)}
         fails = []
         if row["pending_cardiologist"]:
             fails.append("adjudication pending")
@@ -388,6 +484,7 @@ def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
             fails.append(f"kappa {kap:.2f}")
         if row["spot_n"] and not dsc >= p["ds_vs_cardiologist_min"]:
             fails.append(f"data scientists vs cardiologist {dsc:.2f}")
+        fails += _auto_fails(row, cfg)
         row["result"] = "PASS" if not fails else "FAIL: " + "; ".join(fails)
         out.append(row)
     tol = p["value_tolerance"]
@@ -400,7 +497,8 @@ def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
         n_missed = int(sum(isinstance(v, float) for v in mis.reference))
         row = {"column": col, "kind": "value", "rows": len(r), "pending_cardiologist": int((~done).sum()),
                "value_match": match / len(stated) if len(stated) else float("nan"), "value_n": len(stated),
-               "value_miss_rate": n_missed / len(mis) if len(mis) else float("nan"), "miss_n": len(mis)}
+               "value_miss_rate": n_missed / len(mis) if len(mis) else float("nan"), "miss_n": len(mis),
+               **_auto_checks(r, done, tol)}
         fails = []
         if row["pending_cardiologist"]:
             fails.append("adjudication pending")
@@ -408,6 +506,7 @@ def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
             fails.append(f"match {row['value_match']:.3f}")
         if row["miss_n"] and not row["value_miss_rate"] <= p["value_miss_max"]:
             fails.append(f"missed {row['value_miss_rate']:.3f}")
+        fails += _auto_fails(row, cfg)
         row["result"] = "PASS" if not fails else "FAIL: " + "; ".join(fails)
         out.append(row)
     return pd.DataFrame(out)
@@ -417,10 +516,13 @@ def score(d: str, modality: str, cfg: Optional[dict] = None, log=print) -> Dict[
     cfg = cfg or load_tasks()["label_audit"]
     dp = Path(d)
     labels, values = _columns(cfg, modality)
-    key = pd.read_csv(dp / "key.csv", dtype={"audit_id": str, "auditor_2": str}, keep_default_na=False,
-                      na_values={f"auto_{c}": [""] for c in labels + values})
-    key["auditor_2"] = key.auditor_2.fillna("")
-    key["spot_check"] = key.spot_check.astype(str).str.lower() == "true"
+    key = pd.read_csv(dp / "key.csv", dtype=str, keep_default_na=False)
+    for c in labels + values:
+        key[f"auto_{c}"] = pd.to_numeric(key[f"auto_{c}"].replace("", np.nan))
+        if f"aa_{c}" in key:
+            key[f"aa_{c}"] = [(norm_value if c in values else norm_label)(v) for v in key[f"aa_{c}"]]
+    for b in ("spot_check", "auto_settled", "ds_verify"):
+        key[b] = key[b].astype(str).str.lower() == "true" if b in key else False
     key["cardiologist_round"] = key.cardiologist_round.astype(int)
     texts = pd.read_csv(dp / "texts.csv.gz", dtype=str, keep_default_na=False).set_index("audit_id")["text"]
     sheets, cardio = _load_entries(dp, key, labels, values)
@@ -746,6 +848,9 @@ def main(argv=None):
     s.add_argument("--auditors", required=True, help="data scientist codes, comma-separated (no names)")
     s.add_argument("--out", required=True)
     s.add_argument("--extra", help="CSV with an id column (e.g. rr_flags.csv rows with a flag) to add as 'flagged'")
+    s.add_argument("--auto", choices=AUTO_MODES, default="off",
+                   help="automatic auditor: assist = evidence sentences on the sheets; triage = also settles rows "
+                        "where it agrees with the code (a blinded share is still verified by the data scientists)")
     sc = sub.add_parser("score")
     sc.add_argument("modality", choices=["mri", "ecg"])
     sc.add_argument("--dir", required=True)
@@ -771,14 +876,18 @@ def main(argv=None):
         if a.extra:
             x = pd.read_csv(a.extra, dtype=str)
             extra = x[x.get("flag", pd.Series(["x"] * len(x))).fillna("") != ""][cfg[a.modality]["id"]].tolist()
-        key = sample(_read_table(a.manifest), a.modality, [c.strip() for c in a.auditors.split(",") if c.strip()], cfg, extra)
+        key = sample(_read_table(a.manifest), a.modality, [c.strip() for c in a.auditors.split(",") if c.strip()], cfg, extra,
+                     auto=a.auto)
         paths = write_auditor_sheets(key, Path(a.out), a.modality, cfg)
         print(key.picked.str.split(";").explode().str.split(":").str[0].value_counts().to_string())
-        print(f"{len(key)} rows; sheets: {', '.join(p.name for p in paths)}")
+        n_ds = int((key.auditor_1 != "").sum())
+        print(f"{len(key)} rows; data scientists read {n_ds} ({int(key.ds_verify.sum())} of them verify the automatic "
+              f"auditor); {len(key) - n_ds} settled automatically; sheets: {', '.join(p.name for p in paths)}")
     elif a.cmd == "score":
         r = score(a.dir, a.modality, cfg)
         cols = [c for c in ["column", "ppv", "ppv_n", "ppv_ci_low", "npv", "npv_n", "npv_ci_low", "kappa_ds1_ds2",
-                            "value_match", "value_miss_rate", "pending_cardiologist", "result"] if c in r["results"]]
+                            "value_match", "value_miss_rate", "auto_vs_reference", "pending_cardiologist", "result"]
+                if c in r["results"]]
         print(r["results"][cols].to_string(index=False))
     elif a.cmd == "troponin":
         from cardioai_mcp.config import load_study
