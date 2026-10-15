@@ -27,6 +27,25 @@ The model is trained **only on Mayo data** inside the MCP workspace. No public d
 | Reader tools | 3D Slicer and ITK-SNAP are already installed |
 | Workspace check | `python -m annotation.check_workspace` |
 
+### Querying the data (Spark SQL)
+
+Mayo's data on MCP sit in Apache Spark. Every query in this repository is Spark SQL, run through the `spark` session that JupyterLab provides.
+- **Templates:** the SQL is written with placeholders such as `{{cdm}}` (OMOP schema), `{{modality}}` and `{{cs:stemi}}` (a concept set).
+- **Filling them in:** `SparkEngine` replaces the placeholders with the real names from `config/study.yaml` and `config/modality_tables.yaml`, runs the query on Spark, and returns a pandas table.
+- **When names change:** edit the config, not the SQL.
+
+First time in the workspace:
+```python
+spark.sql("SHOW DATABASES").show(100, False)                 # find the OMOP and FACT_ schemas
+spark.sql("SHOW TABLES IN <schema>").show(200, False)
+spark.sql("SELECT COUNT(*) FROM <schema>.FACT_IMAGINGSTUDY WHERE MODALITY_1 = 'MR'").show()   # one test query
+# put the schema names into config/study.yaml (schemas: cdm, vocab, modality, work), then:
+from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
+study = load_study(); eng = SparkEngine(spark, study)
+eng.query("SELECT COUNT(*) AS n FROM {{cdm}}.person")         # placeholders filled from the config
+```
+Model training does not use Spark: Spark builds the training list and pulls the data, then PyTorch trains on the GPU from files.
+
 ## 2. Steps
 
 1. **Lock the Phase 2 MRI cohort first.** The clinical lead confirms the proposed goals and the red-flag cut-offs (`mri_training/config.yaml` → `red_flags`) beforehand.
