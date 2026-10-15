@@ -90,14 +90,28 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    - Check one delivered study with `mri_training.io.read_study_path`.
    - The build refuses to continue if any patient falls in two splits.
 
-5. **Pretrain the encoder on Mayo images** (self-supervised; training period only).
+5. **Audit the automatic report labels** before any training. Data scientists check them first; the cardiologist adjudicates. The protocol is in [`annotation/LABEL_AUDIT.md`](annotation/LABEL_AUDIT.md).
+   ```bash
+   python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --auto triage --out /workspace/audit/mri
+   #   --auto: off (people read everything) | assist (relevant sentences shown) | triage (automatic auditor settles agreeing reports; 25% still verified)
+   #   data scientists fill sheet_ds1.xlsx / sheet_ds2.xlsx (blinded: they never see the automatic labels)
+   python -m annotation.label_audit score mri --dir /workspace/audit/mri    # -> adjudication_1.xlsx for the cardiologist
+   #   cardiologist fills adjudication_1.xlsx (every disagreement and U, plus a blinded spot-check)
+   python -m annotation.label_audit score mri --dir /workspace/audit/mri    # -> audit_results.csv: PASS / FAIL per label
+   ```
+   - With `--auto triage`, the automatic auditor must also match the reference on at least 98% of the verification reports, or that label is re-audited with `--auto assist`.
+   - Every label must PASS: PPV and NPV at least 0.95, with the lower 95% bound at least 0.90. Stated LVEF and infarct size must match in at least 98% of reports.
+   - On a FAIL, fix the rule in `mri_training/config.yaml` → `labels`, rebuild the manifest and re-audit on a **fresh** sample (new `seed` in `annotation/tasks.yaml`).
+   - Record the audit results and the rule version in the model card.
+
+6. **Pretrain the encoder on Mayo images** (self-supervised; training period only).
    ```bash
    python -m mri_training.pretrain --manifest /workspace/mri/manifest.parquet --out /workspace/mri/runs/ssl_v1 --device cuda
    ```
    - It writes `encoder.pt` and `pretrain_card.json` (period, studies, slices, loss).
    - It refuses studies dated on or after 2020-01-01.
 
-6. **Outline about 300 studies in rounds.** Readers use 3D Slicer; the protocol and checks are in `annotation/README.md`.
+7. **Outline about 300 studies in rounds.** Readers use 3D Slicer; the protocol and checks are in `annotation/README.md`.
    ```bash
    python -m annotation.select mri --manifest /workspace/mri/manifest.parquet --readers r01,r02,r03 --out worklist.csv
    # round 1: the first ~40 studies, outlined from scratch
@@ -111,8 +125,13 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    ```
    - `collect` refuses unreviewed or invalid files.
    - About 10% of studies are read twice; agreement goes to `agreement.csv`.
+   - **Outline QC.** Data scientists check every batch of pre-drawn (before readers) and corrected (after `collect`) outlines. The cardiologist reviews grade C, grader disagreements and a spot-check:
+     ```bash
+     python -m annotation.label_audit outlines --root /workspace/annotation --manifest /workspace/mri/manifest.parquet --graders ds1,ds2 --out /workspace/audit/outlines_r2
+     python -m annotation.label_audit score-outlines --dir /workspace/audit/outlines_r2
+     ```
 
-7. **Train the full model.**
+8. **Train the full model.**
    ```bash
    python -m mri_training.train --manifest /workspace/mri/manifest_labels.parquet --init /workspace/mri/runs/ssl_v1 \
           --out /workspace/mri/runs/v1 --cache-dir /workspace/mri/cache --device cuda
@@ -121,7 +140,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    - Stage B adds report labels for every training study.
    - Thresholds are fitted on 2020 only.
 
-8. **Review `model_card.json`** before opening the test set:
+9. **Review `model_card.json`** before opening the test set:
    - `initialised_from`: the pretraining period and the hash of the starting weights;
    - data summary and thresholds;
    - finding AUROC, sensitivity and specificity;
@@ -131,7 +150,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 
    Copy the `test_time` values into the `phase1` fields of `config/cohorts/mri.yaml`.
 
-9. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Images, outlines, manifests and per-study predictions stay in MCP.
+10. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Images, outlines, manifests and per-study predictions stay in MCP.
 
 ## 3. Phase 2 validation
 
@@ -170,8 +189,9 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 | Cohort lock | Phase 2 cohort snapshotted before any training run | Stop and re-lock |
 | Patient IDs | `person_map` confirmed; no patient in two splits | Stop: splits and STEMI links depend on it |
 | DICOM request | Only SA LGE and cine series; studies without LGE counted | Review the series descriptions |
+| Label audit | Every report label PASS in `audit_results.csv`; no adjudication pending | Fix the rule, rebuild, re-audit on a fresh sample |
 | Pretraining | Card shows only studies before 2020 | Rebuild the manifest |
-| Annotation | `collect` rejects unreviewed or invalid files; double-read Dice reviewed | Return the studies to readers |
+| Annotation | `collect` rejects unreviewed or invalid files; double-read Dice reviewed; outline QC graded, grade C redrawn | Return the studies to readers |
 | Thresholds | Fitted on 2020 only; reviewed before the test set is opened | Never refit on test data |
 | Export | Only the three bundle files leave MCP | Stop |
 | Serving | Fingerprint, weights hash and thresholds match the model card | Rebuild from the exact commit |

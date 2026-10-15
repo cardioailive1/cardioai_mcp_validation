@@ -78,21 +78,34 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    - Extraction can be re-run; it resumes where it stopped.
    - ECGs that fail to decode keep the reason in `waveform_error`.
 
-6. **Train on the A100.**
+6. **Audit the automatic labels** before training. The protocol is in [`annotation/LABEL_AUDIT.md`](annotation/LABEL_AUDIT.md).
+   ```bash
+   # troponin / acute MI / STEMI: recomputed independently from the raw lab rows (must match 100%)
+   python -m annotation.label_audit troponin --manifest /workspace/ecg/manifest.parquet --out /workspace/audit/troponin
+   # AF: rhythm cross-check from the waveform, then the blinded text audit of the over-reads
+   python -m annotation.label_audit af-rhythm --manifest /workspace/ecg/manifest.parquet --out /workspace/audit/ecg/rr_flags.csv
+   python -m annotation.label_audit sample ecg --manifest /workspace/ecg/manifest.parquet --auditors ds1,ds2 \
+          --extra /workspace/audit/ecg/rr_flags.csv --auto triage --out /workspace/audit/ecg      # --auto off | assist | triage
+   python -m annotation.label_audit score ecg --dir /workspace/audit/ecg     # twice: before and after the cardiologist
+   ```
+   - The cardiologist reads `troponin_concepts.csv` (which assays the troponin concept set really contains, with units and reference limits) and signs it off.
+   - AF must PASS (PPV and NPV at least 0.95, lower bound at least 0.90). On a FAIL, fix `af_regex` / `af_negation_regex`, rebuild and re-audit on a fresh sample.
+
+7. **Train on the A100.**
    ```bash
    python -m ecg_training.train --manifest /workspace/ecg/manifest.parquet --out /workspace/ecg/runs/v1
    ```
    - Thresholds are fitted on 2020 only, with headroom above the goals: target sensitivity 0.96 for STEMI, 0.97 for AF and 0.96 for acute MI.
    - ECGs with no decoded waveform are dropped and counted in the model card.
 
-7. **Review `model_card.json`** before opening the test set:
+8. **Review `model_card.json`** before opening the test set:
    - data summary and label definitions;
    - thresholds; check **STEMI and AF specificity on the tuning split against the 93% goal**;
    - test metrics (`test_time`, `test_site`), `ecgs_without_waveform`, runtime fingerprint, weights hash and code commit.
 
    Copy the `test_time` values into the `phase1` fields of `config/cohorts/ecg.yaml`, then rerun `scripts/sample_size_report.py`.
 
-8. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Manifests, waveforms and per-ECG predictions stay in MCP.
+9. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Manifests, waveforms and per-ECG predictions stay in MCP.
 
 ## 3. Phase 2 validation
 
@@ -129,6 +142,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 | Manifest | No patient in two splits (the build refuses otherwise) | Fix the patient IDs |
 | Waveform probe | About 10 s and R waves of 0.5–2 mV on 5 rows | Adjust `waveform_raw`, probe again |
 | Extraction | Few ECGs with `waveform_error` | Inspect the errors before training |
+| Label audit | Troponin recomputation 100% match; AF PASS in `audit_results.csv`; troponin concept list signed off | Fix the SQL or rule, rebuild, re-audit |
 | Thresholds | Fitted on 2020 only; specificity reviewed before the test set is opened | Never refit on test data |
 | Export | Only the three bundle files leave MCP | Stop |
 | Serving | Fingerprint and weights hash match the model card | Rebuild from the exact commit |
