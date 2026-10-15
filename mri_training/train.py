@@ -79,7 +79,7 @@ def _local(uri: str) -> str:
 
 def load_example(row: pd.Series, cfg: dict) -> Example:
     """Default loader: Mayo DICOM zip (+ .npz contours) or a public NIfTI pair."""
-    from .io import read_nifti_pair, read_study
+    from .io import read_nifti_pair, read_study_path
     src = row.get("source", "mayo") if hasattr(row, "get") else "mayo"
     if isinstance(src, str) and src in cfg["public_datasets"]:
         p = cfg["public_datasets"][src]
@@ -89,7 +89,7 @@ def load_example(row: pd.Series, cfg: dict) -> Example:
             Example(cine=Stack(stack.images[None], stack.pixel_spacing, stack.positions, stack.orientation,
                                stack.slice_thickness, "cine", stack.notes),
                     cine_labels=lab[None], cine_phases=[0], cine_rule=rule)
-    lge, cine = read_study(Path(_local(row["dicom_uri"])).read_bytes())
+    lge, cine = read_study_path(_local(row["dicom_uri"]))                  # folder (MCP delivery) or zip
     ex = Example(lge=lge, cine=cine)
     lu = row.get("label_uri")
     if isinstance(lu, str) and lu:

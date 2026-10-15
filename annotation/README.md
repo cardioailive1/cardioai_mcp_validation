@@ -16,15 +16,21 @@ Mayo images can't leave the Mayo Clinic Platform workspace, so annotation happen
 | pip install (`monailabel`, `highdicom`) | Allowed | Option A2 (Slicer + MONAI Label on localhost) is open once the pre-drawing model is good |
 | Local web apps | Run on localhost in the environment | OHIF / MONAI Label server possible |
 | Docker | Runs, but `docker pull` doesn't fetch dependencies: images must be self-contained | Only needed for CVAT; build the image outside and import it as a tar, or skip CVAT |
-| Readers | Up to **5 annotator seats**, each with a **cardioailive.com** email; **Mayo readers can't annotate** in our environment | CardioAI hires outside cardiac MRI readers; `select` refuses more than 5 readers |
+| Readers | Up to **5 annotator seats**, each with a **cardioailive.com** email and a signed **DUA**; **Mayo readers can't annotate** in our environment | CardioAI hires outside cardiac MRI readers, and each submits the DUA form before access; `select` refuses more than 5 readers |
 | GPU | Shared reservation of **A100 40 GB** machines; other types on request | Training and pre-drawing run on an A100 (`--device cuda`) |
 | Reports | Radiology (incl. cardiac MRI) in **FACT_RADIOLOGY**; echo notes in **FACT_ECHO_TEST.ECHO_NOTE** | Report labels come from these (`config/modality_tables.yaml`; columns to confirm) |
 | Existing annotations | None: labels are what reports and echo notes say | As planned: report labels for every study, reader outlines for the 300 |
 | Public datasets | **Keep them outside the environment** if possible; import only on request if essential | The pre-drawing model is trained **outside** MCP on the public sets; only its weights come in (`--init`) |
 
-Still open with MCP: where the cardiac MRI and echo **DICOM images** sit (table or storage path, and the
-key that links an image study to its FACT_RADIOLOGY report), and the process for **importing model
-weights** (and, if needed, a self-contained Docker image) into the workspace.
+Answered on 2026-10-15:
+- **Images:** DICOM files are requested through `FACT_RADIOLOGY_DICOM_INVENTORY` and linked to `FACT_RADIOLOGY` by accession number (`mri_training.mcp_imaging` builds the request).
+- **Imports:** a self-contained Docker image (tar) goes through the same import process as files.
+- **Readers:** each annotator completes the same onboarding as any data user, including the **DUA form**.
+- **GPUs:** the A100 reservation is used by switching the machine on; it starts if a machine is free.
+
+Still open with MCP: how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id`; the de-identification
+request steps, turnaround and where delivered files land; whether echo DICOM is in the same inventory
+(modality US); and the process for importing model weights.
 
 ## Workflow
 
