@@ -73,17 +73,33 @@ echo:
 
 mri:
   enabled: false
-  table: "{modality}.cmr_study"        # PLACEHOLDER: one row per cardiac MRI study
+  table: "{work}.cmr_study"            # built by mri_training.mcp_imaging.build_study_table (one row per CMR study)
   columns:
     person_id: person_id
     study_id: study_uid
     study_datetime: study_datetime
-    dicom_uri: dicom_path               # folder or zip of the study's DICOM files in workspace storage
+    dicom_uri: dicom_path               # folder of the study's de-identified DICOM (as delivered) or a zip
     report_text: report_text            # final signed CMR report (else the NOTE fall-back below)
-  # MCP (2026-10-14): radiology reports, including cardiac MRI, are in FACT_RADIOLOGY ("Radiology" slides in
-  # the MCP Resource Hub). CONFIRM its columns (patient, exam date, exam/procedure name, report text,
-  # accession or study UID) and where the CMR DICOM pixel data sit, then point `table` / `columns` there.
-  report_table: "{modality}.FACT_RADIOLOGY"
+  # MCP radiology tables ("Radiology" slides, MCP Resource Hub; Adam Resnick 2026-10-15). DICOM pixel data are
+  # NOT in a table: instances are inventoried in FACT_RADIOLOGY_DICOM_INVENTORY and must be REQUESTED for
+  # de-identification (IMAGE_DEID_STATUS Ready or Available). mri_training.mcp_imaging builds the request
+  # (short-axis LGE + cine series only) and, once delivered, the `table` above (cmr_study) from them.
+  # Joins: FACT_RADIOLOGY.ACCESSION_NBR = INVENTORY.DICOM_ACCESSION_NUMBER;
+  #        INVENTORY <-> FACT_IMAGINGSTUDY on STMO_NAME_IN_ADL + MODALITY + STUDY_INSTANCE_UID.
+  # OMOP: CMR procedures are in procedure_occurrence (CPT), reports also in note.note_text; the inventory is not in OMOP.
+  mcp:
+    schema: "{modality}"                       # CONFIRM the schema holding the FACT_ tables
+    report_table: FACT_RADIOLOGY               # RADIOLOGY_REPORT, RADIOLOGY_IMPRESSION, RADIOLOGY_DTM, ACCESSION_NBR,
+                                               # SERVICE_MODALITY_CODE, SERVICE_RESULT_STATUS
+    inventory_table: FACT_RADIOLOGY_DICOM_INVENTORY
+    study_table: FACT_IMAGINGSTUDY             # PROCEDURE_CODE_TEXT, PROCEDURE_CODE_CODING_CODE, STUDY_DESCRIPTION, MODALITY_1..
+    cmr_cpt: ["75557", "75559", "75561", "75563", "75565"]
+    cmr_description_regex: '(?i)(cardiac|heart|myocard|cmr|mr[ ]?heart|mri[ ]?heart)'
+    final_report_status_regex: '(?i)(final|verified|signed|complete)'   # SERVICE_RESULT_STATUS values to keep (CONFIRM)
+    # Patient key: the inventory and FACT_IMAGINGSTUDY carry PATIENT_CLINIC_NUMBER; OMOP uses person_id.
+    # CONFIRM with MCP how they map (a crosswalk table, or the same value) and fill this in:
+    person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
+    deid_ok: [Ready, Available]
   requirements:            # MRI agent input spec (mri_training/, runtime 1.0.0)
     sequences: [LGE short axis (required), cine SSFP short axis (for LVEF)]
     min_slices: 3

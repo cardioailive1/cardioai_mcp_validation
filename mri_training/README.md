@@ -28,7 +28,24 @@ GroupNorm replaces MobileNetV3's BatchNorm. Each training step is one study's sl
 ## Order of work in the MCP workspace
 
 1. **Lock the Phase 2 MRI cohort first** (`config/cohorts/mri.yaml`, studies from 2021-01-01 on). Run `scripts/run_cohorts.py --cohorts mri --save-tables` and snapshot the result as `mri_analytic_locked`. Training excludes these patients. Have the clinical lead confirm the proposed endpoint goals and the red-flag cut-offs.
-2. **Map the CMR table.** Fill in `config/modality_tables.yaml` → `mri` (study table, DICOM location, report column) and set `enabled: true`. Check one study with `mri_training.io.read_study`.
+2. **Find the CMR studies and request their DICOM.** On MCP the images aren't in a table: every DICOM instance is listed in `FACT_RADIOLOGY_DICOM_INVENTORY` and is **requested for de-identification** (status Ready or Available). Reports are in `FACT_RADIOLOGY` (linked by accession number), and study headers are in `FACT_IMAGINGSTUDY`. Source: MCP "Radiology" slides and Adam Resnick, 2026-10-15.
+   ```python
+   from mri_training import mcp_imaging as mi
+   studies = mi.find_cmr_studies(eng, study["modality"])        # MR, cardiac CPT/description, final report
+   series = mi.list_series(eng, study["modality"], studies)
+   req, report = mi.build_request(series)                        # short-axis LGE + cine series only
+   req.to_csv("/workspace/mri/dicom_request.csv"); report        # submit the request through MCP
+   # after delivery (one folder per study):
+   cmr = mi.build_study_table(studies, "/workspace/mri/dicom")
+   spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")   # = modality_tables mri.table
+   ```
+   - Only the series the model uses are requested. Localisers, long-axis cines, mapping and perfusion series are left out, which keeps the request much smaller.
+   - Studies without a de-identifiable LGE series aren't requested; `report` counts them.
+   - **Before running, confirm:**
+     - the schema of the FACT tables (`mri.mcp.schema`);
+     - the final-report status values;
+     - how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id` (`mri.mcp.person_map`).
+   - Check one delivered study with `mri_training.io.read_study_path`.
 3. **Build the manifest:**
    ```python
    from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine

@@ -65,7 +65,7 @@ def make_labels(ev: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 def evidence_sql(engine, cfg: dict, modality_cfg: dict) -> str:
     mri = modality_cfg["mri"]
-    extra = {"mri_table": mri["table"].replace("{modality}", "{{modality}}")}
+    extra = {"mri_table": re.sub(r"(?<!\{)\{(\w+)\}(?!\})", r"{{\1}}", mri["table"])}   # {work} -> {{work}} macro
     extra.update({f"c_{k}": v for k, v in mri["columns"].items()})
     return engine.render((HERE / "labels.sql").read_text(), extra)
 

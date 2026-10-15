@@ -107,6 +107,24 @@ def select_series(datasets: List) -> Tuple[Optional[Stack], Optional[Stack]]:
             _stack(groups[ci[2]], "cine", ci[3], "short axis by description" if ci[0] else "oblique stack, short axis assumed") if ci else None)
 
 
+def read_folder(path: str) -> List:
+    """Every file under a folder (how MCP delivers de-identified DICOM: one folder per study or series)."""
+    from pathlib import Path
+    return _read_datasets(str(p) for p in sorted(Path(path).rglob("*")) if p.is_file())
+
+
+def read_study_path(path: str) -> Tuple[Stack, Optional[Stack]]:
+    """A study given as a folder of DICOM files or as a zip."""
+    import os
+    if os.path.isdir(path):
+        lge, cine = select_series(read_folder(path))
+        if lge is None:
+            raise MRIInputError("no short-axis LGE series found in the study")
+        return lge, cine
+    with open(path, "rb") as f:
+        return read_study(f.read())
+
+
 def read_study(data: bytes) -> Tuple[Stack, Optional[Stack]]:
     """Zip of a study's DICOM files -> (LGE stack, cine stack or None). LGE is required."""
     lge, cine = select_series(read_zip(data))
