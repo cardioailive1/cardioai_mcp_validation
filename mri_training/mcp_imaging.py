@@ -8,7 +8,7 @@ is REQUESTED for de-identification (IMAGE_DEID_STATUS Ready / Available). Report
     studies = mi.find_cmr_studies(eng, study["modality"])          # CMR studies with a final report
     series  = mi.list_series(eng, study["modality"], studies)        # every series of those studies
     req, report = mi.build_request(series)                           # short-axis LGE + cine series only
-    req.to_csv("/workspace/mri/dicom_request.csv")                   # -> submit through MCP's request process
+    mi.deid_request(studies, req).to_csv("/workspace/mri/deid_request.csv", index=False)   # -> send to the TSM
     ... after delivery:
     cmr = mi.build_study_table(studies, "/workspace/mri/dicom")      # one row per study with its folder
     spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")
@@ -70,8 +70,9 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
       FROM {_t(c, 'inventory_table')} i
       WHERE i.MODALITY = 'MR'
     )
-    SELECT {person} AS person_id, s.PATIENT_CLINIC_NUMBER AS clinic_number, s.STUDY_INSTANCE_UID AS study_uid,
-           s.STMO_NAME_IN_ADL AS stmo, a.DICOM_ACCESSION_NUMBER AS accession,
+    SELECT {person} AS person_id, s.PATIENT_CLINIC_NUMBER AS clinic_number, {c.get('patient_dk_source', 'r.PATIENT_DK')} AS patient_dk,
+           s.STUDY_INSTANCE_UID AS study_uid,
+           s.STMO_NAME_IN_ADL AS stmo, a.MODALITY AS modality, a.DICOM_ACCESSION_NUMBER AS accession,
            r.RADIOLOGY_DTM AS study_datetime, s.STUDY_DESCRIPTION AS study_description,
            CAST(s.PROCEDURE_CODE_CODING_CODE AS STRING) AS procedure_code,
            CONCAT_WS(' ', r.RADIOLOGY_REPORT, r.RADIOLOGY_IMPRESSION) AS report_text,
@@ -140,6 +141,25 @@ def build_request(series: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
               "instances_requested": int(keep.n_instances.sum()), "instances_total": int(s.n_instances.sum())}
     cols = ["stmo", "modality", "study_uid", "series_uid", "series_description", "kind", "n_instances"]
     return keep[cols].reset_index(drop=True), report
+
+
+DEID_COLUMNS = ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
+
+
+def deid_request(studies: pd.DataFrame, req: pd.DataFrame) -> pd.DataFrame:
+    """The file MCP asks for (TSM, 2026-10-15): one row per selected study, with STUDY_INSTANCE_UID,
+    PATIENT_DK, MODALITY and STMO_NAME_IN_ADL. Selected = the studies build_request kept (a de-identifiable
+    short-axis LGE series). MCP de-identifies whole studies; io.select_series picks the LGE and cine series
+    from the delivered files."""
+    keep = studies[studies.study_uid.isin(req.study_uid)]
+    out = pd.DataFrame({"STUDY_INSTANCE_UID": keep.study_uid.astype(str), "PATIENT_DK": keep.patient_dk,
+                        "MODALITY": keep.get("modality", pd.Series("MR", index=keep.index)).fillna("MR"),
+                        "STMO_NAME_IN_ADL": keep.stmo})
+    out = out.drop_duplicates(["STUDY_INSTANCE_UID", "STMO_NAME_IN_ADL"]).reset_index(drop=True)
+    missing = out[DEID_COLUMNS].isna().any(axis=1)
+    if missing.any():
+        raise ValueError(f"{int(missing.sum())} studies lack a value in {DEID_COLUMNS} (check patient_dk_source)")
+    return out[DEID_COLUMNS]
 
 
 def build_study_table(studies: pd.DataFrame, delivered_root: str) -> pd.DataFrame:

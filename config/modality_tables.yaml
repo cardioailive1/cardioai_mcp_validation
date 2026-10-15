@@ -100,6 +100,10 @@ mri:
     # CONFIRM with MCP how they map (a crosswalk table, or the same value) and fill this in:
     person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
     deid_ok: [Ready, Available]
+    # De-identification request (MCP TSM, 2026-10-15): a CSV of the selected studies with STUDY_INSTANCE_UID,
+    # PATIENT_DK, MODALITY, STMO_NAME_IN_ADL (mcp_imaging.deid_request). PATIENT_DK is read from this column
+    # (r = FACT_RADIOLOGY, s = FACT_IMAGINGSTUDY); CONFIRM which table carries it in the workspace.
+    patient_dk_source: r.PATIENT_DK
   requirements:            # MRI agent input spec (mri_training/, runtime 1.0.0)
     sequences: [LGE short axis (required), cine SSFP short axis (for LVEF)]
     min_slices: 3

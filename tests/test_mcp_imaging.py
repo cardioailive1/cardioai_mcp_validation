@@ -31,7 +31,7 @@ def _db():
     con.execute("""CREATE TABLE FACT_RADIOLOGY_DICOM_INVENTORY (PATIENT_CLINIC_NUMBER VARCHAR, DICOM_ACCESSION_NUMBER VARCHAR,
                    STMO_NAME_IN_ADL VARCHAR, MODALITY VARCHAR, STUDY_INSTANCE_UID VARCHAR, SERIES_INSTANCE_UID VARCHAR,
                    SOP_INSTANCE_UID VARCHAR, STUDY_DESCRIPTION VARCHAR, SERIES_DESCRIPTION VARCHAR, IMAGE_DEID_STATUS VARCHAR)""")
-    con.execute("""CREATE TABLE FACT_RADIOLOGY (ACCESSION_NBR VARCHAR, RADIOLOGY_DTM TIMESTAMP, RADIOLOGY_REPORT VARCHAR,
+    con.execute("""CREATE TABLE FACT_RADIOLOGY (ACCESSION_NBR VARCHAR, PATIENT_DK BIGINT, RADIOLOGY_DTM TIMESTAMP, RADIOLOGY_REPORT VARCHAR,
                    RADIOLOGY_IMPRESSION VARCHAR, SERVICE_MODALITY_CODE VARCHAR, SERVICE_RESULT_STATUS VARCHAR)""")
     studies = [  # uid, clinic, cpt, description, status, report, series deid override
         ("1.1", "C1", "75561", "MR HEART WITH CONTRAST", "Final", "Subendocardial LGE consistent with infarction.", None),
@@ -43,7 +43,8 @@ def _db():
     for k, (uid, cn, cpt, desc, status, rep, deid) in enumerate(studies):
         acc = f"A{k}"
         con.execute("INSERT INTO FACT_IMAGINGSTUDY VALUES (?, ?, 'STMO1', 'MR', NULL, ?, ?, ?, 6, 297)", [cn, uid, desc, cpt, desc])
-        con.execute("INSERT INTO FACT_RADIOLOGY VALUES (?, TIMESTAMP '2022-03-01 10:00:00', ?, 'Impression.', 'MR', ?)", [acc, rep, status])
+        con.execute("INSERT INTO FACT_RADIOLOGY VALUES (?, ?, TIMESTAMP '2022-03-01 10:00:00', ?, 'Impression.', 'MR', ?)",
+                    [acc, 1000 + k, rep, status])
         for j, (sd, n, st_) in enumerate(SERIES):
             for i in range(n):
                 con.execute("INSERT INTO FACT_RADIOLOGY_DICOM_INVENTORY VALUES (?, ?, 'STMO1', 'MR', ?, ?, ?, ?, ?, ?)",
@@ -63,6 +64,10 @@ def test_find_request_and_build_study_table(tmp_path):
     assert set(req.study_uid) == {"1.1", "1.2"} and rep["studies_without_lge_or_not_deidentifiable"] == 1
     assert sorted(req.series_description.unique()) == ["SA LGE PSIR", "SA cine SSFP"]   # no localiser, 4ch, mapping
     assert rep["instances_requested"] == 2 * (250 + 10) < rep["instances_total"]
+    deid = mi.deid_request(studies, req)                                          # the file MCP asked for
+    assert list(deid.columns) == ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
+    assert sorted(deid.STUDY_INSTANCE_UID) == ["1.1", "1.2"] and set(deid.MODALITY) == {"MR"}
+    assert sorted(deid.PATIENT_DK) == [1000, 1001] and set(deid.STMO_NAME_IN_ADL) == {"STMO1"}
     # delivery: one folder per study (here written as synthetic DICOM)
     lge, cine, _ = S.study(seed=3, n_slices=6, phases=8)
     import io
