@@ -16,14 +16,23 @@ A cardiac MRI model trained inside the Mayo Clinic Platform workspace. It confir
 
 GroupNorm replaces MobileNetV3's BatchNorm. Each training step is one study's slices from one sequence, so BatchNorm would learn per-study statistics in training but use pooled running statistics in serving. It would also wipe out the constant sequence channel. GroupNorm behaves the same in both.
 
-## Training data (hybrid)
+## Training data: Mayo only (decided 2026-10-15)
 
-| Stage | Data | Loss |
+The model is trained entirely on Mayo data, by time period, like the new ECG model:
+
+| Period | Use |
+|---|---|
+| Studies before 2020-01-01 | Training: self-supervised pretraining, reader outlines, report labels |
+| 2020 | Tuning: model selection and locked thresholds |
+| 2021-01-01 onward (plus held-out sites) | Test, and the Phase 2 cohort (its patients excluded from training) |
+
+| Step | Data | Method |
 |---|---|---|
-| A: segmentation | Public annotated sets (EMIDEC, MyoPS LGE; ACDC cine) and about 300 Mayo studies contoured by readers (LGE, plus cine at ED and ES; 10% double-read) | Class-balanced cross-entropy plus Dice. Classes a dataset doesn't draw are counted under the class that contains them (MyoPS MVO → scar, ACDC scar → myocardium, EMIDEC RV → background) |
-| B: whole model | Every Mayo study, with report labels for the four findings (masked where the report is silent), plus the contoured and public studies for segmentation | Segmentation loss plus masked BCE on the study findings |
+| 0: encoder pretraining (`pretrain.py`) | Unlabelled short-axis LGE and cine slices of every training-period study | Self-supervised SimCLR. No outside data or weights; tuning and test periods untouched (refused if present) |
+| A: segmentation | About 300 Mayo studies outlined by CardioAI readers (LGE, plus cine at ED and ES; 10% read twice) | Class-balanced cross-entropy plus Dice, starting from the pretrained encoder |
+| B: whole model | Every training study's report labels for the four findings (masked where the report is silent), plus the outlined studies | Segmentation loss plus masked BCE on the findings |
 
-**Before training, confirm** each public dataset's label values against its README and check its licence for commercial use (`config.yaml` → `public_datasets`).
+No public dataset or outside pretrained weights are used: `use_public_datasets: false` makes training refuse public rows. The public-dataset settings stay in `config.yaml` only for reference. Why no outside weights: no medical-imaging MobileNetV3 exists (RadImageNet offers ResNet-50, DenseNet-121 and Inception-V3 only), and ImageNet MobileNetV3 weights carry dataset terms that would need a legal check for commercial use.
 
 ## Order of work in the MCP workspace
 
@@ -57,19 +66,20 @@ GroupNorm replaces MobileNetV3's BatchNorm. Each training step is one study's sl
    ```
    The build refuses to continue if any patient appears in two splits.
 4. **Contour about 300 studies** with the annotation kit (`annotation/README.md`: worklist, pre-drawn outlines, tool options, reader protocol, checks and double-read agreement). Readers draw LV pool, myocardium, scar, MVO and RV on the short-axis LGE, and LV pool, myocardium and RV on cine at ED and ES. Spread the studies across splits and over-sample post-STEMI studies. Save one `.npz` per study: `lge` (S, H, W) in `read_study()` slice order, and optionally `cine` (K, S, H, W) with `cine_phases` (K,). Put its path in the manifest's `label_uri` column.
-5. **List the public sets** in a CSV with columns `source,image_uri,label_uri` (NIfTI), on the machine **outside** MCP where they are stored.
-6. **Train.** MCP asks that the public datasets stay **outside** the workspace (2026-10-14), so Stage A on public data runs outside and only its weights come in:
+5. **Pretrain the encoder on Mayo images** (A100, training period only):
    ```bash
-   # outside MCP (CardioAI GPU): segmentation on the public sets only
-   python -m mri_training.train --public public.csv --out runs/public_v1
-   # bring runs/public_v1/weights.pt + model_card.json into the workspace (MCP import process), then on an A100:
    pip install -r requirements-mri.txt      # CUDA build of torch matching the workspace driver
-   python -m mri_training.train --manifest /workspace/mri/manifest.parquet --init runs/public_v1 \
+   python -m mri_training.pretrain --manifest /workspace/mri/manifest.parquet --out /workspace/mri/runs/ssl_v1 --device cuda
+   ```
+   - It writes `encoder.pt` and `pretrain_card.json` (data period, studies and slices, settings, loss).
+   - It refuses studies dated on or after `tune_start`, so the tuning and test periods are never seen.
+6. **Train:**
+   ```bash
+   python -m mri_training.train --manifest /workspace/mri/manifest.parquet --init /workspace/mri/runs/ssl_v1 \
           --out /workspace/mri/runs/v1 --cache-dir /workspace/mri/cache --device cuda
    ```
-   - `--init` loads the public-data weights strictly. Their hash and the public sets they came from are recorded in the model card (`initialised_from`).
-   - Inside MCP, Stage A then fine-tunes on the Mayo reader outlines, and Stage B adds the report labels.
-   - The same public-data bundle pre-draws outlines for the readers (`annotation/README.md`).
+   - `--init` loads the pretrained encoder strictly; the decoder and finding heads start fresh. Its hash and data period go into the model card (`initialised_from`).
+   - With `--stage-a-only` (segmentation only), the same command produces the model that pre-draws outlines for the readers (`annotation/README.md`, step 3).
    - Thresholds are fitted on the `tune` split only, with headroom above the Phase 2 goals. Metrics are reported on `test_time` (2021 on) and `test_site`:
      - finding AUROC, sensitivity and specificity;
      - Dice per structure;

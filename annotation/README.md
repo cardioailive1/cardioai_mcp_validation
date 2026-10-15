@@ -20,7 +20,7 @@ Mayo images can't leave the Mayo Clinic Platform workspace, so annotation happen
 | GPU | Shared reservation of **A100 40 GB** machines; other types on request | Training and pre-drawing run on an A100 (`--device cuda`) |
 | Reports | Radiology (incl. cardiac MRI) in **FACT_RADIOLOGY**; echo notes in **FACT_ECHO_TEST.ECHO_NOTE** | Report labels come from these (`config/modality_tables.yaml`; columns to confirm) |
 | Existing annotations | None: labels are what reports and echo notes say | As planned: report labels for every study, reader outlines for the 300 |
-| Public datasets | **Keep them outside the environment** if possible; import only on request if essential | The pre-drawing model is trained **outside** MCP on the public sets; only its weights come in (`--init`) |
+| Public datasets | **Keep them outside the environment** if possible | **Not used** (2026-10-15): the MRI model is trained on Mayo data only. Outlines are pre-drawn by a Mayo model trained on the first reader outlines |
 
 Answered on 2026-10-15:
 - **Images:** DICOM files are requested through `FACT_RADIOLOGY_DICOM_INVENTORY` and linked to `FACT_RADIOLOGY` by accession number (`mri_training.mcp_imaging` builds the request).
@@ -37,10 +37,13 @@ request steps, turnaround and where delivered files land; whether echo DICOM is 
 ```
 1. check    python -m annotation.check_workspace                       -> which tools can run here (send to MCP)
 2. select   python -m annotation.select mri --manifest manifest.parquet --readers r01,r02,r03 --out worklist.csv
-3. pre-draw (MRI) OUTSIDE MCP (our own GPU), train on the public sets only, then import the bundle:
-            python -m mri_training.train --public public.csv --out runs/prelabel      # outside MCP
-            (bring runs/prelabel/weights.pt + model_card.json into the workspace through MCP's import process)
-4. export   python -m annotation.export mri --worklist worklist.csv --out /workspace/annotation --bundle runs/prelabel
+3. pre-draw (MRI, Mayo only) bootstrap in rounds:
+            round 1: export the first ~40 studies WITHOUT --bundle; readers outline them from scratch
+            then:    python -m mri_training.pretrain --manifest manifest.parquet --out runs/ssl_v1          (once)
+                     python -m mri_training.train --manifest manifest_with_labels.parquet --init runs/ssl_v1 \
+                            --stage-a-only --out runs/prelabel_r1     # segmentation model from the outlines so far
+            round 2+: export the next studies WITH --bundle runs/prelabel_rN; retrain every ~100 studies
+4. export   python -m annotation.export mri --worklist worklist.csv --out /workspace/annotation [--bundle runs/prelabel_rN]
 5. annotate readers open <out>/<reader>/<study>/ in the tool and correct the *_label.nii.gz files (protocol below)
 6. collect  python -m annotation.collect mri --root /workspace/annotation --out /workspace/mri/contours
 7. use      join contours/label_uri.csv into the MRI manifest (label_uri column) and train

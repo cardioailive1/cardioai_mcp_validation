@@ -6,9 +6,13 @@
 model_name: cardioai-mri-mobilenetv3-unet
 study_heads: [infarct, nonischemic_lge, lv_thrombus, lv_aneurysm]
 
-# Hybrid training data ---------------------------------------------------------------------------
-# Stage A (segmentation): public annotated sets + Mayo studies contoured by readers.
-# Stage B (whole model): Mayo report labels for every study + the contoured subset.
+# Training data: Mayo only (decided 2026-10-15) ------------------------------------------------------
+# 0. Self-supervised pretraining of the encoder on unlabelled Mayo short-axis LGE + cine slices from the
+#    training period (pretrain.py), no outside data or weights.
+# Stage A (segmentation): Mayo studies outlined by CardioAI readers (annotation/), starting from that encoder.
+# Stage B (whole model): Mayo report labels for every training study + the outlined subset.
+# Periods, as for the ECG model: train < 2020-01-01, tune 2020, test (and Phase 2) from 2021-01-01.
+use_public_datasets: false          # the public sets below are kept for reference only; train.py refuses them
 public_datasets:
   # label value in the dataset -> our class (0 bg, 1 LV pool, 2 myocardium, 3 scar, 4 MVO, 5 RV pool).
   # `annotated` = classes the dataset labels. Other classes are unknown there and are counted under
@@ -50,8 +54,18 @@ splits:
 
 arch: {width: 1.0, dropout: 0.2}
 
+pretrain:                           # self-supervised encoder pretraining (pretrain.py), training split only
+  epochs: 100
+  batch_size: 512                   # slices per step; NT-Xent negatives = the rest of the batch (A100 40 GB)
+  lr: 0.002
+  weight_decay: 0.0001
+  temperature: 0.2
+  proj_dim: 128
+  cine_phases: 2                    # cine phases sampled per study (LGE: every slice)
+  augment: {rotate_deg: 20, scale: [0.6, 1.0], gamma: [0.7, 1.4], contrast: [0.8, 1.2], blur_p: 0.3, noise: 0.03}
+
 train:
-  stage_a_epochs: 60                # segmentation only (public + contoured Mayo)
+  stage_a_epochs: 60                # segmentation only (Mayo reader outlines)
   stage_b_epochs: 30                # whole model (all Mayo studies)
   lr: 0.0005
   weight_decay: 0.0001

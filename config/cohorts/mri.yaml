@@ -7,7 +7,7 @@
 # Trained on Mayo CMR inside MCP (MobileNetV3 export approved), so this is an INTERNAL held-out
 #   validation: studies from 2021 on (training uses earlier years), and these patients are excluded
 #   from training (mri_training/config.yaml: exclude_persons_table). Lock this cohort BEFORE training.
-#   Report a public external set alongside (EMIDEC test set for infarct size / MVO).
+#   A public external test set (e.g. EMIDEC) may be reported alongside if its licence allows; it is never used in training.
 # Not one of the deck's five Phase 1 agents: no `expected` block, and not in cardioai_mcp.COHORTS
 #   (deck cohorts); listed in cardioai_mcp.EXTRA_COHORTS. Goals below are PROPOSED for the clinical
 #   lead to confirm before the cohort is locked.
@@ -16,7 +16,7 @@ key: mri
 study_id: CA-AGENTS-VAL-PHASE2-MRI
 title: Cardiac MRI Infarct and STEMI Work-up Validation Cohort
 agent: mri_agent
-phase1_source: "Mayo CMR before 2021 (mri_training) + public EMIDEC / MyoPS / ACDC for segmentation pre-training"
+phase1_source: "Mayo CMR only (mri_training): self-supervised encoder + reader outlines + report labels, studies before 2020; tuned on 2020"
 target_n: 1000
 target_sites: 3
 
@@ -157,7 +157,7 @@ predictions:
     runtime_s: "seconds per study"
     runtime_fingerprint: "mri_training.runtime.fingerprint() (must equal the model card)"
   known_limitations:
-    - "Internal validation: same institution as training, separated by time (2021+) and patient. Report the EMIDEC test set alongside for infarct size and MVO against expert contours."
+    - "Internal validation: same institution as training, separated by time (2021+) and patient. Infarct size, MVO and transmurality are also checked against CardioAI reader outlines on test-period studies (model card)."
     - "The reference is the signed CMR report (reader's qualitative call); infarct size is stated in a minority of reports, so its agreement endpoint uses the subset where it is stated, plus the reader-contoured test studies in the model card."
     - "Transmurality per AHA segment is compared with reader contours in the model card (test_time), not with reports, which rarely state all 16 segments."
     - "LV thrombus and aneurysm are rare: their sensitivity estimates will have wide intervals at this N; reported, not powered."
