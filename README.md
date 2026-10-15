@@ -20,7 +20,7 @@ Models trained inside MCP, with MobileNetV3 weights approved for export, live ne
 - `ecg_training/`: acute MI, STEMI and AF from 12-lead ECGs;
 - `mri_training/`: infarct, scar extent and STEMI work-up from cardiac MRI.
 
-Each has its own README. `annotation/` prepares Mayo images for readers inside the workspace (MRI contours; optional echo traces), checks what they draw and writes the training labels.
+Each has its own README. `annotation/` prepares Mayo images for readers inside the workspace (MRI contours; optional echo traces), checks what they draw and writes the training labels. It also audits the automatic labels (data scientists first, cardiologist adjudication): [annotation/LABEL_AUDIT.md](annotation/LABEL_AUDIT.md).
 
 ## Layout
 ```

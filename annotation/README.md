@@ -8,6 +8,8 @@ Mayo images can't leave the Mayo Clinic Platform workspace, so annotation happen
 | **Echo** | Optional QC. LV cavity traced on two frames (end-diastole, end-systole) of the A4C cine | Checks the EchoNet segmentation behind EF and volumes on Mayo data. The Phase 2 echo endpoints use the report reference, so they don't depend on this | 100 studies, 10% read twice |
 | ECG, CAD, Risk, Longitudinal | None | Labels come from reports, over-reads and EHR codes | — |
 
+The **automatic labels** (report rules, troponin logic, pre-drawn outlines) are checked before training by data scientists, with a cardiologist adjudicating: see [LABEL_AUDIT.md](LABEL_AUDIT.md) and `annotation/label_audit.py`.
+
 ## Set-up agreed with MCP (Adam Resnick, 2026-10-14)
 
 | Item | Answer | What it means for us |
@@ -54,6 +56,7 @@ request steps, turnaround and where delivered files land; whether echo DICOM is 
   - It **warns** about MVO with no surrounding scar, scar with no viable myocardium, a missing RV (needed to place the AHA segments), and an ES cavity that isn't smaller than ED.
 - **Double reads:** these go to `agreement.csv`, with Dice per structure plus the infarct-size and EF differences between readers. The numbers go into the model card. Training uses the primary reader (`reader_1`).
 - **Reader codes:** use codes, not names, because they end up in folder names.
+- **Outline QC:** grade each batch with `python -m annotation.label_audit outlines ...` (pre-drawn before readers, corrected after `collect`). See [LABEL_AUDIT.md](LABEL_AUDIT.md), part 4.
 
 ## Choosing the tool
 

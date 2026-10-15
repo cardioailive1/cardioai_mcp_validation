@@ -33,3 +33,62 @@ echo_lv_traces:
   labels: {0: background, 1: lv_cavity}
   frames: "exactly two frames labelled per cine: end-diastole and end-systole (reader's choice)"
   min_minutes_per_study: 5
+
+# =============================================================================
+# Label audit (annotation/label_audit.py, protocol in annotation/LABEL_AUDIT.md).
+# Tier 1: data scientists check the AUTOMATIC labels against their source, blinded to the automatic value.
+# Tier 2: a cardiologist adjudicates every disagreement and every "U" (uncertain), signs off the rule
+#         sheets, and re-reads a blinded spot-check of rows the data scientists agreed on.
+# Everything here (sheets with report text, outline folders) stays in the MCP workspace.
+# =============================================================================
+label_audit:
+  seed: 20261015
+  pass:
+    ppv_min: 0.95                 # P(reference = 1 | automatic label = 1)
+    npv_min: 0.95                 # P(reference = 0 | automatic label = 0)
+    ci_lower_min: 0.90            # Wilson 95% lower bound of PPV and NPV
+    kappa_min: 0.80               # data scientist 1 vs 2 (the rule sheet is clear enough to apply the same way)
+    ds_vs_cardiologist_min: 0.90  # spot-check agreement (data scientists read the reports as a cardiologist would)
+    value_tolerance: 0.5          # stated numbers (LVEF %, infarct size %) count as matching within this
+    value_match_min: 0.98
+    value_miss_max: 0.05          # stated numbers the regex did not pick up (keyword present, no value extracted)
+    troponin_match_min: 1.0       # recomputed troponin flag must match exactly: any mismatch is a code bug
+  second_auditor_fraction: 0.20
+  cardiologist_spot_check_fraction: 0.10
+  mri:
+    id: study_id
+    text: report_text
+    random: 300                   # simple random sample of reports: NPV for every label, PPV for common ones
+    min_positive: 100             # top up automatic positives per label to at least this many
+    hard: 25                      # per label: reports with negation / hedging near the label's words
+    labels:
+      infarct: {keywords: 'infarct|lge|late gadolinium|enhancement|scar'}
+      nonischemic_lge: {keywords: 'mid[- ]?wall|epicardial|non[- ]?isch|myocarditis|sarcoid|amyloid|hypertrophic|insertion'}
+      lv_thrombus: {keywords: 'thromb'}
+      lv_aneurysm: {keywords: 'aneurysm'}
+      report_mvo: {keywords: 'microvascular|mvo|no[- ]reflow'}
+    values:
+      report_lvef: {keywords: 'lvef|ejection fraction'}
+      report_infarct_size: {keywords: 'infarct size|scar burden|lge burden|extent of (late )?enhancement'}
+    missing: 25                   # per value: keyword present but no value extracted (misses)
+  ecg:
+    id: ecg_id
+    text: read_text
+    random: 300
+    min_positive: 100
+    hard: 25
+    labels:
+      af: {keywords: 'atrial (fibrillation|flutter)|afib|a-fib'}
+    values: {}
+    missing: 0
+    rr_regular_cv: 0.08           # AF-labelled ECG with RR coefficient of variation below this -> flagged
+    rr_irregular_cv: 0.20         # non-AF ECG with RR CV above this -> flagged (could also be ectopy)
+  hedge: '\b(no|not|without|negative for|cannot (be )?(excluded?|ruled out)|can ?not exclude|possible|possibly|probable|probably|suspicious|suggestive|equivocal|questionable|history of|prior|previous|old|resolved|rule out|r/o|vs\.?|versus)\b'
+  outlines:
+    double_grade_fraction: 0.10
+    cardiologist_spot_check_A: 0.10
+    lvef_report_diff_max: 10      # model LVEF vs report LVEF, percentage points
+    infarct_size_report_diff_max: 10
+    lvef_range: [10, 80]
+    infarct_pct_max: 60
+    min_lv_slices: 3
