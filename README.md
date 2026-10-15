@@ -48,7 +48,7 @@ tests/            synthetic OMOP generator, pytest end-to-end, local-Spark check
 ```
 
 ## Running on MCP
-**Step-by-step validation guide: [VALIDATION_RUNBOOK.md](VALIDATION_RUNBOOK.md).** Summary:
+**Step-by-step validation guide: [VALIDATION_RUNBOOK.md](VALIDATION_RUNBOOK.md).** Agent runbooks for the models trained in MCP: [RUNBOOK_ECG.md](RUNBOOK_ECG.md) and [RUNBOOK_MRI.md](RUNBOOK_MRI.md). Summary:
 
 1. **Onboard.** Run `python scripts/discover_schema.py`, then set `schemas` and `site_map` in `config/study.yaml` and the ECG/echo table names in `config/modality_tables.yaml` (`enabled: true`). Until these are set, the builder falls back to OMOP proxies: procedure codes, LOINC ECG/echo measurements, and NOTE text.
 2. **Concept sign-off.** `exports/concept_sets_detail_for_review.csv` lists every concept. Rows with `needs_review = 1` came from concept-name searches (the echo dimensions and pack-years) and need a clinician's sign-off.
