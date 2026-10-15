@@ -67,11 +67,15 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    studies = mi.find_cmr_studies(eng, study["modality"])     # MR cardiac studies with a final report
    series = mi.list_series(eng, study["modality"], studies)
    req, report = mi.build_request(series)                     # short-axis LGE + cine series only
-   req.to_csv("/workspace/mri/dicom_request.csv"); report
+   deid = mi.deid_request(studies, req)                       # one row per selected study
+   deid.to_csv("/workspace/mri/deid_request.csv", index=False); report
    ```
    Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `report`.
 
-3. **Submit the de-identification request** through MCP with `dicom_request.csv`.
+3. **Send `deid_request.csv` to the MCP Technical Success Manager (TSM).** It has one row per selected study, with the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
+   - MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
+   - `PATIENT_DK` is read from `FACT_RADIOLOGY` by default (`mri.mcp.patient_dk_source`). If the workspace has it in another table, change that setting.
+   - Check the file before sending: no empty cells, and the row count matches `report["studies_with_lge"]`.
 
 4. **After delivery, build the study table and the manifest.**
    ```python

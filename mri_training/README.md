@@ -43,7 +43,8 @@ No public dataset or outside pretrained weights are used: `use_public_datasets: 
    studies = mi.find_cmr_studies(eng, study["modality"])        # MR, cardiac CPT/description, final report
    series = mi.list_series(eng, study["modality"], studies)
    req, report = mi.build_request(series)                        # short-axis LGE + cine series only
-   req.to_csv("/workspace/mri/dicom_request.csv"); report        # submit the request through MCP
+   mi.deid_request(studies, req).to_csv("/workspace/mri/deid_request.csv", index=False)   # send to the MCP TSM
+   report
    # after delivery (one folder per study):
    cmr = mi.build_study_table(studies, "/workspace/mri/dicom")
    spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")   # = modality_tables mri.table
