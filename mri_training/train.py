@@ -446,18 +446,33 @@ def public_rows(csv_path: str, cfg: dict, tune_fraction: float = 0.1, seed: Opti
 
 
 def load_init(model, init: str, log: Callable[[str], None]) -> dict:
-    """Start from weights trained elsewhere (e.g. on the public sets OUTSIDE MCP): plain state_dict, strict."""
+    """Start from earlier weights: the self-supervised Mayo encoder (pretrain.py: encoder.pt, encoder only,
+    decoder and heads start fresh) or a whole model (weights.pt). Plain state_dict, strict on what it holds."""
+    from .pretrain import ENCODER_PREFIXES
     p = Path(init)
-    wpath = p / "weights.pt" if p.is_dir() else p
+    if p.is_dir():
+        p = p / "encoder.pt" if (p / "encoder.pt").exists() else p / "weights.pt"
+    wpath = p
     state = torch.load(wpath, map_location="cpu", weights_only=True)
     if not isinstance(state, dict) or not all(isinstance(v, torch.Tensor) for v in state.values()):
-        raise TypeError("--init must be a plain state_dict (weights.pt from mri_training.train)")
-    model.load_state_dict(state, strict=True)
-    info = {"weights_sha256": hashlib.sha256(wpath.read_bytes()).hexdigest(), "path": str(wpath)}
-    card = wpath.parent / "model_card.json"
-    if card.exists():                                   # provenance of the starting point (which public sets)
-        c = json.loads(card.read_text())
-        info.update({k: c.get(k) for k in ("model_name", "runtime_fingerprint", "public_studies", "public_datasets", "code_commit")})
+        raise TypeError("--init must be a plain state_dict (encoder.pt from pretrain.py or weights.pt from train.py)")
+    encoder_only = all(k.startswith(ENCODER_PREFIXES) for k in state)
+    if encoder_only:
+        want = {k for k in model.state_dict() if k.startswith(ENCODER_PREFIXES)}
+        if set(state) != want:
+            raise RuntimeError(f"encoder weights do not match this architecture ({len(set(state) ^ want)} keys differ)")
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        assert not unexpected and all(not k.startswith(ENCODER_PREFIXES) for k in missing)
+    else:
+        model.load_state_dict(state, strict=True)
+    info = {"weights_sha256": hashlib.sha256(wpath.read_bytes()).hexdigest(), "path": str(wpath),
+            "scope": "encoder" if encoder_only else "whole model"}
+    for name in ("pretrain_card.json", "model_card.json"):          # provenance of the starting point
+        card = wpath.parent / name
+        if card.exists():
+            c = json.loads(card.read_text())
+            info.update({k: c.get(k) for k in ("kind", "method", "model_name", "runtime_fingerprint", "data", "public_studies",
+                                               "public_datasets", "uses_outside_data", "code_commit") if k in c})
     log(f"initialised from {wpath} ({info['weights_sha256'][:12]})")
     return info
 
@@ -476,6 +491,8 @@ def train(m: pd.DataFrame, cfg: dict, out_dir: str, loader: Loader = load_exampl
     if "source" not in m:
         m["source"] = "mayo"
     m["source"] = m["source"].fillna("mayo")
+    if not cfg.get("use_public_datasets", True) and (m.source != "mayo").any():
+        raise ValueError("config use_public_datasets is false (Mayo-only training): remove the public rows")
     for h in heads:
         if h not in m:
             m[h] = np.nan
@@ -561,8 +578,10 @@ def main():
     ap.add_argument("--config", default=None)
     ap.add_argument("--device", default=None)
     ap.add_argument("--cache-dir", default=None)
+    ap.add_argument("--stage-a-only", action="store_true",
+                    help="segmentation only (no report-label stage): the model that pre-draws outlines for the readers")
     ap.add_argument("--init", default=None,
-                    help="start from weights.pt (or its bundle folder) trained elsewhere, e.g. on the public sets outside MCP")
+                    help="start from the self-supervised Mayo encoder (pretrain.py output folder or encoder.pt) or a weights.pt")
     a = ap.parse_args()
     cfg = load_config(a.config)
     if not (a.manifest or a.public):
@@ -571,6 +590,8 @@ def main():
     if a.public:
         parts.append(public_rows(a.public, cfg))
     m = pd.concat(parts, ignore_index=True)
+    if a.stage_a_only:
+        cfg["train"]["stage_b_epochs"] = 0
     card = train(m, cfg, a.out, device=a.device, cache_dir=a.cache_dir, init=a.init)
     print(json.dumps({k: card[k] for k in ("parameters", "thresholds", "runtime_fingerprint", "weights_sha256")}, indent=2))
 

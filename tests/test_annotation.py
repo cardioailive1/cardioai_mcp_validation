@@ -223,35 +223,29 @@ def test_workspace_check_runs():
     assert r["local_web_server"]["ok"]
 
 
-def test_public_only_training_gives_a_prelabel_bundle(tmp_path):
-    """Step 3 of the workflow: a model trained on public sets only (no Mayo rows) pre-draws for the readers."""
+def test_mayo_stage_a_model_pre_draws_for_readers(tmp_path):
+    """Workflow step 3 (Mayo-only): a segmentation-only model trained on the first reader outlines, starting
+    from the self-supervised Mayo encoder, pre-draws the remaining studies."""
     from annotation.export import load_prelabel_model
     from mri_training.dataset import load_config
+    from mri_training.pretrain import pretrain
     from mri_training.train import Example, train
     cfg = copy.deepcopy(load_config())
     cfg["arch"]["width"] = 0.25
-    cfg["train"].update(stage_a_epochs=1, stage_b_epochs=1, accumulate_studies=1, augment=None)
+    cfg["pretrain"].update(epochs=1, batch_size=8)
+    cfg["train"].update(stage_a_epochs=1, stage_b_epochs=0, accumulate_studies=1, augment=None)   # = --stage-a-only
 
     def loader(r, _c):
         lge, _, t = S.study(seed=int(r.seed), n_slices=5)
-        return Example(lge=lge, lge_labels=t["labels"], lge_rule={"annotated": [0, 1, 2, 3, 4], "merge": {}})
-    m = pd.DataFrame([dict(source="emidec", image_uri=f"x{i}", label_uri=f"y{i}", split="train" if i < 3 else "tune", seed=i)
+        ex = Example(lge=lge)
+        if r.label_uri:
+            ex.lge_labels, ex.lge_rule = t["labels"], cfg["mayo_contours"]["lge"]
+        return ex
+    m = pd.DataFrame([dict(study_id=f"m{i}", person_id=i, split="train" if i < 3 else "tune", seed=i, study_date="2018-05-01",
+                           infarct=1.0, nonischemic_lge=0.0, lv_thrombus=0.0, lv_aneurysm=0.0, label_uri="x" if i != 1 else "")
                       for i in range(4)])
-    train(m, cfg, str(tmp_path), loader=loader, device="cpu", log=lambda s: None, n_boot=0)
-    model, prov = load_prelabel_model(str(tmp_path))
+    pretrain(m, cfg, str(tmp_path / "ssl"), loader=loader, device="cpu", log=lambda s: None)
+    card = train(m, cfg, str(tmp_path / "pre"), loader=loader, device="cpu", log=lambda s: None, n_boot=0, init=str(tmp_path / "ssl"))
+    assert card["initialised_from"]["scope"] == "encoder" and card["initialised_from"]["uses_outside_data"] is False
+    model, prov = load_prelabel_model(str(tmp_path / "pre"))
     assert model is not None and len(prov["weights_sha256"]) == 64
-    # inside MCP: Mayo-only training starts from the imported public-data weights (public sets stay outside)
-    mayo = pd.DataFrame([dict(study_id=f"m{i}", person_id=i, split="train" if i < 2 else "tune", seed=10 + i, infarct=1.0,
-                              nonischemic_lge=0.0, lv_thrombus=0.0, lv_aneurysm=0.0, label_uri="") for i in range(3)])
-
-    def mayo_loader(r, _c):
-        lge, _, _ = S.study(seed=int(r.seed), n_slices=5)
-        return Example(lge=lge)
-    card = train(mayo, cfg, str(tmp_path / "inside"), loader=mayo_loader, device="cpu", log=lambda s: None, n_boot=0,
-                 init=str(tmp_path))
-    assert card["initialised_from"]["weights_sha256"] == prov["weights_sha256"]
-    assert card["initialised_from"]["public_studies"]                                   # provenance carried over
-    with pytest.raises(RuntimeError):                                                   # strict: wrong architecture refused
-        cfg2 = copy.deepcopy(cfg)
-        cfg2["arch"]["width"] = 0.5
-        train(mayo, cfg2, str(tmp_path / "bad"), loader=mayo_loader, device="cpu", log=lambda s: None, n_boot=0, init=str(tmp_path))
