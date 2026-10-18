@@ -135,7 +135,7 @@ def seg_targets(row: pd.Series) -> torch.Tensor:
 # --------------------------------------------------------------------------- stages
 def train_views(model, clips: pd.DataFrame, cache: ClipCache, cfg: dict, device: str, log, rng) -> List[dict]:
     tc = cfg["train"]
-    lab = clips[clips.view_source.isin(["label", "tag"]) & clips["view"].isin(VIEW_CLASSES)].reset_index(drop=True)
+    lab = clips[clips.view_source.isin(["label", "tag", "sr", "cluster"]) & clips["view"].isin(VIEW_CLASSES)].reset_index(drop=True)
     if not len(lab) or not int(tc["view_epochs"]):
         return []
     opt = torch.optim.AdamW(model.parameters(), lr=float(tc["lr"]), weight_decay=float(tc["weight_decay"]))

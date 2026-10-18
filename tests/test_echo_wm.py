@@ -289,3 +289,62 @@ def test_label_audit_supports_echo():
     assert aa.read("Possible hypokinesis of the inferior wall.")["terr_rca"] == "U"
     assert aa.read("Normal wall motion. LVEF 60%.") == {"wma_any": 0.0, "global_hypokinesis": 0.0, "terr_lad": 0.0,
                                                          "terr_rca": 0.0, "terr_lcx": 0.0, "report_lvef": 60.0}
+
+
+# --------------------------------------------------------------------------- automatic view sources
+def test_views_from_tags_and_measurement_reports(tmp_path):
+    from echo_wm_training.io import list_clips
+    from echo_wm_training.view_sources import coverage, sr_views, study_sr_files, view_from_words
+    from echo_wm_training.views import assign_views
+    _, _, cl = E.study("normal", seed=4, views=("A4C", "A2C", "A3C"), n_frames=44)
+    st = tmp_path / "s1"
+    st.mkdir()
+    (st / "a.dcm").write_bytes(E.dicom_bytes(cl["A4C"], view_tag="Apical 4ch"))
+    (st / "b.dcm").write_bytes(E.dicom_bytes(cl["A2C"]))
+    (st / "c.dcm").write_bytes(E.dicom_bytes(cl["A3C"]))
+    clips = list_clips(str(st), "s1")
+    uid = dict(zip(clips.clip_uri.map(lambda u: Path(u).name), clips.sop_uid))
+    (st / "sr.dcm").write_bytes(E.sr_bytes([(uid["b.dcm"], "Apical two chamber"), (uid["c.dcm"], "Apical long axis")]))
+    clips = list_clips(str(st), "s1")
+    clips = clips[clips.kind == "cine"]
+    sr = sr_views(study_sr_files([str(tmp_path)]))
+    assert dict(zip(sr.sop_uid, sr.view_sr)) == {uid["b.dcm"]: "A2C", uid["c.dcm"]: "A3C"}
+    cov = coverage(clips, sr)
+    assert cov["clips_with_either"] == 3 and cov["studies_with_view"] == {"A4C": 1, "A2C": 1, "A3C": 1}
+    v = assign_views(clips, sr=sr).set_index(clips.clip_uri.map(lambda u: Path(u).name))
+    assert v["view"].to_dict() == {"a.dcm": "A4C", "b.dcm": "A2C", "c.dcm": "A3C"}
+    assert v.view_source.to_dict() == {"a.dcm": "tag", "b.dcm": "sr", "c.dcm": "sr"}
+    assert view_from_words(["Method of Disks, Single Plane", "A4C"]) == "A4C"
+    assert view_from_words(["Biplane", "A4C", "A2C"]) is None                    # two views named: no label
+
+
+def test_clusters_auto_label_and_person_sheet(tmp_path):
+    pytest.importorskip("openpyxl")
+    from echo_wm_training.train import ClipCache
+    from echo_wm_training.view_sources import cluster_table, embed_clips, export_clusters, kmeans, read_clusters
+    store, rows = {}, []
+    for i in range(6):
+        _, _, cl = E.study("normal", seed=40 + i, views=("A4C", "A2C", "other"), n_frames=44)
+        for v, f in cl.items():
+            u = f"mem://{i}/{v}"
+            store[u] = Video(f, fps=25.0)
+            rows.append({"study_id": f"s{i}", "clip_uri": u, "true": v, "view_tag": v if (v == "A4C" and i < 5) else None})
+    clips = pd.DataFrame(rows)
+    X = embed_clips(build_model({"width": 0.35, "d": 32}), clips, ClipCache(lambda u: store[u]))
+    assert X.shape[0] == 18 and np.allclose(np.linalg.norm(X, axis=1), 1, atol=1e-4)
+    lab = kmeans(X, 3, seed=0)
+    assert set(lab) <= {0, 1, 2} and (kmeans(X, 3, seed=0) == lab).all()
+    t = cluster_table(clips, np.where(clips.true == "A4C", 0, np.where(clips.true == "A2C", 1, 2)), auto_purity=0.9, auto_min=5)
+    assert t.set_index("cluster").auto_view.fillna("-").to_dict() == {0: "A4C", 1: "-", 2: "-"}
+    t = export_clusters(clips, np.where(clips.true == "A4C", 0, np.where(clips.true == "A2C", 1, 2)), str(tmp_path),
+                        ClipCache(lambda u: store[u]), ["ds1"], auto_purity=0.9, auto_min=5)
+    assert (tmp_path / "img" / "C001.png").read_bytes()[:4] == b"\x89PNG"
+    from openpyxl import load_workbook
+    wb = load_workbook(tmp_path / "clusters.xlsx")
+    ws = wb["clusters"]
+    assert [ws.cell(r, 1).value for r in (2, 3)] == ["C002", "C003"]             # only groups no source settled
+    ws.cell(2, 5).value, ws.cell(3, 5).value = "A2C", "mixed"
+    wb.save(tmp_path / "clusters.xlsx")
+    v = read_clusters(str(tmp_path))
+    assert set(v.groupby("view").clip_uri.count().to_dict().items()) == {("A4C", 6), ("A2C", 6)}
+    assert set(v.cluster_source) == {"auto", "person"}

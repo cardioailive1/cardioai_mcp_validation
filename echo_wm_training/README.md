@@ -9,7 +9,8 @@ Runbook: [RUNBOOK_ECHO_WM.md](../RUNBOOK_ECHO_WM.md).
 | `labels.py` | Echo report -> 17 segment scores, territories, global hypokinesis, LVEF (the automatic labels; audited) |
 | `mcp_echo.py` | Echo studies from `FACT_ECHO_TEST` + the DICOM inventory; de-identification CSV; study and reference tables |
 | `dataset.py` | Manifest with labels and patient-disjoint splits; clip table (2-D greyscale cines only) |
-| `views.py` | View-labelling sheet (4-frame strips), view labels, view assignment (label > tag > confident model) |
+| `view_sources.py` | Automatic view labels: measurement reports (SR) and DICOM tags, coverage report, clusters of similar clips (auto-labelled when their tagged clips agree, else one picture per group for a person) |
+| `views.py` | Per-clip labelling sheet (last resort), view assignment (person > tag > SR > cluster > confident model) |
 | `pretrain.py` | Self-supervised encoder (SimCLR on nearby frames), training period only |
 | `train.py` | Stage V (views), stage W (segments, LVEF, global), thresholds on 2020, metrics, export bundle |
 | `serve/` | Vertex container (`predictor.py`, `Dockerfile`, `deploy.sh`) |

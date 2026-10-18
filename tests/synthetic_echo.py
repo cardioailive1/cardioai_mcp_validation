@@ -145,3 +145,43 @@ def dataset(n: int, seed: int = 0, kinds=("normal", "lad", "rca", "lcx", "global
             n_frames: int = 40) -> List[Tuple[str, dict, Dict[str, np.ndarray]]]:
     rng = np.random.default_rng(seed)
     return [study(str(rng.choice(kinds)), seed=seed * 1000 + i, views=views, n_frames=n_frames) for i in range(n)]
+
+
+def sr_bytes(refs) -> bytes:
+    """A minimal echo measurement report (Comprehensive SR): one measurement group per (sop_uid, view words)."""
+    from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    from synthetic_cmr import _save
+
+    def code(meaning, value="CODE"):
+        d = Dataset()
+        d.CodeValue, d.CodingSchemeDesignator, d.CodeMeaning = "1", "99X", meaning
+        return d
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.88.33"
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.SOPClassUID, ds.SOPInstanceUID, ds.Modality = meta.MediaStorageSOPClassUID, meta.MediaStorageSOPInstanceUID, "SR"
+    ds.ValueType = "CONTAINER"
+    ds.ConceptNameCodeSequence = Sequence([code("Adult Echocardiography Measurements")])
+    groups = []
+    for uid, words in refs:
+        g = Dataset()
+        g.ValueType, g.ConceptNameCodeSequence = "CONTAINER", Sequence([code("Measurement Group")])
+        v = Dataset()
+        v.ValueType, v.ConceptNameCodeSequence, v.ConceptCodeSequence = "CODE", Sequence([code("Image View")]), Sequence([code(words)])
+        m = Dataset()
+        m.ValueType, m.ConceptNameCodeSequence = "NUM", Sequence([code("LV End Diastolic Volume, Method of Disks")])
+        im = Dataset()
+        r = Dataset()
+        r.ReferencedSOPClassUID, r.ReferencedSOPInstanceUID = "1.2.840.10008.5.1.4.1.1.3.1", uid
+        im.ValueType, im.ReferencedSOPSequence = "IMAGE", Sequence([r])
+        g.ContentSequence = Sequence([v, m, im])
+        groups.append(g)
+    ds.ContentSequence = Sequence(groups)
+    buf = io.BytesIO()
+    _save(ds, buf)
+    return buf.getvalue()

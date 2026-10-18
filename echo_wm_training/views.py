@@ -1,13 +1,11 @@
 """Views of the training clips: DICOM tags, a quick human view-labelling sheet, and the model's view head.
 
-Echo files rarely say which view they are. Training needs to know which clips are apical 4-, 2- and 3-chamber:
+Echo files rarely say which view they are. Training needs to know which clips are apical 4-, 2- and 3-chamber.
+Automatic sources come first (view_sources.py): DICOM tags, the machine's measurement reports (SR), then clusters
+of similar clips labelled a group at a time. The per-clip sheet below is the LAST resort, for what they leave out.
+The view head (train.py stage V) learns from all of them and labels the rest (only confident predictions are used).
 
-  1. tags      : io.list_clips reads the view when the scanner wrote it (view_tag)
-  2. labels    : a person labels a sample of clips (sheet below; about 2,000 clips, ~5 s each from a 4-frame strip)
-  3. view head : train.py stage V learns views from 1 + 2; predict_views() then labels every clip, and only
-                 confident predictions (config views.min_view_prob) are used for training
-
-    python -m echo_wm_training.views sheet --clips /workspace/echo/clips.parquet --n 2000 --labellers ds1,ds2 --out /workspace/echo/views
+    python -m echo_wm_training.views sheet --clips /workspace/echo/clips.parquet --n 300 --labellers ds1,ds2 --out /workspace/echo/views
     ... fill views_<code>.xlsx (view: A4C / A2C / A3C / other) ...
     python -m echo_wm_training.views read --dir /workspace/echo/views --out /workspace/echo/view_labels.csv
 
@@ -115,22 +113,29 @@ def read_view_labels(d: str) -> pd.DataFrame:
 
 
 def assign_views(clips: pd.DataFrame, labels: Optional[pd.DataFrame] = None, predicted: Optional[pd.DataFrame] = None,
-                 min_prob: float = 0.9) -> pd.DataFrame:
-    """view = human label, else DICOM tag, else a confident prediction; view_source says which."""
+                 min_prob: float = 0.9, sr: Optional[pd.DataFrame] = None, clusters: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """view = person's per-clip label > DICOM tag > measurement report (SR) > cluster > confident model prediction;
+    view_source says which (label / tag / sr / cluster / model)."""
     c = clips.copy()
     c["view"], c["view_source"] = None, None
+
+    def put(mask, values, source):
+        mask = mask & values.notna()
+        c.loc[mask, "view"] = values[mask]
+        c.loc[mask, "view_source"] = source
     if predicted is not None and len(predicted):
         p = predicted.set_index("clip_uri")
         ok = c.clip_uri.map(p.view_p).fillna(0) >= min_prob
-        c.loc[ok, "view"] = c.loc[ok, "clip_uri"].map(p["view"])
-        c.loc[ok, "view_source"] = "model"
+        put(ok, c.clip_uri.map(p["view"]), "model")
+    if clusters is not None and len(clusters):
+        put(pd.Series(True, index=c.index), c.clip_uri.map(clusters.set_index("clip_uri")["view"]), "cluster")
+    if sr is not None and len(sr) and "sop_uid" in c:
+        srv = sr.dropna(subset=["view_sr"]).set_index("sop_uid").view_sr
+        put(pd.Series(True, index=c.index), c.sop_uid.map(srv), "sr")
     if "view_tag" in c:
-        t = c.view_tag.notna()
-        c.loc[t, "view"], c.loc[t, "view_source"] = c.loc[t, "view_tag"], "tag"
+        put(c.view_tag.notna(), c.view_tag, "tag")
     if labels is not None and len(labels):
-        lab = labels.set_index("clip_uri").view
-        h = c.clip_uri.isin(lab.index)
-        c.loc[h, "view"], c.loc[h, "view_source"] = c.loc[h, "clip_uri"].map(lab), "label"
+        put(pd.Series(True, index=c.index), c.clip_uri.map(labels.set_index("clip_uri")["view"]), "label")
     c.loc[c["view"].notna() & ~c["view"].isin(VIEWS), "view"] = "other"
     return c
 

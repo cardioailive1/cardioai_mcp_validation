@@ -17,7 +17,7 @@ The model is trained **only on Mayo data** inside the MCP workspace, like the EC
 | Input | Greyscale apical cines (A4C, A2C, A3C), at least one, all three for all 17 segments; 1.6 s at 20 fps, 112 px |
 | Periods | Echos before 2020-01-01 train it, 2020 tunes it, 2021 onward (plus held-out sites) tests it. Patients in the locked Phase 2 echo cohort never train it |
 | Mayo data | **Reports:** `FACT_ECHO_TEST.ECHO_NOTE`. **Images:** echo DICOM requested for de-identification from `FACT_RADIOLOGY_DICOM_INVENTORY` (`MODALITY = 'US'`) |
-| Labels | Automatic: the report's wall-motion statement parsed into 17 segment scores (`labels.parse_report`), audited by data scientists and the cardiologist (`annotation/LABEL_AUDIT.md`). Views: people label about 2,000 clips, then a view model labels the rest |
+| Labels | Automatic: the report's wall-motion statement parsed into 17 segment scores (`labels.parse_report`), audited by data scientists and the cardiologist (`annotation/LABEL_AUDIT.md`). Views: automatic first (DICOM tags, the machine's measurement reports, clusters whose tagged clips agree); people label only the remaining clusters (about 60 pictures) and, if needed, a few hundred single clips |
 | Phase 2 goals | Any wall-motion abnormality: sensitivity and specificity ≥ 0.85 (deck). Proposed (clinical-lead sign-off sheet): each territory ≥ 0.80, global hypokinesis ≥ 0.85, WMSI error ≤ 0.20 |
 | Exported | `weights.pt`, `thresholds.json`, `model_card.json` only |
 
@@ -74,17 +74,31 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
    ```
    Every label must PASS (PPV and NPV ≥ 0.95, lower bound ≥ 0.90). On a FAIL, fix `labels.py`, rebuild and re-audit on a fresh sample.
 
-5. **Label views on a sample of clips.** Untagged clips get a 4-frame strip and a sheet (A4C / A2C / A3C / other), about 5 s per clip.
+5. **Get the clip views, automatic sources first.**
    ```bash
-   python -m echo_wm_training.views sheet --clips /workspace/echo/clips.parquet --n 2000 --labellers ds1,ds2 --out /workspace/echo/views
-   python -m echo_wm_training.views read --dir /workspace/echo/views --out /workspace/echo/view_labels.csv
+   # tags + the machine's measurement reports (SR): what share of clips and studies they already label
+   python -m echo_wm_training.view_sources coverage --clips /workspace/echo/clips.parquet --studies /workspace/echo/dicom --out /workspace/echo/views
+   ```
+   - **Tags:** what the scanner wrote in the DICOM.
+   - **SR:** a clip that a sonographer measured on (biplane EF, volumes) is referenced by the study's measurement report together with its view.
+   - `coverage.json` shows how many clips and studies each source covers.
+
+   Then group the remaining clips (after step 6, which builds the encoder):
+   ```bash
+   python -m echo_wm_training.view_sources clusters --clips /workspace/echo/clips.parquet --sr /workspace/echo/views/sr_views.csv \
+          --encoder /workspace/echo/runs/ssl_v1 --k 60 --out /workspace/echo/views/clusters
+   #   a group whose tagged / SR clips agree (>= 90%, >= 10 clips) takes their view automatically;
+   #   the data scientists label the other groups in clusters.xlsx from one picture of 8 clips each ('mixed' = leave out)
+   python -m echo_wm_training.view_sources read-clusters --dir /workspace/echo/views/clusters --out /workspace/echo/views/cluster_views.csv
    ```
    ```python
    from echo_wm_training.views import assign_views
-   c = assign_views(pd.read_parquet("/workspace/echo/clips.parquet"), pd.read_csv("/workspace/echo/view_labels.csv"))
-   c.to_parquet("/workspace/echo/clips_views.parquet")               # label > DICOM tag; the rest is filled by the view model in training
+   c = assign_views(pd.read_parquet("/workspace/echo/clips.parquet"), sr=pd.read_csv("/workspace/echo/views/sr_views.csv"),
+                    clusters=pd.read_csv("/workspace/echo/views/cluster_views.csv"))
+   c.to_parquet("/workspace/echo/clips_views.parquet")     # precedence: person > tag > SR > cluster; the view model fills the rest
    ```
-   The cardiologist spot-checks 100 labelled clips; agreement goes into the model card.
+   - **Per-clip labels:** only when a view is still short, label clips one at a time (`python -m echo_wm_training.views sheet --n 300 ...`).
+   - **Spot-check:** the cardiologist checks 100 clips across the sources. Agreement per source goes into the model card.
 
 6. **Pretrain the encoder on Mayo cines** (self-supervised, training period only).
    ```bash
@@ -141,7 +155,7 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
 | Cohort lock | Phase 2 echo cohort snapshotted before any training run | Stop and re-lock |
 | Echo link | `echo.mcp` link columns confirmed with MCP; study counts plausible | Stop: labels would attach to the wrong images |
 | Label audit | Every echo label PASS; no adjudication pending | Fix `labels.py`, rebuild, re-audit on a fresh sample |
-| Views | View labels spot-checked by the cardiologist; most training clips labelled, tagged or confidently predicted | Label more clips |
+| Views | `coverage.json` reviewed; view labels spot-checked by the cardiologist per source; most training clips labelled by a source or confidently predicted | Label more clusters or clips |
 | Pretraining | Card shows only studies before 2020 | Rebuild the manifest |
 | Thresholds | Fitted on 2020 only; reviewed before the test set is opened | Never refit on test data |
 | Export | Only the three bundle files leave MCP | Stop |

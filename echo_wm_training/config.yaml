@@ -30,6 +30,9 @@ splits:
 views:
   min_view_prob: 0.9                 # view-model confidence to use an untagged, unlabelled clip in training
   max_clips_per_view: 2              # clips per view per study kept for training (largest frame count first)
+  cluster_k: 60                      # view_sources clusters: groups of similar clips (encoder embedding + k-means)
+  cluster_auto_purity: 0.9           # a group takes the view of its tagged / SR clips when >= 90% of them agree ...
+  cluster_auto_min: 10               # ... and there are at least 10 of them; other groups are labelled by a person
 
 pretrain:                            # self-supervised encoder pretraining (pretrain.py), training split only
   epochs: 50
