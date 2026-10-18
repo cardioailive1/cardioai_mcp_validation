@@ -3,6 +3,11 @@
 # Agent under test: Echo agent = EchoNet-Dynamic LV segmentation (MobileNetV3-UNet 3D, Vertex `mobilenetv3`)
 #   -> per-frame area-length volumes -> median per-beat EF (echo branch, echo_pipeline.py v2.0.0)
 #   Phase 1 trained on EchoNet-Dynamic (Stanford, 10,000 pts)
+# Wall-motion extension = MobileNetV3-WM (echo_wm_training/), trained on Mayo echo in MCP (A4C + A2C + A3C):
+#   17 AHA segment scores -> LAD / RCA / LCx territories (regional, CAD mapping) and LVEF estimate, global
+#   hypokinesis, WMSI (global, heart-failure assessment). Its endpoints are an INTERNAL held-out validation:
+#   this cohort's patients are excluded from its training (echo_wm_training/config.yaml exclude_persons_table =
+#   echo_analytic_locked), so LOCK THIS COHORT BEFORE TRAINING the wall-motion model.
 # Deck: 1,500 patients · 12 sites · 27 elements (19 REQ / 8 OPT) · 86.6% avg completeness
 # =============================================================================
 key: echo
@@ -128,6 +133,17 @@ elements:
      src: {type: modality, modality: echo, column: image_quality, window: [0, 1], fallback: {type: empty}},
      fill: "CASE WHEN echo_report IS NULL THEN NULL WHEN echo_report RLIKE '(technically (difficult|limited)|suboptimal|poor (acoustic|image|echo) (window|quality)|limited (study|views|windows|image))' THEN 'limited' ELSE 'adequate' END"}
   # ---------------- reference-standard helpers (aux) used by the endpoints
+  # wall-motion reference: the echo report parsed by echo_wm_training.labels (audited: annotation/LABEL_AUDIT.md)
+  - {name: ref_wma, aux: true, src: {type: modality, modality: echo_wm, table: reference_table, column: ref_wall_motion, window: [0, 1], fallback: {type: empty}}}
+  - {name: ref_terr_lad, aux: true, src: {type: modality, modality: echo_wm, table: reference_table, column: terr_lad, window: [0, 1], fallback: {type: empty}},
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN CAST({v} AS DOUBLE) >= 1 THEN 'abnormal' ELSE 'normal' END"}
+  - {name: ref_terr_rca, aux: true, src: {type: modality, modality: echo_wm, table: reference_table, column: terr_rca, window: [0, 1], fallback: {type: empty}},
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN CAST({v} AS DOUBLE) >= 1 THEN 'abnormal' ELSE 'normal' END"}
+  - {name: ref_terr_lcx, aux: true, src: {type: modality, modality: echo_wm, table: reference_table, column: terr_lcx, window: [0, 1], fallback: {type: empty}},
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN CAST({v} AS DOUBLE) >= 1 THEN 'abnormal' ELSE 'normal' END"}
+  - {name: ref_global_hypokinesis, aux: true, src: {type: modality, modality: echo_wm, table: reference_table, column: global_hypokinesis, window: [0, 1], fallback: {type: empty}},
+     transform: "CASE WHEN {v} IS NULL THEN NULL WHEN CAST({v} AS DOUBLE) >= 1 THEN 'abnormal' ELSE 'normal' END"}
+  - {name: ref_wmsi, aux: true, src: {type: modality, modality: echo_wm, table: reference_table, column: wmsi, window: [0, 1], fallback: {type: empty}}}
   - {name: ref_ef_category, aux: true, src: {type: derived, expr: "CASE WHEN lvef_expert IS NULL THEN NULL WHEN lvef_expert <= 40 THEN 'reduced' WHEN lvef_expert < 50 THEN 'mildly_reduced' ELSE 'normal' END"}}
   - {name: bsa, aux: true, src: {type: derived, expr: "SQRT(height * weight / 3600.0)"}}
   - {name: ref_lv_size, aux: true, src: {type: derived, expr: "CASE WHEN lv_end_diastolic_volume IS NULL OR bsa IS NULL THEN NULL WHEN lv_end_diastolic_volume / bsa > CASE WHEN gender = 'Male' THEN 74 ELSE 61 END THEN 'dilated' ELSE 'normal' END"}}
@@ -146,8 +162,19 @@ predictions:
     agent_lv_size: "derived by evaluate(): agent_edv_ml / bsa > 74 (men) / 61 (women) mL/m2 -> dilated (same rule as ref_lv_size)"
     runtime_s: "wall-clock seconds from DICOM load to output"
     pipeline_version: "summary.pipeline_version (must equal the locked version)"
+    # wall-motion model (echo_wm_training.runtime.pipeline on the A4C, A2C and A3C cines of the same echo)
+    agent_wall_motion: "abnormal | normal = flags.wma_any"
+    agent_terr_lad: "abnormal | normal = flags.terr_lad (NULL when no LAD segment was assessed)"
+    agent_terr_rca: "abnormal | normal = flags.terr_rca"
+    agent_terr_lcx: "abnormal | normal = flags.terr_lcx"
+    agent_global_hypokinesis: "abnormal | normal = flags.global_hypokinesis"
+    agent_wmsi: "findings.wmsi (mean score over assessed segments)"
+    agent_wm_lvef: "findings.lvef_pct (wall-motion model estimate; the primary EF stays agent_lvef)"
+    agent_wm_views: "views used (findings.views)"
+    wm_runtime_fingerprint: "must equal the locked wall-motion runtime fingerprint"
   known_limitations:
-    - "The model segments the LV only: wall motion is not produced (endpoints marked not applicable below)."
+    - "EchoNet segments the LV only; wall motion comes from the Mayo-trained wall-motion model (internal validation, patients of this cohort never trained it). Segments of a view that was not acquired are not assessed, and a territory with no assessed segment is NULL (excluded, counted)."
+    - "Wall-motion reference = the echo report read by echo_wm_training.labels (one reader per study, as reported); hedged reports are excluded. Territory is the AHA standard assignment, not angiography."
     - "Agent EDV is single-plane (A4C) area-length; the reference EDV is usually biplane Simpson. Expect a systematic offset; report Bland-Altman for EDV alongside the chamber-size kappa."
     - "Phase 1 EF values (r 0.96, MAE 3.2, kappa 0.91) are not supported by the training repo, which reports only Dice on one traced frame. Replace them with evaluate_echonet_ef.py output (EchoNet TEST split) before the validation lock; under Plan C the pass threshold depends on them."
 
@@ -160,7 +187,16 @@ endpoints:
     - {id: chamber_size, label: "Chamber size agreement (kappa)", metric: kappa, pred: agent_lv_size, ref: ref_lv_size, goal: 0.80, direction: ge, phase1: 0.84}
     - {id: processing_time, label: "Processing time (median s)", metric: median, pred: runtime_s, goal: 60, direction: le, phase1: 45}
     - {id: data_completeness, label: "Data completeness (required elements)", metric: completeness, goal: 0.95, direction: ge, phase1: 0.98}
-  not_applicable:            # deck endpoints this agent cannot produce; reported as N/A, not as failures
-    - {id: wall_motion_sens, label: "Wall motion abnormality — sensitivity", reason: "model outputs an LV mask only, no regional wall-motion assessment", deck_goal: 0.85}
-    - {id: wall_motion_spec, label: "Wall motion abnormality — specificity", reason: "model outputs an LV mask only, no regional wall-motion assessment", deck_goal: 0.85}
+    # wall-motion extension (deck goals 0.85 for any abnormality; territory / global goals for the clinical lead to set)
+    - {id: wall_motion_sens, label: "Wall motion abnormality — sensitivity", metric: sensitivity, pred: agent_wall_motion, ref: ref_wma, positive: abnormal, goal: 0.85, direction: ge, phase1: null}
+    - {id: wall_motion_spec, label: "Wall motion abnormality — specificity", metric: specificity, pred: agent_wall_motion, ref: ref_wma, positive: abnormal, goal: 0.85, direction: ge, phase1: null}
+    - {id: lad_territory_sens, label: "LAD-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_lad, ref: ref_terr_lad, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: lad_territory_spec, label: "LAD-territory abnormality — specificity", metric: specificity, pred: agent_terr_lad, ref: ref_terr_lad, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: rca_territory_sens, label: "RCA-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_rca, ref: ref_terr_rca, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: rca_territory_spec, label: "RCA-territory abnormality — specificity", metric: specificity, pred: agent_terr_rca, ref: ref_terr_rca, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: lcx_territory_sens, label: "LCx-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_lcx, ref: ref_terr_lcx, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: lcx_territory_spec, label: "LCx-territory abnormality — specificity", metric: specificity, pred: agent_terr_lcx, ref: ref_terr_lcx, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: global_hypokinesis_sens, label: "Global hypokinesis — sensitivity", metric: sensitivity, pred: agent_global_hypokinesis, ref: ref_global_hypokinesis, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: global_hypokinesis_spec, label: "Global hypokinesis — specificity", metric: specificity, pred: agent_global_hypokinesis, ref: ref_global_hypokinesis, positive: abnormal, goal: null, direction: ge, phase1: null}
+    - {id: wmsi_mae, label: "Wall motion score index MAE vs report", metric: mae, pred: agent_wmsi, ref: ref_wmsi, goal: null, direction: le, phase1: null}
   subgroups: [gender, age_group, race, site, image_quality, ref_ef_category]

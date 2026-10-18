@@ -2,7 +2,7 @@
 
 **Study CA-AGENTS-VAL-PHASE2 · Plan C · 5 agents · 8,300 patients**
 
-This runbook takes you from an accepted MCP account to a signed-off validation report for each agent. The ECG and MRI agents are trained inside MCP first: follow [RUNBOOK_ECG.md](RUNBOOK_ECG.md) and [RUNBOOK_MRI.md](RUNBOOK_MRI.md) for training, then step 7 here for their Phase 2 validation. Follow the steps in order: steps 1–6 are done **once** for all agents, and step 7 is repeated **for each agent**.
+This runbook takes you from an accepted MCP account to a signed-off validation report for each agent. The ECG and MRI agents are trained inside MCP first: follow [RUNBOOK_ECG.md](RUNBOOK_ECG.md), [RUNBOOK_MRI.md](RUNBOOK_MRI.md) and [RUNBOOK_ECHO_WM.md](RUNBOOK_ECHO_WM.md) (echo wall motion) for training, then step 7 here for their Phase 2 validation. Follow the steps in order: steps 1–6 are done **once** for all agents, and step 7 is repeated **for each agent**.
 
 ---
 
@@ -148,7 +148,7 @@ The agent reads the locked analytic table and writes a predictions table that fo
 | Longitudinal | `longitudinal_series`, only data with `day ≤ t`, run daily for t = 0…179 | `longitudinal_predictions`: `person_id, day, risk_hf_7d, alert_hf_7d, risk_acute_24h, alert_acute_24h`; plus `longitudinal_predictions_patient`: `person_id, risk_mi_30d, risk_event_30d, pred_readmit_30d, pred_risk_90d` |
 | ECG | The 12-lead waveform from the MCP ECG table (Base64, decoded by `ecg_training`; see `RUNBOOK_ECG.md`) | `ecg_predictions`: `person_id, agent_acute_mi_prob, agent_acute_mi, agent_stemi_prob, agent_stemi, agent_af_prob, agent_af, runtime_s, runtime_fingerprint` |
 | MRI | Short-axis LGE + cine DICOM requested from `FACT_RADIOLOGY_DICOM_INVENTORY` (see `RUNBOOK_MRI.md`) | `mri_predictions`: `person_id, agent_infarct_prob, agent_infarct, agent_nonischemic_prob, agent_nonischemic, agent_thrombus_prob, agent_thrombus, agent_aneurysm_prob, agent_aneurysm, agent_infarct_size_pct, agent_mvo_pct, agent_mvo, agent_lvef, agent_red_flags, runtime_s, runtime_fingerprint` |
-| Echo | The A4C cine from the echo DICOM (112 px, ≥ 32 frames) | `echo_predictions`: `person_id, agent_lvef, agent_ef_category, agent_wall_motion, agent_lv_size, runtime_s` |
+| Echo | The A4C cine from the echo DICOM (112 px, ≥ 32 frames); for wall motion also the A2C and A3C cines (see `RUNBOOK_ECHO_WM.md`) | `echo_predictions`: `person_id, agent_lvef, agent_ef_category, agent_lv_size, runtime_s`, and from the wall-motion model `agent_wall_motion, agent_terr_lad, agent_terr_rca, agent_terr_lcx, agent_global_hypokinesis, agent_wmsi, agent_wm_lvef, wm_runtime_fingerprint` |
 
 Encode the model inputs with the **same code the app serves with**, so the validated encoding is the deployed one. `encode_cohort` renames the analytic columns into the app's request fields, applies the pre-specified missing-data rules and calls the shared encoders:
 ```python

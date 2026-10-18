@@ -28,6 +28,9 @@ Code: `annotation/label_audit.py`. Numbers and pass rules: `annotation/tasks.yam
 | MRI | Pre-drawn and reader-corrected outlines | Images | Automatic checks, report comparison, visual grading (part 4) |
 | ECG | `af` | Confirmed over-read statement | Blinded text audit (part 1) plus rhythm cross-check (part 3) |
 | ECG | `trop_pos`, `acute_mi`, `stemi` | Lab rows plus diagnosis codes | Independent recomputation (part 2) |
+| Echo wall motion | `wma_any`, `terr_lad`, `terr_rca`, `terr_lcx`, `global_hypokinesis` (from 17 segment scores) | Echo report (FACT_ECHO_TEST.ECHO_NOTE) | Blinded text audit (part 1), `sample echo` |
+| Echo wall motion | `report_lvef` | Echo report | Blinded text audit: number as stated (part 1) |
+| Echo wall motion | Clip views (A4C / A2C / A3C) | Images | View labels by people, then a confident view model (`echo_wm_training/views.py`) |
 
 ## Part 1: report-derived labels
 
@@ -86,6 +89,19 @@ These must match what the code is meant to do. **The cardiologist signs them off
 | Label | 1 | 0 | U |
 |---|---|---|---|
 | `af` | Atrial fibrillation or flutter on **this** tracing, including paced rhythm with underlying AF | Any other rhythm; "history of AF" with sinus rhythm now; "no AF"; AF not mentioned | "Possible AF", "consider AF" |
+
+**Echo report (wall motion):**
+
+| Label | 1 | 0 | NM / U |
+|---|---|---|---|
+| `wma_any` | Hypokinesis, akinesis, dyskinesis or aneurysm of any segment, regional or global | "Normal wall motion", "no regional wall motion abnormalities" | NM: wall motion not described. U: "possible", "cannot exclude" |
+| `terr_lad` | An abnormal anterior, anteroseptal, apical anterior / septal segment or the apex (AHA 1, 2, 7, 8, 13, 14, 17), or global hypokinesis | Wall motion described, none of these abnormal | "Septal" alone counts for LAD and RCA |
+| `terr_rca` | An abnormal inferior, inferoseptal or apical inferior segment (AHA 3, 4, 9, 10, 15), or global hypokinesis | Described, none abnormal | |
+| `terr_lcx` | An abnormal inferolateral / posterior, anterolateral / lateral or apical lateral segment (AHA 5, 6, 11, 12, 16), or global hypokinesis | Described, none abnormal | |
+| `global_hypokinesis` | Global / diffuse / generalised LV hypokinesis | Wall motion described without it | NM: not described |
+| `report_lvef` | LVEF % of **this** echo; a range is entered as its midpoint | — | Blank: not stated or a prior study only |
+
+When abnormal walls are listed, the other segments count as normal (`unmentioned_normal`, stated in the model card). The cardiologist confirms the AHA segment-to-territory assignment and the A3C apical segments in `echo_wm_training/runtime/segments.py`.
 
 ### 1.4 Score, adjudicate, score again
 

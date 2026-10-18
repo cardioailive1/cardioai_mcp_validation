@@ -246,7 +246,12 @@ def build(n_persons: int = 6000, seed: int = 7, config_dir: str | None = None) -
                 meas(pid, "la_diam", d, rnd.gauss(39, 6), vid)  # mm -> transformed to cm
                 if rnd.random() < .7:
                     meas(pid, "la_vol", d, rnd.gauss(55, 15), vid)
-                wm = "normal regional wall motion" if ef > 50 else "regional wall motion abnormalities with inferior hypokinesis"
+                # wall-motion wording varies by patient (no extra random draws: the rest of the data stays the same)
+                wm = "normal regional wall motion" if ef > 50 else [
+                    "regional wall motion abnormalities with inferior hypokinesis",
+                    "akinesis of the mid and apical anterior wall and apex",
+                    "hypokinesis of the basal and mid inferolateral and anterolateral walls",
+                    "severe global hypokinesis"][pid % 4]
                 rv = rnd.choice(["normal", "mildly reduced", "low normal"])
                 dd = rnd.choice(["grade I diastolic dysfunction", "normal diastolic function", "grade II diastolic dysfunction"])
                 q = rnd.choice(["Technically difficult study.", "", ""])

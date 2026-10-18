@@ -19,6 +19,7 @@ A sixth cohort, **Cardiac MRI** (`…-MRI`, 1,000 patients, `config/cohorts/mri.
 Models trained inside MCP, with MobileNetV3 weights approved for export, live next to the toolkit:
 - `ecg_training/`: acute MI, STEMI and AF from 12-lead ECGs;
 - `mri_training/`: infarct, scar extent and STEMI work-up from cardiac MRI.
+- `echo_wm_training/`: regional (17 AHA segments, LAD / RCA / LCx territories) and global (LVEF, global hypokinesis, WMSI) wall motion from apical echo cines; extends the echo agent.
 
 Each has its own README. `annotation/` prepares Mayo images for readers inside the workspace (MRI contours; optional echo traces), checks what they draw and writes the training labels. It also audits the automatic labels (data scientists first, cardiologist adjudication): [annotation/LABEL_AUDIT.md](annotation/LABEL_AUDIT.md).
 
@@ -48,7 +49,7 @@ tests/            synthetic OMOP generator, pytest end-to-end, local-Spark check
 ```
 
 ## Running on MCP
-**Step-by-step validation guide: [VALIDATION_RUNBOOK.md](VALIDATION_RUNBOOK.md).** Agent runbooks for the models trained in MCP: [RUNBOOK_ECG.md](RUNBOOK_ECG.md) and [RUNBOOK_MRI.md](RUNBOOK_MRI.md). Summary:
+**Step-by-step validation guide: [VALIDATION_RUNBOOK.md](VALIDATION_RUNBOOK.md).** Agent runbooks for the models trained in MCP: [RUNBOOK_ECG.md](RUNBOOK_ECG.md), [RUNBOOK_MRI.md](RUNBOOK_MRI.md) and [RUNBOOK_ECHO_WM.md](RUNBOOK_ECHO_WM.md). Summary:
 
 1. **Onboard.** Run `python scripts/discover_schema.py`, then set `schemas` and `site_map` in `config/study.yaml` and the ECG/echo table names in `config/modality_tables.yaml` (`enabled: true`). Until these are set, the builder falls back to OMOP proxies: procedure codes, LOINC ECG/echo measurements, and NOTE text.
 2. **Concept sign-off.** `exports/concept_sets_detail_for_review.csv` lists every concept. Rows with `needs_review = 1` came from concept-name searches (the echo dimensions and pack-years) and need a clinician's sign-off.
