@@ -14,6 +14,8 @@ Missing-data semantics (important for completeness QC):
 """
 from __future__ import annotations
 
+import re
+
 from .config import Element
 
 # OMOP event tables: (table, concept col, source concept col, date col)
@@ -312,6 +314,11 @@ def x_note_text(el, idx, study):
     """
 
 
+def _schema_macro(name: str) -> str:
+    """'{modality}.x' / '{work}.x' in modality_tables.yaml -> the engine's '{{modality}}' / '{{work}}' macros."""
+    return re.sub(r"(?<!\{)\{(\w+)\}(?!\})", r"{{\1}}", name)
+
+
 def x_modality(el, idx, study):
     """Column from MCP modality table (ECG / echo) nearest to index; falls back when disabled."""
     s = el.src
@@ -330,7 +337,7 @@ def x_modality(el, idx, study):
         SELECT i.person_id, i.index_date, t.{cols[s['column']]} AS value,
                ROW_NUMBER() OVER (PARTITION BY i.person_id, i.index_date
                                   ORDER BY ABS(DATEDIFF(CAST(t.{dt} AS DATE), i.index_date))) AS rn
-        FROM {idx} i JOIN {mod[table_key]} t ON t.{cols['person_id']} = i.person_id
+        FROM {idx} i JOIN {_schema_macro(mod[table_key])} t ON t.{cols['person_id']} = i.person_id
         WHERE {_win(f'CAST(t.{dt} AS DATE)', w)}
     ) x WHERE rn = 1
     """

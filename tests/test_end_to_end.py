@@ -40,6 +40,10 @@ def simulate_predictions(key: str, a: pd.DataFrame) -> pd.DataFrame:
         # single-plane area-length EDV reads ~10% under biplane, with scatter; lv_size is derived by evaluate()
         p["agent_edv_ml"] = a.lv_end_diastolic_volume * 0.92 + RNG.normal(0, 6, len(a))
         p["runtime_s"] = RNG.gamma(9, 5, len(a))
+        for ref, col in (("ref_wma", "agent_wall_motion"), ("ref_terr_lad", "agent_terr_lad"), ("ref_terr_rca", "agent_terr_rca"),
+                         ("ref_terr_lcx", "agent_terr_lcx"), ("ref_global_hypokinesis", "agent_global_hypokinesis")):
+            p[col] = _flip(a[ref].fillna("normal"), 0.08, ["normal", "abnormal"])
+        p["agent_wmsi"] = pd.to_numeric(a.ref_wmsi, errors="coerce") + RNG.normal(0, 0.1, len(a))
     elif key == "ecg":
         for head, ref in (("acute_mi", "ref_acute_mi"), ("stemi", "ref_stemi"), ("af", "ref_af_any")):
             y = a[ref].fillna(0).astype(int)
@@ -82,7 +86,16 @@ def simulate_daily(a: pd.DataFrame, series: pd.DataFrame) -> pd.DataFrame:
 def built():
     study = load_study()
     study["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
-    eng = DuckDBEngine(build(6000), study)
+    con = build(6000)
+    # echo wall-motion reference, built like in MCP (echo_wm_training.mcp_echo.reference_table) from the echo reports
+    from echo_wm_training.mcp_echo import reference_table
+    notes = con.execute("SELECT person_id, CAST(note_id AS VARCHAR) AS study_uid, note_date AS study_datetime, note_text AS report_text "
+                        "FROM note WHERE note_title = 'Echocardiogram Report'").df()
+    ref = reference_table(notes)
+    con.register("echo_wm_ref_df", ref)
+    con.execute("CREATE TABLE echo_wm_reference AS SELECT * FROM echo_wm_ref_df")
+    study["modality"]["echo_wm"]["enabled"] = True
+    eng = DuckDBEngine(con, study)
     return eng, build_all(eng, COHORTS, study, os.path.join(ROOT, "exports", "synthetic_test"))
 
 
@@ -127,7 +140,10 @@ def test_endpoints_evaluate(built):
         scored = ep[ep.tier != "not_applicable"]
         assert scored.estimate.notna().sum() >= len(scored) - 1, ep.to_string()
         if k == "echo":
-            assert set(ep[ep.tier == "not_applicable"].endpoint) == {"wall_motion_sens", "wall_motion_spec"}
+            assert ep[ep.tier == "not_applicable"].empty                      # wall motion now produced (echo_wm_training)
+            e = ep.set_index("endpoint")
+            assert e.loc["wall_motion_sens", "deck_goal"] == 0.85 and e.loc["wall_motion_sens", "estimate"] > 0.8
+            assert e.loc["rca_territory_sens", "estimate"] == e.loc["rca_territory_sens", "estimate"]   # not NaN
             assert ep.set_index("endpoint").loc["chamber_size", "estimate"] == ep.set_index("endpoint").loc["chamber_size", "estimate"]  # not NaN
         if k == "ecg":
             assert {"stemi_sensitivity", "af_sensitivity"} <= set(ep[ep.tier == "primary"].endpoint)

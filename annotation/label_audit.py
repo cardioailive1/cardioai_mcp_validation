@@ -243,6 +243,23 @@ def rule_text(modality: str) -> List[tuple]:
             ("report_lvef", "LVEF in % measured on THIS CMR (not echo, not a prior study). Range (e.g. 50-55) -> U."),
             ("report_infarct_size", "Infarct size / scar burden as % of LV mass. Grams only, or segment counts -> blank."),
         ]
+    if modality == "echo":
+        return common + [
+            ("wma_any", "1 = any wall-motion abnormality on THIS echo: hypokinesis, akinesis, dyskinesis or aneurysm of any "
+                        "segment, regional or global. 0 = 'normal wall motion' / 'no regional wall motion abnormalities'. "
+                        "NM = wall motion not described. 'Possible' / 'cannot exclude' -> U."),
+            ("terr_lad", "1 = an abnormal segment in the LAD territory: anterior, anteroseptal, apical anterior / septal or the "
+                         "apex (AHA 1, 2, 7, 8, 13, 14, 17), or global hypokinesis. 0 = wall motion described and none of these "
+                         "abnormal. 'Septal' without anterior/inferior counts for LAD and RCA."),
+            ("terr_rca", "1 = an abnormal inferior or inferoseptal segment, or apical inferior (AHA 3, 4, 9, 10, 15), or global "
+                         "hypokinesis. 0 = described and none abnormal."),
+            ("terr_lcx", "1 = an abnormal inferolateral / posterior or anterolateral / lateral segment, or apical lateral "
+                         "(AHA 5, 6, 11, 12, 16), or global hypokinesis. 0 = described and none abnormal."),
+            ("global_hypokinesis", "1 = global / diffuse / generalised hypokinesis of the LV. 0 = wall motion described without "
+                                   "it (regional abnormalities only, or normal). NM = not described."),
+            ("report_lvef", "LVEF in % of THIS echo (biplane or visual). A range (e.g. 35-40) -> type the midpoint and note "
+                            "'range'; a prior study's value -> blank."),
+        ]
     return common + [
         ("af", "Confirmed (over-read) statement. 1 = atrial fibrillation or atrial flutter on THIS tracing. 0 = any "
                "other rhythm stated, including 'history of AF' with sinus rhythm now and 'no AF'. Paced rhythm with "
@@ -843,7 +860,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("sample")
-    s.add_argument("modality", choices=["mri", "ecg"])
+    s.add_argument("modality", choices=["mri", "ecg", "echo"])
     s.add_argument("--manifest", required=True)
     s.add_argument("--auditors", required=True, help="data scientist codes, comma-separated (no names)")
     s.add_argument("--out", required=True)
@@ -852,7 +869,7 @@ def main(argv=None):
                    help="automatic auditor: assist = evidence sentences on the sheets; triage = also settles rows "
                         "where it agrees with the code (a blinded share is still verified by the data scientists)")
     sc = sub.add_parser("score")
-    sc.add_argument("modality", choices=["mri", "ecg"])
+    sc.add_argument("modality", choices=["mri", "ecg", "echo"])
     sc.add_argument("--dir", required=True)
     tr = sub.add_parser("troponin")
     tr.add_argument("--manifest", required=True)

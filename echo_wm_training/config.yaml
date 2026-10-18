@@ -1,0 +1,76 @@
+# =============================================================================
+# Echo wall-motion model (MobileNetV3-WM), trained only on Mayo echocardiograms inside MCP.
+# Every value here is recorded in the model card; changing any of them after the tuning split has been
+# looked at invalidates the Phase 2 comparison.
+# =============================================================================
+model_name: cardioai-echo-wm-mobilenetv3
+use_public_datasets: false           # Mayo-only (same policy as the MRI model); public echo sets stay outside MCP
+
+arch: {width: 1.0, d: 128, dropout: 0.2}
+
+# Labels: echo report text (FACT_ECHO_TEST.ECHO_NOTE) parsed by labels.parse_report; structured LVEF from the
+# echo measurement table when mapped (config/modality_tables.yaml echo.measurement_table), else the report.
+labels:
+  unmentioned_normal: true           # abnormal walls listed -> segments not mentioned are normal (in the model card)
+  lvef_source: [measurement, report]
+  # territory and any-abnormality heads are scored from the segment outputs; these are the report-derived
+  # references they are tuned and tested against
+  heads: [wma_any, terr_lad, terr_rca, terr_lcx, global_hypokinesis]
+
+# Patient-disjoint splits by time and site, the same calendar as the ECG and MRI models.
+splits:
+  tune_start: '2020-01-01'
+  test_start: '2021-01-01'
+  heldout_sites: []
+  heldout_site_fraction: 0.15
+  max_ecgs_per_patient: 3            # max studies per patient (name shared with the ECG split code)
+  exclude_persons_table: echo_analytic_locked     # Phase 2 echo cohort: these patients never train
+  seed: 20261017
+
+views:
+  min_view_prob: 0.9                 # view-model confidence to use an untagged, unlabelled clip in training
+  max_clips_per_view: 2              # clips per view per study kept for training (largest frame count first)
+  cluster_k: 60                      # view_sources clusters: groups of similar clips (encoder embedding + k-means)
+  cluster_auto_purity: 0.9           # a group takes the view of its tagged / SR clips when >= 90% of them agree ...
+  cluster_auto_min: 10               # ... and there are at least 10 of them; other groups are labelled by a person
+
+pretrain:                            # self-supervised encoder pretraining (pretrain.py), training split only
+  epochs: 50
+  batch_size: 256                    # frames per step; NT-Xent negatives = the rest of the batch
+  lr: 0.002
+  weight_decay: 0.0001
+  temperature: 0.2
+  proj_dim: 128
+  frames_per_clip: 4
+  augment: {rotate_deg: 10, scale: [0.7, 1.0], gamma: [0.7, 1.4], contrast: [0.8, 1.2], noise: 0.05}
+
+train:
+  view_epochs: 10                    # stage V: view head only (labelled / tagged clips)
+  epochs: 40                         # stage W: whole model
+  lr: 0.0005
+  weight_decay: 0.0001
+  accumulate_studies: 8
+  clips_per_view: 1                  # random clip (and random 1.6 s window) per view per step
+  loss_weights: {segments: 1.0, view: 0.5, lvef: 0.02, global_hypokinesis: 0.5}
+  class_weights: [1.0, 2.0, 3.0, 4.0]   # normal, hypokinetic, akinetic, dyskinetic (rarer classes count more)
+  patience: 8
+  augment: {rotate_deg: 8, scale: [0.85, 1.0], gamma: [0.8, 1.25], noise: 0.03}
+
+# Thresholds fitted on the tuning split (2020) for these sensitivities, then locked.
+thresholds:
+  wma_any: {target_sensitivity: 0.90}
+  terr_lad: {target_sensitivity: 0.85}
+  terr_rca: {target_sensitivity: 0.85}
+  terr_lcx: {target_sensitivity: 0.85}
+  global_hypokinesis: {target_sensitivity: 0.90}
+
+# Findings that need further work-up (re-applied by the app from the model card). PROPOSED in the clinical-lead
+# sign-off sheet (2026-10-18), each tied to a guideline; final once signed. The app applies the LVEF rules to
+# EchoNet's volumetric EF when the echo analysis has it, and to this model's estimate only when run alone.
+red_flags:
+  lvef_le_40: {value: lvef_pct, max: 40.0, text: "LVEF <= 40%: heart failure with reduced EF range (2022 AHA/ACC/HFSA)"}
+  lvef_le_35: {value: lvef_pct, max: 35.0, text: "LVEF <= 35%: severe LV systolic dysfunction (ICD threshold, 2017 AHA/ACC/HRS)"}
+  regional_wma: {flag: [terr_lad, terr_rca, terr_lcx], min: 1, text: "regional wall-motion abnormality in a coronary territory: correlate with ECG, troponin and symptoms; consider ischaemia evaluation"}
+  multi_territory: {flag: [terr_lad, terr_rca, terr_lcx], min: 2, text: "wall-motion abnormality in two or more coronary territories: high-risk finding (multivessel disease or cardiomyopathy)"}
+  apical_akinesis: {value: max_apical_score, min: 3, text: "apical akinesis or dyskinesis: consider a contrast echo or cardiac MRI to look for LV thrombus"}
+  high_wmsi: {value: wmsi, min: 2.0, text: "wall motion score index >= 2.0: extensive LV dysfunction"}

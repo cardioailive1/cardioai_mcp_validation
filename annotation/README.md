@@ -5,6 +5,7 @@ Mayo images can't leave the Mayo Clinic Platform workspace, so annotation happen
 | Agent | Annotation | Why | Size |
 |---|---|---|---|
 | **MRI** | **Required.** Outlines on short-axis LGE (LV cavity, myocardium, scar, MVO, RV) and on cine at end-diastole and end-systole (LV cavity, myocardium, RV) | Stage A training on Mayo images, and contour-based test metrics: infarct size, MVO, transmurality per segment and LVEF against readers | 300 studies, 10% read twice |
+| **Echo (wall motion)** | **View labels** only, and mostly automatic: DICOM tags, the echo machine's measurement reports, and clusters of similar clips (`echo_wm_training/view_sources.py`); people label the clusters no source settles (about 60 pictures of 8 clips) and, if needed, a few hundred single clips. Wall-motion labels come from the reports and are audited | The wall-motion model needs to know which clips are apical views | ~60 cluster pictures (+ up to 300 clips); cardiologist spot-checks 100 |
 | **Echo** | Optional QC. LV cavity traced on two frames (end-diastole, end-systole) of the A4C cine | Checks the EchoNet segmentation behind EF and volumes on Mayo data. The Phase 2 echo endpoints use the report reference, so they don't depend on this | 100 studies, 10% read twice |
 | ECG, CAD, Risk, Longitudinal | None | Labels come from reports, over-reads and EHR codes | — |
 

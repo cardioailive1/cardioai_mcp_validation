@@ -111,6 +111,8 @@ class AutoAuditor:
         text = text if isinstance(text, str) else ""
         if self.modality == "mri":
             return self._read_mri(text)
+        if self.modality == "echo":
+            return self._read_echo(text)
         return self._read_ecg(text)
 
     def _read_mri(self, text: str) -> Dict[str, object]:
@@ -139,6 +141,38 @@ class AutoAuditor:
     def _read_ecg(self, text: str) -> Dict[str, object]:
         st = self.mentions(text, "af")
         return {"af": self._simple(st, 0.0)}
+
+    def _read_echo(self, text: str) -> Dict[str, object]:
+        """Wall motion: any abnormality, global hypokinesis, and the coronary territories of the walls named in
+        sentences that affirm an abnormality (its own wall-to-territory words, not the training parser's segments)."""
+        wma, glob = self.concepts["wma"], self.concepts["global"]
+        terr = {t: re.compile(p, re.I) for t, p in self.m["territory_walls"].items()}
+        st_any: List[str] = []
+        found: Dict[str, List[str]] = {t: [] for t in terr}
+        gl: List[str] = []
+        for sent in sentences(text):
+            if _SKIP.search(sent):
+                continue
+            st = [self.status(sent, m.start(), m.end()) for m in wma.finditer(sent)]
+            st += ["negated" for _ in self.concepts["wm_normal"].finditer(sent)]     # "normal wall motion" = no abnormality
+            if not st:
+                continue
+            st = ["uncertain"] if "uncertain" in st else st
+            st_any += st
+            s0 = "affirmed" if "affirmed" in st else st[0]
+            if glob.search(sent) and s0 in ("affirmed", "uncertain"):
+                gl.append(s0)
+            for t, rx in terr.items():
+                if rx.search(sent) and s0 in ("affirmed", "uncertain"):
+                    found[t].append(s0)
+        described = bool(st_any)
+        r: Dict[str, object] = {"wma_any": self._simple(st_any, NM)}
+        g = 1.0 if "affirmed" in gl else U if "uncertain" in gl else (0.0 if described else NM)
+        r["global_hypokinesis"] = g
+        for t in terr:
+            r[t] = 1.0 if (g == 1.0 or "affirmed" in found[t]) else U if "uncertain" in found[t] else (0.0 if described else NM)
+        r["report_lvef"] = self._value(text, "report_lvef", lo=5, hi=90)
+        return r
 
     def _value(self, text: str, name: str, lo: float, hi: float) -> object:
         kw = re.compile(self.m["values"][name], re.I)

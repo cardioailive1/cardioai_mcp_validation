@@ -83,6 +83,21 @@ label_audit:
     missing: 0
     rr_regular_cv: 0.08           # AF-labelled ECG with RR coefficient of variation below this -> flagged
     rr_irregular_cv: 0.20         # non-AF ECG with RR CV above this -> flagged (could also be ectopy)
+  echo:                           # echo wall-motion labels (echo_wm_training.labels.parse_report)
+    id: study_id
+    text: report_text
+    random: 300
+    min_positive: 100
+    hard: 25
+    labels:
+      wma_any: {keywords: 'hypokines|akines|dyskines|aneurysm|wall motion'}
+      terr_lad: {keywords: 'anterior|anteroseptal|apex|apical|lad'}
+      terr_rca: {keywords: 'inferior|inferoseptal|rca|right coronary'}
+      terr_lcx: {keywords: 'lateral|posterior|circumflex|lcx'}
+      global_hypokinesis: {keywords: 'global|diffuse|generali'}
+    values:
+      report_lvef: {keywords: 'lvef|ejection fraction|\bef\b'}
+    missing: 25
   hedge: '\b(no|not|without|negative for|cannot (be )?(excluded?|ruled out)|can ?not exclude|possible|possibly|probable|probably|suspicious|suggestive|equivocal|questionable|history of|prior|previous|old|resolved|rule out|r/o|vs\.?|versus)\b'
   auto_audit:                     # optional automatic first pass (sample --auto assist | triage)
     verify_fraction: 0.25         # triage: share of auto-settled rows still read (blinded) by the data scientists
@@ -118,6 +133,19 @@ label_audit:
       concepts:
         af: 'atrial fibrillation|atrial flutter|\ba-?fib\b|\bafl\b'
       values: {}
+    echo:
+      concepts:
+        wma: 'hypo-?kine\w*|\ba-?kine\w*|dys-?kine\w*|aneurysm\w*|wall[- ]motion abnormalit\w*|regional wall[- ]motion'
+        global: '\b(global|globally|diffuse|diffusely|generali[sz]ed)\b'
+        wm_normal: 'normal (regional |segmental )?wall[- ]motion|wall[- ]motion (is|was|appears) normal|normally contracting'
+      territory_walls:            # its own wall words -> territory (AHA); 'septal' and 'apical' count for more than one
+        terr_lad: '\b(anterior|anteroseptal|anteroseptum|septal|septum|apex|apical|lad|left anterior descending)\b'
+        terr_rca: '\b(inferior|inferoseptal|inferoseptum|septal|septum|rca|right coronary)\b'
+        terr_lcx: '\b(lateral|inferolateral|anterolateral|posterior|posterolateral|circumflex|lcx)\b'
+      values:
+        report_lvef: '\blvef\b|left ventricular ejection fraction|\bejection fraction\b|\bef\b'
+      value_exclude:
+        report_lvef: '\b(rvef|right ventric|previous|prior study)\b'
   outlines:
     double_grade_fraction: 0.10
     cardiologist_spot_check_A: 0.10
