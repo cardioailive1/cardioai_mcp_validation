@@ -101,10 +101,10 @@ def augment(clip: np.ndarray, a: dict, rng: np.random.Generator) -> np.ndarray:
 
 # --------------------------------------------------------------------------- study inputs
 def study_clips(clips: pd.DataFrame, study_id: str, rng: Optional[np.random.Generator], per_view: int = 1) -> List[pd.Series]:
-    g = clips[(clips.study_id == study_id) & clips.view.isin(VIEWS)]
+    g = clips[(clips.study_id == study_id) & clips["view"].isin(VIEWS)]
     picked = []
     for v in VIEWS:
-        gv = g[g.view == v]
+        gv = g[g["view"] == v]
         if len(gv):
             idx = rng.choice(len(gv), min(per_view, len(gv)), replace=False) if rng is not None else range(min(per_view, len(gv)))
             picked += [gv.iloc[int(i)] for i in idx]
@@ -121,7 +121,7 @@ def batch_for(rows: Sequence[pd.Series], cache: ClipCache, rng: Optional[np.rand
         if aug is not None and rng is not None:
             c = augment(c, aug, rng)
         xs.append(standardise(c))
-        views.append(r.view)
+        views.append(r["view"])
     if not xs:
         return None, None
     return torch.from_numpy(np.stack(xs)), views
@@ -135,7 +135,7 @@ def seg_targets(row: pd.Series) -> torch.Tensor:
 # --------------------------------------------------------------------------- stages
 def train_views(model, clips: pd.DataFrame, cache: ClipCache, cfg: dict, device: str, log, rng) -> List[dict]:
     tc = cfg["train"]
-    lab = clips[clips.view_source.isin(["label", "tag"]) & clips.view.isin(VIEW_CLASSES)].reset_index(drop=True)
+    lab = clips[clips.view_source.isin(["label", "tag"]) & clips["view"].isin(VIEW_CLASSES)].reset_index(drop=True)
     if not len(lab) or not int(tc["view_epochs"]):
         return []
     opt = torch.optim.AdamW(model.parameters(), lr=float(tc["lr"]), weight_decay=float(tc["weight_decay"]))
@@ -381,11 +381,11 @@ def train(m: pd.DataFrame, clips: pd.DataFrame, cfg: dict, out_dir: str, loader:
     init_info = load_init(model, init, log) if init else None
     model = model.to(device)
     hist = train_views(model, clips, cache, cfg, device, log, rng)
-    todo = clips[clips.view.isna()]
+    todo = clips[clips["view"].isna()]
     if len(todo):                                     # unlabelled, untagged clips: confident view-head predictions only
         pred = predict_views(model, todo, cache, device).set_index("clip_uri")
-        fill = clips.view.isna() & clips.clip_uri.map(pred.view_p).fillna(0).ge(float(cfg["views"]["min_view_prob"]))
-        clips.loc[fill, "view"] = clips.loc[fill, "clip_uri"].map(pred.view)
+        fill = clips["view"].isna() & clips.clip_uri.map(pred.view_p).fillna(0).ge(float(cfg["views"]["min_view_prob"]))
+        clips.loc[fill, "view"] = clips.loc[fill, "clip_uri"].map(pred["view"])
         clips.loc[fill, "view_source"] = "model"
     view_counts = clips.groupby(["view", "view_source"], dropna=False).size().reset_index(name="clips").to_dict("records")
     hist += train_wm(model, m, clips, cache, cfg, device, log, rng, heads)

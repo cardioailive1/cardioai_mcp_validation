@@ -105,13 +105,13 @@ def read_view_labels(d: str) -> pd.DataFrame:
         s = pd.read_excel(p, sheet_name="views", dtype=str)
         parts.append(s[["clip_id", "view", "quality"]])
     lab = pd.concat(parts) if parts else pd.DataFrame(columns=["clip_id", "view", "quality"])
-    lab["view"] = lab.view.str.strip().str.upper().replace({"OTHER": "other"})
-    bad = lab[lab.view.notna() & ~lab.view.isin(VIEW_CLASSES)]
+    lab["view"] = lab["view"].str.strip().str.upper().replace({"OTHER": "other"})
+    bad = lab[lab["view"].notna() & ~lab["view"].isin(VIEW_CLASSES)]
     if len(bad):
         raise ValueError(f"{len(bad)} view labels not in {VIEW_CLASSES}, e.g. {bad.clip_id.head(3).tolist()}")
     out = key.merge(lab, on="clip_id", how="left")
     out.loc[out.quality.fillna("").str.lower().eq("unusable"), "view"] = "other"
-    return out[out.view.notna()][["clip_uri", "study_id", "view", "quality"]]
+    return out[out["view"].notna()][["clip_uri", "study_id", "view", "quality"]]
 
 
 def assign_views(clips: pd.DataFrame, labels: Optional[pd.DataFrame] = None, predicted: Optional[pd.DataFrame] = None,
@@ -122,7 +122,7 @@ def assign_views(clips: pd.DataFrame, labels: Optional[pd.DataFrame] = None, pre
     if predicted is not None and len(predicted):
         p = predicted.set_index("clip_uri")
         ok = c.clip_uri.map(p.view_p).fillna(0) >= min_prob
-        c.loc[ok, "view"] = c.loc[ok, "clip_uri"].map(p.view)
+        c.loc[ok, "view"] = c.loc[ok, "clip_uri"].map(p["view"])
         c.loc[ok, "view_source"] = "model"
     if "view_tag" in c:
         t = c.view_tag.notna()
@@ -131,7 +131,7 @@ def assign_views(clips: pd.DataFrame, labels: Optional[pd.DataFrame] = None, pre
         lab = labels.set_index("clip_uri").view
         h = c.clip_uri.isin(lab.index)
         c.loc[h, "view"], c.loc[h, "view_source"] = c.loc[h, "clip_uri"].map(lab), "label"
-    c.loc[c.view.notna() & ~c.view.isin(VIEWS), "view"] = "other"
+    c.loc[c["view"].notna() & ~c["view"].isin(VIEWS), "view"] = "other"
     return c
 
 
@@ -154,7 +154,7 @@ def main():
     else:
         lab = read_view_labels(a.dir)
         lab.to_csv(a.out, index=False)
-        print(lab.view.value_counts().to_string())
+        print(lab["view"].value_counts().to_string())
 
 
 if __name__ == "__main__":
