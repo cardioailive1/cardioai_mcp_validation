@@ -62,12 +62,17 @@ def test_segments_views_and_territories():
     assert sorted(s for t in TERRITORIES.values() for s in t) == list(range(1, 18))
     assert assessed(VIEWS).all() and assessed(["A4C"]).sum() == 7 and assessed(["A4C", "A2C"]).sum() == 13
     assert all(VIEW_SEGMENTS[v][3] == 17 for v in VIEWS)                       # the apex is in the middle slot
+    assert VIEW_SEGMENTS["A3C"][2] is None and VIEW_SEGMENTS["A3C"][4] is None   # A3C apical slots score no segment
+    assert sorted(np.flatnonzero(assessed(["A3C"])) + 1) == [2, 5, 8, 11, 17]
     p = np.tile([0.9, 0.05, 0.03, 0.02], (17, 1))
     p[3] = [0.1, 0.2, 0.6, 0.1]                                                # basal inferior akinetic
     s = summarise(p, assessed(["A4C", "A2C"]))
     assert s["segments"]["4"]["score"] == 3 and "5" not in s["segments"]
     assert s["territories"]["RCA"]["abnormal_segments"] == [4] and s["territories"]["LCx"]["assessed_segments"] == 3
     assert s["n_abnormal_segments"] == 1 and s["wmsi"] == round((12 + 3) / 13, 2)
+    assert s["max_apical_score"] == 1
+    p[12] = [0.1, 0.1, 0.7, 0.1]                                               # apical anterior akinetic
+    assert summarise(p, assessed(["A4C", "A2C"]))["max_apical_score"] == 3
 
 
 # --------------------------------------------------------------------------- preprocessing and DICOM

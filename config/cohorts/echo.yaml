@@ -187,16 +187,17 @@ endpoints:
     - {id: chamber_size, label: "Chamber size agreement (kappa)", metric: kappa, pred: agent_lv_size, ref: ref_lv_size, goal: 0.80, direction: ge, phase1: 0.84}
     - {id: processing_time, label: "Processing time (median s)", metric: median, pred: runtime_s, goal: 60, direction: le, phase1: 45}
     - {id: data_completeness, label: "Data completeness (required elements)", metric: completeness, goal: 0.95, direction: ge, phase1: 0.98}
-    # wall-motion extension (deck goals 0.85 for any abnormality; territory / global goals for the clinical lead to set)
+    # wall-motion extension: deck goals 0.85 for any abnormality; territory 0.80, global hypokinesis 0.85 and WMSI MAE 0.20
+    # PROPOSED in the clinical-lead sign-off sheet (2026-10-18; basis: Lin et al. 2022 external AUC 0.89-0.91), final once signed
     - {id: wall_motion_sens, label: "Wall motion abnormality — sensitivity", metric: sensitivity, pred: agent_wall_motion, ref: ref_wma, positive: abnormal, goal: 0.85, direction: ge, phase1: null}
     - {id: wall_motion_spec, label: "Wall motion abnormality — specificity", metric: specificity, pred: agent_wall_motion, ref: ref_wma, positive: abnormal, goal: 0.85, direction: ge, phase1: null}
-    - {id: lad_territory_sens, label: "LAD-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_lad, ref: ref_terr_lad, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: lad_territory_spec, label: "LAD-territory abnormality — specificity", metric: specificity, pred: agent_terr_lad, ref: ref_terr_lad, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: rca_territory_sens, label: "RCA-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_rca, ref: ref_terr_rca, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: rca_territory_spec, label: "RCA-territory abnormality — specificity", metric: specificity, pred: agent_terr_rca, ref: ref_terr_rca, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: lcx_territory_sens, label: "LCx-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_lcx, ref: ref_terr_lcx, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: lcx_territory_spec, label: "LCx-territory abnormality — specificity", metric: specificity, pred: agent_terr_lcx, ref: ref_terr_lcx, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: global_hypokinesis_sens, label: "Global hypokinesis — sensitivity", metric: sensitivity, pred: agent_global_hypokinesis, ref: ref_global_hypokinesis, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: global_hypokinesis_spec, label: "Global hypokinesis — specificity", metric: specificity, pred: agent_global_hypokinesis, ref: ref_global_hypokinesis, positive: abnormal, goal: null, direction: ge, phase1: null}
-    - {id: wmsi_mae, label: "Wall motion score index MAE vs report", metric: mae, pred: agent_wmsi, ref: ref_wmsi, goal: null, direction: le, phase1: null}
+    - {id: lad_territory_sens, label: "LAD-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_lad, ref: ref_terr_lad, positive: abnormal, goal: 0.80, direction: ge, phase1: null}
+    - {id: lad_territory_spec, label: "LAD-territory abnormality — specificity", metric: specificity, pred: agent_terr_lad, ref: ref_terr_lad, positive: abnormal, goal: 0.80, direction: ge, phase1: null}
+    - {id: rca_territory_sens, label: "RCA-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_rca, ref: ref_terr_rca, positive: abnormal, goal: 0.80, direction: ge, phase1: null}
+    - {id: rca_territory_spec, label: "RCA-territory abnormality — specificity", metric: specificity, pred: agent_terr_rca, ref: ref_terr_rca, positive: abnormal, goal: 0.80, direction: ge, phase1: null}
+    - {id: lcx_territory_sens, label: "LCx-territory abnormality — sensitivity", metric: sensitivity, pred: agent_terr_lcx, ref: ref_terr_lcx, positive: abnormal, goal: 0.80, direction: ge, phase1: null}
+    - {id: lcx_territory_spec, label: "LCx-territory abnormality — specificity", metric: specificity, pred: agent_terr_lcx, ref: ref_terr_lcx, positive: abnormal, goal: 0.80, direction: ge, phase1: null}
+    - {id: global_hypokinesis_sens, label: "Global hypokinesis — sensitivity", metric: sensitivity, pred: agent_global_hypokinesis, ref: ref_global_hypokinesis, positive: abnormal, goal: 0.85, direction: ge, phase1: null}
+    - {id: global_hypokinesis_spec, label: "Global hypokinesis — specificity", metric: specificity, pred: agent_global_hypokinesis, ref: ref_global_hypokinesis, positive: abnormal, goal: 0.85, direction: ge, phase1: null}
+    - {id: wmsi_mae, label: "Wall motion score index MAE vs report", metric: mae, pred: agent_wmsi, ref: ref_wmsi, goal: 0.20, direction: le, phase1: null}
   subgroups: [gender, age_group, race, site, image_quality, ref_ef_category]

@@ -176,14 +176,15 @@ class MobileNetV3WM(nn.Module):
         lvef  ()      percent, from all apical clips (all clips if none is apical)
         ghypo ()      global hypokinesis logit"""
         dev = out["slots"].device
-        seg = torch.zeros(N_SEG, N_SCORE, device=dev)
-        cnt = torch.zeros(N_SEG, device=dev)
+        seg = torch.zeros(N_SEG + 1, N_SCORE, device=dev)        # last row: slots that score no segment (discarded)
+        cnt = torch.zeros(N_SEG + 1, device=dev)
         apical = view_idx >= 0
         for i in torch.nonzero(apical).flatten().tolist():
             v = int(view_idx[i])
             idx = self.seg_of_slot[v]
             seg = seg.index_add(0, idx, out["slots"][i, v])
             cnt = cnt.index_add(0, idx, torch.ones(N_SLOT, device=dev))
+        seg, cnt = seg[:N_SEG], cnt[:N_SEG]
         seen = cnt > 0
         seg = seg / cnt.clamp(min=1).unsqueeze(1)
         feats = out["feat"][apical] if apical.any() else out["feat"]

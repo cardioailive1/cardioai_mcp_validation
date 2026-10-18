@@ -78,6 +78,7 @@ def analyse(model, clips: Sequence[Tuple[Video, Optional[str]]], device: str = "
     findings = {"lvef_pct": round(float(st["lvef"].item()), 1), "wmsi": s["wmsi"],
                 "assessed_segments": s["assessed_segments"], "n_abnormal_segments": s["n_abnormal_segments"],
                 "max_segment_score": max([v["score"] for v in s["segments"].values()], default=None),
+                "max_apical_score": s["max_apical_score"],
                 "segments": s["segments"], "territories": s["territories"], "views": clip_views}
     return {"findings": findings, "probabilities": probs, "notes": notes,
             "attention": out["attn"].cpu().numpy(), "clip_views": per_clip}

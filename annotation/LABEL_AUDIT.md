@@ -101,7 +101,7 @@ These must match what the code is meant to do. **The cardiologist signs them off
 | `global_hypokinesis` | Global / diffuse / generalised LV hypokinesis | Wall motion described without it | NM: not described |
 | `report_lvef` | LVEF % of **this** echo; a range is entered as its midpoint | — | Blank: not stated or a prior study only |
 
-When abnormal walls are listed, the other segments count as normal (`unmentioned_normal`, stated in the model card). The cardiologist confirms the AHA segment-to-territory assignment and the A3C apical segments in `echo_wm_training/runtime/segments.py`.
+When abnormal walls are listed, the other segments count as normal (`unmentioned_normal`, stated in the model card). The clinical lead signs these rules, the AHA segment-to-territory map and the A3C apical slots (proposed: not scored) on the echo wall-motion sign-off sheet.
 
 ### 1.4 Score, adjudicate, score again
 

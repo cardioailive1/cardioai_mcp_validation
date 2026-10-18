@@ -61,11 +61,13 @@ thresholds:
   terr_lcx: {target_sensitivity: 0.85}
   global_hypokinesis: {target_sensitivity: 0.90}
 
-# Findings that need further work-up (re-applied by the app from the model card). PROPOSED: clinical lead to confirm.
+# Findings that need further work-up (re-applied by the app from the model card). PROPOSED in the clinical-lead
+# sign-off sheet (2026-10-18), each tied to a guideline; final once signed. The app applies the LVEF rules to
+# EchoNet's volumetric EF when the echo analysis has it, and to this model's estimate only when run alone.
 red_flags:
-  lvef_le_35: {value: lvef_pct, max: 35.0, text: "LVEF <= 35% (wall-motion model estimate): severe LV systolic dysfunction"}
-  lvef_le_40: {value: lvef_pct, max: 40.0, text: "LVEF <= 40% (wall-motion model estimate): heart failure with reduced EF range"}
+  lvef_le_40: {value: lvef_pct, max: 40.0, text: "LVEF <= 40%: heart failure with reduced EF range (2022 AHA/ACC/HFSA)"}
+  lvef_le_35: {value: lvef_pct, max: 35.0, text: "LVEF <= 35%: severe LV systolic dysfunction (ICD threshold, 2017 AHA/ACC/HRS)"}
   regional_wma: {flag: [terr_lad, terr_rca, terr_lcx], min: 1, text: "regional wall-motion abnormality in a coronary territory: correlate with ECG, troponin and symptoms; consider ischaemia evaluation"}
-  multi_territory: {flag: [terr_lad, terr_rca, terr_lcx], min: 2, text: "wall-motion abnormality in two or more coronary territories: multivessel disease or cardiomyopathy"}
-  dyskinesis: {value: max_segment_score, min: 4, text: "dyskinetic / aneurysmal segment: LV thrombus risk, consider contrast echo or cardiac MRI"}
-  high_wmsi: {value: wmsi, min: 1.7, text: "wall motion score index >= 1.7 (extensive dysfunction; clinical lead to confirm cut-off)"}
+  multi_territory: {flag: [terr_lad, terr_rca, terr_lcx], min: 2, text: "wall-motion abnormality in two or more coronary territories: high-risk finding (multivessel disease or cardiomyopathy)"}
+  apical_akinesis: {value: max_apical_score, min: 3, text: "apical akinesis or dyskinesis: consider a contrast echo or cardiac MRI to look for LV thrombus"}
+  high_wmsi: {value: wmsi, min: 2.0, text: "wall motion score index >= 2.0: extensive LV dysfunction"}

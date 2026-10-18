@@ -18,7 +18,7 @@ The model is trained **only on Mayo data** inside the MCP workspace, like the EC
 | Periods | Echos before 2020-01-01 train it, 2020 tunes it, 2021 onward (plus held-out sites) tests it. Patients in the locked Phase 2 echo cohort never train it |
 | Mayo data | **Reports:** `FACT_ECHO_TEST.ECHO_NOTE`. **Images:** echo DICOM requested for de-identification from `FACT_RADIOLOGY_DICOM_INVENTORY` (`MODALITY = 'US'`) |
 | Labels | Automatic: the report's wall-motion statement parsed into 17 segment scores (`labels.parse_report`), audited by data scientists and the cardiologist (`annotation/LABEL_AUDIT.md`). Views: people label about 2,000 clips, then a view model labels the rest |
-| Phase 2 goals | Any wall-motion abnormality: sensitivity ≥ 0.85 and specificity ≥ 0.85 (deck). Territory, global hypokinesis and WMSI endpoints are reported; the clinical lead sets their goals |
+| Phase 2 goals | Any wall-motion abnormality: sensitivity and specificity ≥ 0.85 (deck). Proposed (clinical-lead sign-off sheet): each territory ≥ 0.80, global hypokinesis ≥ 0.85, WMSI error ≤ 0.20 |
 | Exported | `weights.pt`, `thresholds.json`, `model_card.json` only |
 
 ## 1. Before you start
@@ -28,7 +28,7 @@ The model is trained **only on Mayo data** inside the MCP workspace, like the EC
 | Accounts, trainings, GPU | As for the MRI agent (RUNBOOK_MRI.md §1): DUA forms, Radiology training, an A100 40 GB from the shared reservation |
 | Code | `cardioai_mcp_validation` (main) in the workspace; `pip install -r requirements.txt -r requirements-echo-wm.txt` (CUDA torch) |
 | Echo link | **Confirm with MCP** how a `FACT_ECHO_TEST` row links to its DICOM study (accession number or study UID), and the column names. Fill `config/modality_tables.yaml` → `echo.mcp` |
-| Clinical lead | Signs off the echo rule sheet (LABEL_AUDIT.md §1.3), the segment-to-territory map and the A3C apical segments (`runtime/segments.py`), and the red-flag cut-offs (`echo_wm_training/config.yaml` → `red_flags`) |
+| Clinical lead | Signs the sign-off sheet "Echo Wall-Motion Agent: Clinical Lead Sign-off": the echo rule sheet (LABEL_AUDIT.md §1.3), the A3C apical slots (proposed: not scored) and the AHA territory map (`runtime/segments.py`), the red-flag cut-offs (`config.yaml` → `red_flags`) and the Phase 2 goals (`config/cohorts/echo.yaml`). The code already holds the proposals; amendments are applied before training |
 
 Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data").
 
@@ -150,5 +150,5 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
 ## 6. Open items
 
 - MCP: the `FACT_ECHO_TEST` ↔ DICOM link and column names; whether echo DICOM is in `FACT_RADIOLOGY_DICOM_INVENTORY`; `PATIENT_CLINIC_NUMBER` ↔ `person_id` mapping (shared with MRI).
-- Clinical lead: rule sheet, A3C apical segments, territory map, red-flag cut-offs, and goals for the territory and global endpoints.
+- Clinical lead: sign the sign-off sheet (rule sheet incl. rules 4 and 8, A3C apical slots, territory map, red flags, goals). Proposals are in the code, marked proposed.
 - Territory output is "consistent with" an AHA territory, not a coronary diagnosis: coronary anatomy varies (dominance, wrap-around LAD).

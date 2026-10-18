@@ -5,9 +5,12 @@ Segments (Cerqueira et al., AHA 2002; ASE/EACVI chamber quantification, Lang et 
   mid    7 anterior  8 anteroseptal  9 inferoseptal 10 inferior 11 inferolateral 12 anterolateral
   apical 13 anterior 14 septal 15 inferior 16 lateral          17 apex (apical cap)
 
-Each apical view shows 7 segments, listed here from the basal segment on the LEFT of the standard display
+Each apical view has 7 positions, listed here from the basal segment on the LEFT of the standard display
 (apex at the top), up the left wall, the apex, and down the right wall to its basal segment. The model has
 one spatial "slot" per position. A segment seen in more than one view is averaged over the views that show it.
+The apical long-axis (A3C) view cuts the apex between the standard apical segments (the 18-segment model gives
+it its own "anteroseptal apical" and "inferolateral apical" segments), so its two apical slots score NO segment
+(None): segments 13-16 come from A4C and A2C (clinical-lead decision 2, proposed 2026-10-18).
 
 Territories follow the AHA standard assignment; individual coronary anatomy varies (dominance, wrap-around
 LAD), so territory output is "consistent with" a territory, never a coronary diagnosis.
@@ -34,10 +37,10 @@ N_SCORE = len(SCORES)
 VIEWS = ["A4C", "A2C", "A3C"]
 VIEW_CLASSES = VIEWS + ["other"]
 # 7 slots per view: basal-left, mid-left, apical-left, apex, apical-right, mid-right, basal-right
-VIEW_SEGMENTS: Dict[str, List[int]] = {
+VIEW_SEGMENTS: Dict[str, List[Optional[int]]] = {
     "A4C": [3, 9, 14, 17, 16, 12, 6],     # inferoseptum (left) .. anterolateral (right)
     "A2C": [4, 10, 15, 17, 13, 7, 1],     # inferior (left) .. anterior (right)
-    "A3C": [5, 11, 16, 17, 13, 8, 2],     # inferolateral (left) .. anteroseptum (right); CONFIRM apical pair with the clinical lead
+    "A3C": [5, 11, None, 17, None, 8, 2],  # inferolateral (left) .. anteroseptum (right); apical slots not scored
 }
 N_SLOT = 7
 
@@ -49,8 +52,8 @@ TERRITORIES: Dict[str, List[int]] = {
 
 
 def slot_index() -> np.ndarray:
-    """(n_views, 7) -> segment index 0..16 (for gathering per-view slot logits into segments)."""
-    return np.array([[s - 1 for s in VIEW_SEGMENTS[v]] for v in VIEWS], dtype=np.int64)
+    """(n_views, 7) -> segment index 0..16, or 17 (= N_SEG, a discard row) for a slot that scores no segment."""
+    return np.array([[N_SEG if s is None else s - 1 for s in VIEW_SEGMENTS[v]] for v in VIEWS], dtype=np.int64)
 
 
 def assessed(views: Iterable[str]) -> np.ndarray:
@@ -58,7 +61,8 @@ def assessed(views: Iterable[str]) -> np.ndarray:
     a = np.zeros(N_SEG, bool)
     for v in views:
         for s in VIEW_SEGMENTS[v]:
-            a[s - 1] = True
+            if s is not None:
+                a[s - 1] = True
     return a
 
 
@@ -85,7 +89,9 @@ def summarise(seg_prob: np.ndarray, seen: np.ndarray) -> Dict[str, object]:
         terr[t] = {"assessed_segments": len(idx), "p_abnormal": round(float(p_abn[idx].max()), 4),
                    "abnormal_segments": [s + 1 for s in idx if cls[s] > 0],
                    "worst_score": int(cls[idx].max()) + 1}
+    apical = [int(cls[i]) + 1 for i in range(12, N_SEG) if seen[i]]
     return {"segments": segs, "assessed_segments": int(seen.sum()),
+            "max_apical_score": max(apical) if apical else None,
             "wmsi": round(float(scores.mean()), 2) if len(scores) else None,
             "n_abnormal_segments": int(sum(cls[i] > 0 for i in range(N_SEG) if seen[i])),
             "territories": terr}
