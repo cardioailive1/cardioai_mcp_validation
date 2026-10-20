@@ -124,6 +124,14 @@ This creates `<work>.<cohort>_analytic` (one row per patient, every deck data el
 ### 7b. Check data quality
 Review `exports/<cohort>_attrition.csv`, `_completeness.csv`, `_sites.csv` and `_table1.csv`. Fix mapping problems now; once the reference standard is locked, the data are frozen.
 
+**MRI only (before 7b):** the MRI reference is built in Python by the training label code, from the cohort's own report text. After the first 7a run:
+```python
+from mri_training.reference import reference_table, check_reference
+ref = reference_table(spark.table("cardioai_work.mri_analytic").toPandas())
+spark.createDataFrame(ref).write.mode("overwrite").saveAsTable("cardioai_work.mri_reference")
+```
+Set `mri_ref.enabled: true` in `config/modality_tables.yaml`, re-run 7a for `mri`, and call `check_reference` on the new `mri_analytic` before 7c. Without this the cohort falls back to older word-level SQL rules, and `evaluate_cohorts.py` warns.
+
 ### 7c. Adjudicate and lock the reference standard
 Several references come from report text: CAD stenosis %, echo wall motion / RV / valves, ECG over-read classes. For these:
 1. Draw a 10% random sample (seed fixed in `study.yaml`). Two cardiologists independently review the source report, **blinded to the extracted value and to the agent**. A third reviewer resolves disagreements.

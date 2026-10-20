@@ -15,6 +15,8 @@ import argparse
 import os
 import sys
 
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cardioai_mcp.config import load_cohort, load_study  # noqa: E402
@@ -58,6 +60,11 @@ def main():
         except SystemExit:
             print(f"WARNING: {key}_analytic_locked not found - scoring the unlocked {key}_analytic")
             analytic = table(f"{key}_analytic")
+        if key == "mri":
+            found = pd.to_numeric(analytic.get("py_ref_found", pd.Series(dtype=float)), errors="coerce")
+            if not (found == 1).any():
+                print("WARNING: the MRI reference comes from the older SQL rules, not the training label code: build "
+                      "mri_reference (mri_training/reference.py), enable mri_ref, rebuild and re-lock the cohort")
         series = daily = None
         if key == "longitudinal":
             daily = table(c.predictions["table"])
