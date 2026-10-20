@@ -48,6 +48,7 @@ splits:
   test_start: '2021-01-01'
   heldout_sites: []
   heldout_site_fraction: 0.15
+  min_age: 18                       # adults only, as in every Phase 2 cohort: tests before 18 are dropped from all splits
   max_ecgs_per_patient: 3           # max studies per patient (name shared with the ECG split code)
   exclude_persons_table: mri_analytic_locked
   seed: 20261014

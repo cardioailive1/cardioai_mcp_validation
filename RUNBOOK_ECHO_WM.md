@@ -65,6 +65,7 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
    clips = build_clip_table(m)                                       # every 2-D greyscale cine (colour, Doppler, M-mode skipped)
    clips.to_parquet("/workspace/echo/clips.parquet")
    ```
+   Adults only: tests done before age 18 (`splits.min_age`, the Phase 2 cohort rule) are dropped from every split, and `m.attrs["n_under_min_age"]` gives the count.
    Set `echo_wm.enabled: true` in `config/modality_tables.yaml` once `echo_wm_reference` exists.
 
 4. **Audit the automatic labels** (data scientists first, then the cardiologist; LABEL_AUDIT.md).

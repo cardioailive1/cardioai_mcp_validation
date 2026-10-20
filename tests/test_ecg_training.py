@@ -93,7 +93,7 @@ def evidence(n=400, seed=0):
     return pd.DataFrame({
         "person_id": pid, "ecg_id": [f"e{i}" for i in range(n)], "waveform_uri": [f"u{i}" for i in range(n)],
         "ecg_date": pd.to_datetime("2016-01-01") + pd.to_timedelta(rnd.integers(0, 3000, n), "D"),
-        "site": pid % 9, "confirmed": 1,
+        "site": pid % 9, "confirmed": 1, "age": 30 + pid % 50,
         "read_text": rnd.choice(["Sinus rhythm.", "Atrial fibrillation with RVR.", "No evidence of atrial fibrillation.",
                                  "History of atrial flutter. Sinus rhythm.", None], n),
         "mi_dx": rnd.integers(0, 2, n), "stemi_dx": rnd.integers(0, 2, n), "nstemi_dx": rnd.integers(0, 2, n),
@@ -126,6 +126,24 @@ def test_splits_patient_disjoint_time_ordered_and_exclusions():
     assert (m[m.split == "test_time"].ecg_date >= test_start).all()
     assert not set(m[m.split.isin(["train", "tune"])].person_id) & excluded
     assert m[m.split.isin(["train", "tune"])].groupby("person_id").size().max() <= cfg["splits"]["max_ecgs_per_patient"]
+
+
+def test_min_age_drops_children_from_every_split():
+    cfg = load_config()
+    assert cfg["splits"]["min_age"] == 18
+    cfg["splits"]["heldout_site_fraction"] = 0.0
+    d = pd.DataFrame({"person_id": [1, 1, 2, 3, 4], "ecg_id": ["a", "b", "c", "d", "e"], "site": 1,
+                      "ecg_date": ["2015-01-01", "2020-06-01", "2022-01-01", "2016-01-01", "2016-01-01"],
+                      "age": [17, 18, 12, None, 40]})
+    m = assign_splits(d, cfg)
+    # patient 1's split is set by the first ADULT ECG (2020 -> tune); the child-only patient 2 and the
+    # missing-age ECG are gone from every split, including test
+    assert dict(zip(m.ecg_id, m.split)) == {"b": "tune", "e": "train"}
+    assert m.attrs["n_under_min_age"] == 3
+    del cfg["splits"]["min_age"]
+    assert len(assign_splits(d, cfg)) == 4                          # off: only the time windows apply (a, b split apart)
+    with pytest.raises(ValueError):
+        assign_splits(d.drop(columns="age"), load_config())
 
 
 def test_label_sql_runs_on_omop():

@@ -65,7 +65,7 @@ No public dataset or outside pretrained weights are used: `use_public_datasets: 
    m = build_manifest(SparkEngine(spark, study), study, cfg, study["modality"], exclude_persons=excl)
    summary(m, cfg["study_heads"]); m.to_parquet("/workspace/mri/manifest.parquet")
    ```
-   The build refuses to continue if any patient appears in two splits.
+   The build refuses to continue if any patient appears in two splits. Adults only: tests done before age 18 (`splits.min_age`, the Phase 2 cohort rule) are dropped from every split, and `m.attrs["n_under_min_age"]` gives the count.
 4. **Contour about 300 studies** with the annotation kit (`annotation/README.md`: worklist, pre-drawn outlines, tool options, reader protocol, checks and double-read agreement). Readers draw LV pool, myocardium, scar, MVO and RV on the short-axis LGE, and LV pool, myocardium and RV on cine at ED and ES. Spread the studies across splits and over-sample post-STEMI studies. Save one `.npz` per study: `lge` (S, H, W) in `read_study()` slice order, and optionally `cine` (K, S, H, W) with `cine_phases` (K,). Put its path in the manifest's `label_uri` column.
 5. **Pretrain the encoder on Mayo images** (A100, training period only):
    ```bash
