@@ -91,6 +91,23 @@ echo:
     resize_px: 112
     fps: 20
 
+# Phase 2 MRI reference built in the workspace from the cohort's own CMR report text, by the training label code
+# (mri_training/reference.py). The MRI cohort reads it (modality mri_ref); without it, its older SQL rules apply.
+mri_ref:
+  enabled: false                       # set true once mri_reference is built (two-pass, see mri_training/reference.py)
+  table: "{work}.mri_reference"
+  columns:
+    person_id: person_id
+    study_datetime: study_datetime     # = the cohort index date
+    ref_found: ref_found
+    infarct: infarct
+    nonischemic_lge: nonischemic_lge
+    lv_thrombus: lv_thrombus
+    lv_aneurysm: lv_aneurysm
+    report_mvo: report_mvo
+    report_lvef: report_lvef
+    report_infarct_size: report_infarct_size
+
 # Echo wall-motion tables built in the workspace (echo_wm_training): the delivered studies, and the
 # report-derived wall-motion reference the Phase 2 echo cohort reads (config/cohorts/echo.yaml, modality echo_wm).
 echo_wm:
