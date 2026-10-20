@@ -31,7 +31,8 @@ T = {
     "D": ("Transmural enhancement in the RCA territory consistent with infarct. Apical LV thrombus measuring 1 cm. "
           "Left ventricular aneurysm at the apex. Ejection fraction 30 %.",
           dict(infarct=1, nonischemic_lge=0, lv_thrombus=1, lv_aneurysm=1, report_mvo=0, report_lvef=30)),
-    # the regex calls this thrombus = 1; the text is uncertain -> the audit must catch it
+    # a deliberately BAD rule (hedges ignored, see _manifest) calls this thrombus = 1; the text is uncertain ->
+    # the audit must catch it. (The real rule masks it; this test proves the audit would catch the bug.)
     "E": ("Subendocardial late gadolinium enhancement in the LAD territory consistent with prior myocardial infarction. "
           "Possible small LV thrombus, cannot be excluded. LVEF 45 %.",
           dict(infarct=1, nonischemic_lge=0, lv_thrombus="U", lv_aneurysm=0, report_mvo=0, report_lvef=45)),
@@ -45,6 +46,8 @@ def _manifest(n=1500, seed=0):
     rnd = np.random.default_rng(seed)
     kinds = rnd.choice(list(MIX), n, p=list(MIX.values()))
     cfg = mri_cfg()
+    never = r"(?!x)x"                                   # planted bug: the label code ignores every hedge
+    cfg["labels"]["context"] = {"pre_uncertain": never, "post_uncertain": never, "anywhere_uncertain": never}
     rows = []
     for i, k in enumerate(kinds):
         rows.append({"study_id": f"S{i:05d}", "person_id": i, "kind": k, "report_text": T[k][0], **report_labels(T[k][0], cfg)})

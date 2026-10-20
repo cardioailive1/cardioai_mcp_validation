@@ -24,10 +24,13 @@ labels:
   troponin_url_fallback: {ng_per_l_male: 15, ng_per_l_female: 10, ng_per_l: 14, ng_per_ml: 0.04}
   # stemi = 1 : acute_mi = 1 AND a STEMI diagnosis (concept set stemi) within window_days
   # stemi = 0 : acute_mi = 0, or acute_mi = 1 with NSTEMI and no STEMI diagnosis; else NULL
-  # af    = 1 : confirmed (over-read) statement says atrial fibrillation or flutter; 0 otherwise
-  #             NULL when there is no confirmed read
+  # af    = 1 : confirmed (over-read) statement says atrial fibrillation or flutter on THIS tracing
+  #       = 0 : not mentioned, or negated ("no evidence of", "not seen"), historical ("history of", "on the prior
+  #             tracing") or resolved ("no longer present", "has resolved")
+  #       NULL: only hedged mentions ("possible", "consider", "versus"), or no confirmed read
+  # Mentions are judged in their sentence by cardioai_mcp/report_context.py; `context` overrides its trigger words.
   af_regex: '(?i)(atrial fibrillation|atrial flutter|\bafib\b|\ba-fib\b)'
-  af_negation_regex: '(?i)(no (evidence of )?atrial (fibrillation|flutter)|history of atrial (fibrillation|flutter)|(rule out|r/o) atrial)'
+  context: {}
   require_confirmed_read: true
 
 splits:

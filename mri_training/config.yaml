@@ -30,15 +30,19 @@ mayo_contours:
 
 labels:
   # CMR report rules (confirmed final reports). NULL = not stated -> masked in the loss.
-  infarct_regex: '(?i)(ischa?emic (pattern|scar|lge|enhancement)|(subendocardial|transmural) (late )?(gadolinium )?enhancement|(consistent|compatible) with (an? )?(prior |remote |old |acute |recent )?(myocardial )?infarct|infarct(ion)? (scar|size)|lge in (an? )?(lad|lcx|rca|coronary) (territory|distribution))'
-  nonischemic_regex: '(?i)((mid[- ]?wall|midmyocardial|mid-myocardial|subepicardial|epicardial|patchy|non[- ]?isch(a)?emic|nonisch(a)?emic|insertion[- ]point) (late )?(gadolinium )?enhancement|myocarditis|sarcoid|amyloid|hypertrophic cardiomyopathy)'
+  # Mentions are judged in their sentence (cardioai_mcp/report_context.py): negated, hedged, historical and
+  # resolved mentions don't count as present; hedged-only -> masked. `context` overrides its trigger words.
+  infarct_regex: '(?i)(ischa?emic (pattern|scar|lge|enhancement|infarct)|(subendocardial|transmural)\s+(?:[\w,()<>%-]+\s+){0,4}?(?:late\s+)?(?:gadolinium\s+)?(?:enhancement|lge|infarct|scar)|(consistent|compatible|in keeping) with (?:[\w-]+ ){0,4}?infarct|infarct(ion)? (scar|size|mass)|(scar|lge|enhancement)\s+(?:[\w-]+\s+){0,5}?(lad|rca|lcx|circumflex|coronary)( artery)? (territory|distribution))'
+  # an infarct-pattern mention in a sentence like these is ignored unless the sentence also names a coronary cause
+  infarct_exclude_regex: '(?i)(amyloid|(diffuse|global|circumferential) subendocardial)'
+  infarct_keep_regex: '(?i)(infarct|coronary|ischa?emic|\b(lad|rca|lcx)\b)'
+  nonischemic_regex: '(?i)((mid[- ]?wall|midmyocardial|mid-myocardial|subepicardial|epicardial|patchy|non[- ]?isch(a)?emic|nonisch(a)?emic|insertion[- ]point)\s+(?:[\w-]+\s+){0,2}?(late\s+)?(gadolinium\s+)?(enhancement|lge)|myocarditis|sarcoid|amyloid|hypertrophic cardiomyopathy)'
   no_lge_regex: '(?i)(no (evidence of )?(late gadolinium enhancement|lge|delayed (myocardial )?enhancement|myocardial (scar|fibrosis|infarct))|without (late gadolinium )?enhancement)'
-  thrombus_regex: '(?i)((lv|left ventricular|apical|ventricular) (mural )?thromb)'
-  thrombus_negation_regex: '(?i)(no (evidence of )?(lv |left ventricular |apical |intracardiac |ventricular )?(mural )?thromb)'
-  aneurysm_regex: '(?i)((lv|left ventricular|apical|true|false|pseudo) ?aneurysm)'
-  aneurysm_negation_regex: '(?i)(no (evidence of )?(lv |left ventricular |apical )?(pseudo)?aneurysm)'
+  thrombus_regex: '(?i)((lv|left ventricular|apical|ventricular|mural|intracavitary) (mural )?thromb)'
+  aneurysm_regex: '(?i)((lv|left ventricular|apical|true|false|pseudo) ?aneurysm\b)'
+  aneurysm_uncertain_regex: '(?i)(\baneurysmal\b|dyskine)'
   mvo_regex: '(?i)(microvascular obstruction|\bmvo\b|no[- ]reflow)'
-  mvo_negation_regex: '(?i)(no (evidence of )?(microvascular obstruction|mvo|no[- ]reflow))'
+  context: {}
   lvef_regex: '(?i)(?:lvef|ejection fraction)[^0-9]{0,25}(?P<val>[1-8][0-9](?:\.[0-9])?) ?%'
   infarct_size_regex: '(?i)(?:infarct size|scar burden|lge burden|extent of (?:late )?enhancement)[^0-9]{0,25}(?P<val>[0-9]{1,2}(?:\.[0-9])?) ?%'
   thrombus_aneurysm_default_negative: true   # not mentioned in a full LGE report = absent (assumption, in model card)

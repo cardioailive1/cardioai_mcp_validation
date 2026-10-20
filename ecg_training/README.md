@@ -68,7 +68,7 @@ The request is `{"instances": [{"signal": n_leads x N, "fs": Hz, "leads": [...],
 |---|---|---|---|
 | acute_mi | Acute MI diagnosis **and** troponin above the upper reference limit (the row's own limit, else Mayo's: males > 15, females > 10 ng/L), both within −1 to +3 days of the ECG | No MI diagnosis of any kind within ±30 days | Diagnosis without troponin, or the reverse |
 | stemi | acute_mi = 1 **and** a STEMI diagnosis within −1 to +3 days | acute_mi = 0, or NSTEMI without a STEMI diagnosis | Otherwise |
-| af | Confirmed read says atrial fibrillation or flutter (negations removed) | Confirmed read without it | No confirmed read |
+| af | Confirmed read says atrial fibrillation or flutter on this tracing | Confirmed read without it, or negated, historical ("history of", "on the prior tracing") or resolved ("no longer present") | No confirmed read; only hedged mentions ("possible", "consider", "versus") |
 
 ## Tests
 
