@@ -124,11 +124,12 @@ Every cine phase is segmented, so allow tens of seconds per study on CPU (`n1-st
 
 | Finding | Positive | Negative | Masked |
 |---|---|---|---|
-| infarct | Ischaemic pattern, subendocardial or transmural LGE, "consistent with infarction", or LGE in a coronary territory | "No LGE / scar / infarct", or a non-ischaemic pattern only | Otherwise |
-| nonischemic_lge | Mid-wall, subepicardial, patchy, non-ischaemic or insertion-point LGE; myocarditis, sarcoid, amyloid or HCM | No LGE, or an infarct only | Otherwise |
-| lv_thrombus, lv_aneurysm | Mentioned and not negated | Negated, or not mentioned in a full LGE report (an assumption recorded in the model card) | Short or empty report |
+| infarct | Ischaemic pattern; subendocardial or transmural LGE or scar; "consistent with (prior LAD territory) infarction"; LGE or scar in a coronary territory | "No LGE / scar / infarct", or a non-ischaemic pattern only | LGE not assessed; only hedged mentions ("versus", "differential includes"); diffuse / amyloid subendocardial enhancement is not counted as infarct |
+| nonischemic_lge | Mid-wall, subepicardial, patchy, non-ischaemic or insertion-point LGE; myocarditis, sarcoid, amyloid or HCM (not a "history of" line) | No LGE, or an infarct only | LGE not assessed; only hedged mentions |
+| lv_thrombus, report_mvo | Present now | Negated ("not seen"), resolved, reported on another study, or not mentioned in a full LGE report (an assumption recorded in the model card) | Hedged ("possible", "cannot be excluded", "may represent"); short or empty report |
+| lv_aneurysm | True aneurysm or pseudoaneurysm | As thrombus | Hedged; "aneurysmal" or dyskinesis without an aneurysm named |
 
-LVEF, infarct size and MVO stated in the report are kept to evaluate the measurements. `config/cohorts/mri.yaml` uses the same rules in SQL, and `tests/test_mri_cohort.py` checks that the two agree report by report.
+Each mention is judged in its sentence by `cardioai_mcp/report_context.py` (negation, hedge, history, resolved). LVEF, infarct size and MVO stated in the report are kept to evaluate the measurements. `config/cohorts/mri.yaml` still screens reports with the earlier word-level rules in SQL; `tests/test_mri_cohort.py` checks that the two agree on plain reports, but they differ on hedged, historical and resolved sentences.
 
 ## Tests
 

@@ -89,7 +89,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    python -m annotation.label_audit score ecg --dir /workspace/audit/ecg     # twice: before and after the cardiologist
    ```
    - The cardiologist reads `troponin_concepts.csv` (which assays the troponin concept set really contains, with units and reference limits) and signs it off.
-   - AF must PASS (PPV and NPV at least 0.95, lower bound at least 0.90). On a FAIL, fix `af_regex` / `af_negation_regex`, rebuild and re-audit on a fresh sample.
+   - AF must PASS (PPV and NPV at least 0.95, lower bound at least 0.90). On a FAIL, fix `af_regex` or the `context` trigger words (`cardioai_mcp/report_context.py`), rebuild and re-audit on a fresh sample.
 
 7. **Train on the A100.**
    ```bash

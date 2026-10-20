@@ -8,6 +8,7 @@ Report labels (config.yaml labels:) for the study heads, plus report values used
 """
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Iterable, Optional
@@ -24,35 +25,59 @@ def load_config(path: Optional[str] = None) -> dict:
     return yaml.safe_load(Path(path or HERE / "config.yaml").read_text())
 
 
-def _flag(text: str, pos: str, neg: Optional[str]) -> Optional[float]:
-    clean = re.sub(neg, " ", text) if neg else text
-    return 1.0 if re.search(pos, clean) else 0.0
-
-
 def report_labels(text: Optional[str], cfg: dict) -> dict:
-    """One CMR report -> study labels (1 / 0 / NaN) and stated values (regexes capture the number as `val`)."""
+    """One CMR report -> study labels (1 / 0 / NaN) and stated values (regexes capture the number as `val`).
+
+    Each mention is judged in its sentence (cardioai_mcp/report_context.py): affirmed, negated, uncertain
+    ("possible", "cannot be excluded", "versus", "differential includes"), historical ("history of", "was reported
+    on the referring echo") or resolved ("has resolved"). A label is 1 when affirmed anywhere, masked (NaN) when its
+    only mentions are uncertain, otherwise by the rules below.
+      infarct / nonischemic_lge: affirmed -> 1; uncertain -> NaN; "no LGE" or (the other pattern affirmed) -> 0;
+        otherwise NaN (LGE not assessed). "Prior infarct" counts (old scar is still there); an infarct-pattern
+        mention in a sentence about diffuse / amyloid enhancement with no coronary wording is ignored.
+      lv_thrombus, report_mvo: affirmed -> 1; uncertain -> NaN; otherwise 0 (silence = absent, model card).
+      lv_aneurysm: as thrombus, and "aneurysmal" or dyskinesis without an aneurysm named -> NaN (rule sheet).
+    """
+    from cardioai_mcp.report_context import Context
     lab = cfg["labels"]
     nan = float("nan")
     if not isinstance(text, str) or len(text.strip()) < 20:
         return {"infarct": nan, "nonischemic_lge": nan, "lv_thrombus": nan, "lv_aneurysm": nan,
                 "report_mvo": nan, "report_lvef": nan, "report_infarct_size": nan}
-    no_lge = bool(re.search(lab["no_lge_regex"], text))
-    body = re.sub(lab["no_lge_regex"], " ", text)
-    infarct = 1.0 if re.search(lab["infarct_regex"], body) else (0.0 if no_lge else nan)
-    nonisch = 1.0 if re.search(lab["nonischemic_regex"], body) else (0.0 if (no_lge or infarct == 1.0) else nan)
-    if no_lge and infarct != 1.0 and nonisch != 1.0:
-        infarct, nonisch = 0.0, 0.0
-    if nonisch == 1.0 and infarct != 1.0:
-        infarct = 0.0          # LGE described, pattern non-ischaemic only -> no infarct
+    ctx = Context(lab.get("context"))
+    no_lge = ctx.combine(ctx.statuses(text, lab["no_lge_regex"])) == 1.0          # "no LGE" stated (not hedged)
+    excl = re.compile(lab["infarct_exclude_regex"]) if lab.get("infarct_exclude_regex") else None
+    coronary = re.compile(lab.get("infarct_keep_regex", r"(?!x)x"))
+    skip = (lambda sent: bool(excl.search(sent)) and not coronary.search(sent)) if excl else None
+    inf_st = ctx.statuses(text, lab["infarct_regex"], skip)
+    non_st = ctx.statuses(text, lab["nonischemic_regex"])
+    inf, non = ctx.combine(inf_st), ctx.combine(non_st)
+
+    def resolve(own, other):
+        if own == 1.0:
+            return 1.0
+        if own is not None and math.isnan(own):
+            return nan                                     # only hedged mentions
+        if no_lge or other == 1.0:
+            return 0.0
+        return nan
+    infarct, nonisch = resolve(inf, non), resolve(non, inf)
+
+    def present(pattern) -> float:
+        v = ctx.label(text, pattern)
+        return 0.0 if v is None else v                     # silence = absent (thrombus_aneurysm_default_negative)
+
     default_neg = lab.get("thrombus_aneurysm_default_negative", True)
-    thr = _flag(text, lab["thrombus_regex"], lab["thrombus_negation_regex"])
-    ane = _flag(text, lab["aneurysm_regex"], lab["aneurysm_negation_regex"])
-    mvo = _flag(text, lab["mvo_regex"], lab["mvo_negation_regex"])
+    thr = present(lab["thrombus_regex"])
+    ane = present(lab["aneurysm_regex"])
+    if ane == 0.0 and lab.get("aneurysm_uncertain_regex") and re.search(lab["aneurysm_uncertain_regex"], text):
+        ane = nan                                          # "aneurysmal segment" / dyskinesis, no aneurysm named
+    mvo = present(lab["mvo_regex"])
     ef = re.search(lab["lvef_regex"], text)
     size = re.search(lab["infarct_size_regex"], text)
     return {"infarct": infarct, "nonischemic_lge": nonisch,
-            "lv_thrombus": thr if (thr == 1.0 or default_neg) else nan,
-            "lv_aneurysm": ane if (ane == 1.0 or default_neg) else nan,
+            "lv_thrombus": thr if (thr != 0.0 or default_neg) else nan,
+            "lv_aneurysm": ane if (ane != 0.0 or default_neg) else nan,
             "report_mvo": mvo,
             "report_lvef": float(ef.group("val")) if ef else nan,
             "report_infarct_size": float(size.group("val")) if size else nan}

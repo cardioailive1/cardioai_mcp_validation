@@ -22,6 +22,10 @@ Rules (the rule sheet in annotation/LABEL_AUDIT.md must say the same):
     stated in the model card);
   * hedged clauses (possible, questionable, may represent, cannot exclude, suggestive, equivocal) leave the
     segments they mention UNKNOWN (masked), never normal;
+  * a clause about another study ("previous echo showed ...", "on the 2019 study") is skipped unless it says
+    the finding is current ("persists", "unchanged", "new"); a resolved finding ("has resolved", "no longer
+    seen") is normal now, and counts as a wall-motion statement;
+  * "apical" naming a view, clot or mass ("apical thrombus", "apical 4-chamber view") is not a segment level;
   * no wall-motion statement at all: every segment unknown (masked).
 """
 from __future__ import annotations
@@ -50,6 +54,16 @@ _LEVEL_RE = re.compile(r"\b(?P<range>bas(?:e|al)[- ]?(?:to|through|-)[- ]?(?:mid
 _NEG_BEFORE = re.compile(r"\b(no|without|not|absence of|resolved)\W+(?:\w+\W+){0,2}$")
 _HEDGE = re.compile(r"\b(possible|possibly|probable|questionabl[ey]|equivocal|may (?:be|represent)|"
                     r"can ?not (?:be )?(?:exclude|excluded|ruled out)|cannot rule out|suggestive|suggests?|r/o|rule out|\?)")
+# a clause about another study (skipped unless it also says the finding is current), and resolved findings (normal now)
+_PRIOR = re.compile(r"\b(?:previous|prior|old|earlier|outside|referring|last)\s+(?:echo\w*|stud(?:y|ies)|exam\w*|tte|tee|scan)\b|"
+                    r"\b(?:on|in|from)\s+(?:the\s+)?(?:19|20)\d\d\s+(?:echo\w*|study|exam\w*)\b|\bpreviously\s+(?:seen|reported|described|noted)\b")
+_CURRENT = re.compile(r"\b(?:today|now|currently|current study|this study|this exam\w*|new(?:ly)?|persist\w*|still|again|unchanged|"
+                      r"remains?|no change|not significantly changed)\b")
+_RESOLVED = re.compile(r"\b(?:has|have|had)?\s*(?:since\s+)?resolved\b|\bno longer (?:seen|present|evident|visible)\b|"
+                       r"\b(?:has|have) normali[sz]ed\b|\bnow normal\b")
+# a level word that names a view, a clot or a mass, not segments ("apical thrombus", "apical 4-chamber view")
+_LEVEL_NOT_SEG = re.compile(r"^\W+(?:[a-z]+\W+)?(?:thromb|clot|mass|trabecul|view|window|imag|foreshort|"
+                            r"(?:two|three|four|2|3|4|long)[- ]?(?:chamber|axis))")
 _GLOBAL = re.compile(r"\b(global(?:ly)?|diffuse(?:ly)?|generali[sz]ed)\b[\w\s,-]{0,40}?\bhypo-?kine")
 _NORMAL_WM = re.compile(r"\bno (?:other |further )?(?:definite |significant )?(?:regional |segmental )?wall[- ]motion abnormalit|"
                         r"\bnormal (?:regional |segmental |left ventricular )?wall[- ]motion|\bwall[- ]motion (?:is|was|appears) normal|"
@@ -87,6 +101,8 @@ def _tokens(clause: str) -> List[Tuple[int, str, object]]:
     for m in _WALL_RE.finditer(clause):
         toks.append((m.start(), "wall", next(k for k, _ in _WALLS if m.group(k))))
     for m in _LEVEL_RE.finditer(clause):
+        if _LEVEL_NOT_SEG.match(clause[m.end():m.end() + 40]):
+            continue
         if m.group("range"):
             r = m.group("range")
             lv = {"B", "M", "AP"} if re.search(r"apical|apex|entire|whole|all", r) and r.startswith(("bas", "entire", "whole", "all")) \
@@ -138,6 +154,8 @@ def _read_clause(clause: str) -> Tuple[Dict[int, int], Set[int]]:
         for s in segs:
             out[s] = max(out.get(s, 0), score)
     hedged = set(out) if _HEDGE.search(clause) else set()
+    if _RESOLVED.search(clause) and not hedged:
+        out = {s: 1 for s in out}                       # "inferior hypokinesis has resolved": normal now
     return ({s: v for s, v in out.items() if s not in hedged}, hedged)
 
 
@@ -151,13 +169,20 @@ def parse_report(text: Optional[str], unmentioned_normal: bool = True) -> Dict[s
     t = text.lower()
     scores: Dict[int, int] = {}
     hedged: Set[int] = set()
+    kept: List[str] = []
+    resolved = False
     for clause in _CLAUSE.split(t):
+        if _PRIOR.search(clause) and not _CURRENT.search(clause) and not _RESOLVED.search(clause):
+            continue                                    # "previous echo (2019) showed inferior akinesis"
+        kept.append(clause)
         sc, hd = _read_clause(clause)
+        resolved |= bool(sc) and all(v == 1 for v in sc.values()) and bool(_RESOLVED.search(clause))
         for s, v in sc.items():
             scores[s] = max(scores.get(s, 0), v)
         hedged |= hd
-    glob = bool(_GLOBAL.search(t)) and not re.search(r"\bno (?:global|diffuse)\b", t)
-    normal_stmt = bool(_NORMAL_WM.search(t))
+    k = " . ".join(kept)
+    glob = bool(_GLOBAL.search(k)) and not re.search(r"\bno (?:global|diffuse)\b", k)
+    normal_stmt = bool(_NORMAL_WM.search(k)) or resolved
     described = bool(scores or glob or normal_stmt or hedged)
     final: Dict[int, Optional[int]] = {}
     for s in range(1, N_SEG + 1):

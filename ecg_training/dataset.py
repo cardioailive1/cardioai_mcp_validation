@@ -56,7 +56,8 @@ def make_labels(ev: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     d["acute_mi"] = np.where(pos_mi, 1.0, np.where(neg_mi, 0.0, np.nan))
     d["stemi"] = np.where(pos_mi & (d.stemi_dx == 1), 1.0,
                           np.where(neg_mi | (pos_mi & (d.nstemi_dx == 1) & (d.stemi_dx == 0)), 0.0, np.nan))
-    af_re, neg_re = re.compile(lab["af_regex"]), re.compile(lab["af_negation_regex"])
+    from cardioai_mcp.report_context import Context
+    af_re, ctx = re.compile(lab["af_regex"]), Context(lab.get("context"))
 
     def af(row):
         txt = row.read_text
@@ -64,8 +65,10 @@ def make_labels(ev: pd.DataFrame, cfg: dict) -> pd.DataFrame:
             return np.nan
         if lab.get("require_confirmed_read", True) and row.confirmed != 1:
             return np.nan
-        clean = neg_re.sub(" ", txt)
-        return 1.0 if af_re.search(clean) else 0.0
+        # affirmed on this tracing -> 1; only hedged ("possible", "versus") -> masked; negated, historical
+        # ("history of", "on the prior tracing") or resolved ("no longer present") -> 0; not mentioned -> 0
+        v = ctx.label(txt, af_re)
+        return 0.0 if v is None else v
 
     d["af"] = d.apply(af, axis=1) if len(d) else pd.Series(dtype=float)
     return d
