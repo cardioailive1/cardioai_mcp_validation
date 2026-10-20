@@ -37,6 +37,7 @@ splits:
   test_start: '2021-01-01'
   heldout_sites: []                 # fill with care_site_ids agreed before training, or use fraction:
   heldout_site_fraction: 0.15       # deterministic by hash of site id when heldout_sites is empty
+  min_age: 18                       # adults only, as in every Phase 2 cohort: tests before 18 are dropped from all splits
   max_ecgs_per_patient: 20          # train/tune only; keeps frequent-ECG patients from dominating
   # Phase 2 validation patients (ECG cohort) never enter train or tune:
   exclude_persons_table: ecg_analytic_locked

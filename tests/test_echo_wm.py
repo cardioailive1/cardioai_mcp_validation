@@ -232,7 +232,7 @@ def test_mcp_request_reference_and_splits():
                                                 "deid_ok": ["Ready"], "echo_test_columns": {"link": "ACCESSION_NBR", "datetime": "ECHO_DTM",
                                                                                          "note": "ECHO_NOTE", "patient_dk": "PATIENT_DK"}}}})
     assert "{{modality}}.FACT_ECHO_TEST" in sql and "MODALITY = 'US'" in sql
-    ev = pd.DataFrame({"person_id": [1, 1, 2, 3], "study_id": ["a", "b", "c", "d"], "site": [1, 1, 1, 1],
+    ev = pd.DataFrame({"person_id": [1, 1, 2, 3], "study_id": ["a", "b", "c", "d"], "site": [1, 1, 1, 1], "age": 60,
                        "study_date": ["2018-01-01", "2022-01-01", "2020-06-01", "2023-01-01"],
                        "report_text": [E.REPORTS["rca"].format(ef=50)] * 4})
     from ecg_training.dataset import assign_splits

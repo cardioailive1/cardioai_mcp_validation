@@ -35,6 +35,7 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
    - The manifest never holds the Base64 strings (about 160 kB each). `extract_waveforms` reads them in batches by `ecg_id`, writes `.npz` files and can be re-run: it resumes where it stopped.
    - ECGs that fail to decode keep the reason in `waveform_error`. Training drops them and records the count in the model card.
    - The build refuses to continue if any patient appears in two splits.
+   - Adults only: tests done before age 18 (`splits.min_age`, the Phase 2 cohort rule) are dropped from every split, and `m.attrs["n_under_min_age"]` gives the count.
 5. **Train on the GPU workspace:**
    ```bash
    pip install -r requirements-ecg.txt   # CUDA build of torch matching the workspace driver

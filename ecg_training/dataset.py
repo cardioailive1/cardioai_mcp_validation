@@ -86,10 +86,22 @@ def assign_splits(d: pd.DataFrame, cfg: dict, exclude_persons: Iterable[int] = (
     otherwise by the patient's FIRST ECG date: train (< tune_start), tune (< test_start), test_time
     Each patient keeps only ECGs dated inside their split's window. Phase 2 validation
     patients (exclude_persons) are removed from train and tune.
+
+    splits.min_age (18: adults only, as in every Phase 2 cohort) drops tests done before that age from EVERY
+    split, before splitting, so a patient's split is set by their first adult test. Age = test year - year of
+    birth (the cohort rule). A missing age is dropped too. The number dropped is in out.attrs["n_under_min_age"].
     """
     sp = cfg["splits"]
     tune_start, test_start = pd.Timestamp(sp["tune_start"]), pd.Timestamp(sp["test_start"])
     d = d.copy()
+    n_young = 0
+    min_age = sp.get("min_age")
+    if min_age is not None:
+        if "age" not in d:
+            raise ValueError("splits.min_age is set but the evidence has no 'age' column")
+        adult = pd.to_numeric(d["age"], errors="coerce") >= float(min_age)
+        n_young = int((~adult).sum())
+        d = d[adult]
     d[date_col] = pd.to_datetime(d[date_col])
     d["_held_site"] = d.site.map(lambda s: _site_held_out(s, cfg))
     site_pts = set(d.loc[d._held_site, "person_id"])
@@ -110,7 +122,9 @@ def assign_splits(d: pd.DataFrame, cfg: dict, exclude_persons: Iterable[int] = (
         capped = shuffled[shuffled.groupby("person_id").cumcount() < cap]
         rest = pd.concat([capped, rest[~trn]])
     out = pd.concat([rest, site_part]).drop(columns="_held_site")
-    return out.sort_values(["split", "person_id", date_col]).reset_index(drop=True)
+    out = out.sort_values(["split", "person_id", date_col]).reset_index(drop=True)
+    out.attrs["n_under_min_age"] = n_young
+    return out
 
 
 def check_disjoint(m: pd.DataFrame) -> dict:
