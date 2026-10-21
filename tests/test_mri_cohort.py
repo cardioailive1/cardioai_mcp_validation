@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -21,7 +22,14 @@ REPORTS = [
     "Cardiac MRI: patchy subepicardial late gadolinium enhancement of the inferolateral wall consistent with myocarditis. LVEF 55%.",
     "Cardiac MRI: no late gadolinium enhancement to suggest myocardial scar or infarction. LVEF 62%. No MVO.",
     "Cardiac MRI: lge in the rca territory, consistent with prior infarction, with an inferior aneurysm. LVEF 44.5%.",
+    # where the older SQL rules and the training code disagree (hedged, resolved, history):
+    "Cardiac MRI: transmural LGE of the anterior wall consistent with infarction. Small apical LV thrombus cannot be "
+    "excluded. LVEF 40%.",
+    "Cardiac MRI: subendocardial LGE in the inferior wall consistent with infarct. The apical LV thrombus described "
+    "before has resolved. Possible microvascular obstruction. LVEF 47%.",
+    "Cardiac MRI: history of myocarditis. No late gadolinium enhancement today. LVEF 59%.",
 ]
+N_PLAIN = 5
 
 
 def _seed_cmr(con):
@@ -30,7 +38,7 @@ def _seed_cmr(con):
     con.execute("""
       CREATE TEMP TABLE cmr_seed AS
       SELECT p.person_id, CAST(DATE '2021-03-01' + CAST((p.person_id * 37) % 900 AS INTEGER) AS DATE) AS d,
-             (p.person_id % 5) AS kind
+             (p.person_id % 8) AS kind
       FROM person p WHERE p.person_id % 2 = 0
       UNION ALL
       SELECT co.person_id, CAST(co.condition_start_date + INTERVAL 6 DAY AS DATE), 0
@@ -59,16 +67,44 @@ def test_mri_cohort_builds_and_evaluates(tmp_path):
     for e in c.deck_elements:
         assert e.name in a.columns, e.name
     assert a.recent_stemi.sum() > 0 or a.recent_acute_mi.sum() > 0
-    # the cohort's SQL reference = the training label rules, report by report
+    # pass 1: no Python reference yet -> the older SQL rules; they agree with training on plain reports only
+    from mri_training.reference import check_reference, reference_table
     cfg = load_config()
+    pairs = (("ref_infarct", "infarct"), ("ref_nonischemic_lge", "nonischemic_lge"), ("ref_lv_thrombus", "lv_thrombus"),
+             ("ref_lv_aneurysm", "lv_aneurysm"), ("ref_mvo", "report_mvo"), ("lvef_report", "report_lvef"),
+             ("infarct_size_report", "report_infarct_size"))
+
+    def agree(row, lab):
+        return all((pd.isna(row[r]) and np.isnan(lab[k])) or (not pd.isna(row[r]) and float(row[r]) == lab[k])
+                   for r, k in pairs)
+    plain, tricky = 0, 0
+    for txt, grp in a.groupby("cmr_report"):
+        ok = agree(grp.iloc[0], report_labels(txt, cfg))
+        if txt in [r.lower() for r in REPORTS[:N_PLAIN]]:      # the cohort's note text is lower-cased
+            assert ok, txt[:60]
+            plain += 1
+        else:
+            assert txt in [r.lower() for r in REPORTS[N_PLAIN:]]
+            tricky += not ok
+    assert plain >= 2 and tricky >= 1                           # some hedged / resolved reports differ under SQL
+    with pytest.raises(AssertionError):
+        check_reference(a)
+    # pass 2: Python reference built from the cohort's own report text -> every report = the training labels
+    ref = reference_table(a, cfg)
+    assert ref.rules_version.nunique() == 1 and len(ref) == a.cmr_report.notna().sum()
+    con.register("mri_reference_df", ref)
+    con.execute("CREATE TABLE mri_reference AS SELECT * FROM mri_reference_df")
+    study["modality"]["mri_ref"]["enabled"] = True
+    res = build_all(eng, ["mri"], study, str(tmp_path))["mri"]
+    a, c = res["analytic"], res["cohort"]
+    assert check_reference(a)["missing_reference"] == 0
     for txt, grp in a.groupby("cmr_report"):
         lab = report_labels(txt, cfg)
-        row = grp.iloc[0]
-        for ref, key in (("ref_infarct", "infarct"), ("ref_nonischemic_lge", "nonischemic_lge"),
-                         ("ref_lv_thrombus", "lv_thrombus"), ("ref_lv_aneurysm", "lv_aneurysm"), ("ref_mvo", "report_mvo"),
-                         ("lvef_report", "report_lvef"), ("infarct_size_report", "report_infarct_size")):
-            v, w = row[ref], lab[key]
-            assert (pd.isna(v) and np.isnan(w)) or float(v) == w, (txt[:60], ref, v, w)
+        for _, row in grp.iterrows():
+            assert agree(row, lab), txt[:60]
+    resolved = a[a.cmr_report == REPORTS[N_PLAIN + 1].lower()]
+    if len(resolved):                                           # resolved thrombus 0; possible MVO masked
+        assert resolved.iloc[0].ref_lv_thrombus == 0 and pd.isna(resolved.iloc[0].ref_mvo)
     # endpoints evaluate with simulated agent output
     rng = np.random.default_rng(0)
     p = pd.DataFrame({"person_id": a.person_id})

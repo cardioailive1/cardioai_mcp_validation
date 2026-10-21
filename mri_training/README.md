@@ -36,7 +36,7 @@ No public dataset or outside pretrained weights are used: `use_public_datasets: 
 
 ## Order of work in the MCP workspace
 
-1. **Lock the Phase 2 MRI cohort first** (`config/cohorts/mri.yaml`, studies from 2021-01-01 on). Run `scripts/run_cohorts.py --cohorts mri --save-tables` and snapshot the result as `mri_analytic_locked`. Training excludes these patients. Have the clinical lead confirm the proposed endpoint goals and the red-flag cut-offs.
+1. **Lock the Phase 2 MRI cohort first** (`config/cohorts/mri.yaml`, studies from 2021-01-01 on). Run `scripts/run_cohorts.py --cohorts mri --save-tables`, build the Python reference (`mri_training/reference.py`: `reference_table`, save as `mri_reference`, set `mri_ref.enabled: true`, re-run, `check_reference`; VALIDATION_RUNBOOK step 7), then snapshot the result as `mri_analytic_locked`. Training excludes these patients. Have the clinical lead confirm the proposed endpoint goals and the red-flag cut-offs.
 2. **Find the CMR studies and request their DICOM.** On MCP the images aren't in a table: every DICOM instance is listed in `FACT_RADIOLOGY_DICOM_INVENTORY` and is **requested for de-identification** (status Ready or Available). Reports are in `FACT_RADIOLOGY` (linked by accession number), and study headers are in `FACT_IMAGINGSTUDY`. Source: MCP "Radiology" slides and Adam Resnick, 2026-10-15.
    ```python
    from mri_training import mcp_imaging as mi
@@ -129,7 +129,7 @@ Every cine phase is segmented, so allow tens of seconds per study on CPU (`n1-st
 | lv_thrombus, report_mvo | Present now | Negated ("not seen"), resolved, reported on another study, or not mentioned in a full LGE report (an assumption recorded in the model card) | Hedged ("possible", "cannot be excluded", "may represent"); short or empty report |
 | lv_aneurysm | True aneurysm or pseudoaneurysm | As thrombus | Hedged; "aneurysmal" or dyskinesis without an aneurysm named |
 
-Each mention is judged in its sentence by `cardioai_mcp/report_context.py` (negation, hedge, history, resolved). LVEF, infarct size and MVO stated in the report are kept to evaluate the measurements. `config/cohorts/mri.yaml` still screens reports with the earlier word-level rules in SQL; `tests/test_mri_cohort.py` checks that the two agree on plain reports, but they differ on hedged, historical and resolved sentences.
+Each mention is judged in its sentence by `cardioai_mcp/report_context.py` (negation, hedge, history, resolved). LVEF, infarct size and MVO stated in the report are kept to evaluate the measurements. The Phase 2 MRI cohort reads its reference from `mri_reference`, built by `mri_training/reference.py` with this same code from the cohort's own report text. Its older word-level SQL rules remain only as a fallback before that table exists (they differ on hedged, historical and resolved sentences); `tests/test_mri_cohort.py` checks both passes.
 
 ## Tests
 
