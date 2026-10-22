@@ -37,7 +37,7 @@ def waveform_batch_sql(modality_cfg: dict, ids) -> str:
     for key in ("sample_rate_hz", "n_leads"):
         if c.get(key):
             cols.append(f"x.{c[key]} AS {key}")
-    table = e["table"].replace("{modality}", "{{modality}}")
+    table = e["table"].replace("{modality}", "{{modality}}").replace("{work}", "{{work}}")
     return f"SELECT {', '.join(cols)} FROM {table} x WHERE CAST(x.{c['ecg_id']} AS STRING) IN ({', '.join(_quote(i) for i in ids)})"
 
 
@@ -52,6 +52,8 @@ def extract_waveforms(engine, manifest: pd.DataFrame, modality_cfg: dict, out_di
                       query: Optional[Callable[[str], pd.DataFrame]] = None) -> pd.DataFrame:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if modality_cfg["ecg"].get("waveform_storage") == "base64_per_lead":
+        return _extract_per_lead(engine, manifest, modality_cfg, out, batch_size, log, overwrite, query)
     raw_cfg = modality_cfg["ecg"].get("waveform_raw", {})
     q = query or (lambda sql: engine.query(engine.render(sql, {})))
     m = manifest.copy()
@@ -81,4 +83,47 @@ def extract_waveforms(engine, manifest: pd.DataFrame, modality_cfg: dict, out_di
                 m.loc[idx, "waveform_error"] = str(e)[:200]
         done += len(chunk)
         log(f"{done}/{len(ids)} ECGs; {int(m.waveform_error.notna().sum())} failed so far")
+    return m
+
+
+def _extract_per_lead(engine, manifest: pd.DataFrame, modality_cfg: dict, out: Path, batch_size: int,
+                      log: Callable[[str], None], overwrite: bool,
+                      query: Optional[Callable[[str], pd.DataFrame]]) -> pd.DataFrame:
+    """MCP layout: one FACT_ECG_WAVEFORM row per lead (ecg_training.mcp_waveforms). Needs the manifest's
+    clinic_number and ecg_dtm (labels.sql); batches by patient so each query fetches whole acquisitions."""
+    from .mcp_waveforms import assemble, match, waveform_rows_sql
+    e = modality_cfg["ecg"]
+    q = query or (lambda sql: engine.query(engine.render(sql, {})))
+    m = manifest.copy()
+    for col in ("clinic_number", "ecg_dtm"):
+        if col not in m:
+            raise ValueError(f"manifest lacks {col}: rebuild it with waveform_storage base64_per_lead")
+    m["waveform_uri"] = m.get("waveform_uri", pd.Series(index=m.index, dtype=object)).astype(object)
+    m["waveform_error"] = None
+    patients = sorted(m.clinic_number.dropna().astype(str).unique())
+    tol = float(e.get("timestamp_tolerance_s", 0))
+    done = 0
+    for start in range(0, len(patients), batch_size):
+        batch = patients[start:start + batch_size]
+        sub = m[m.clinic_number.astype(str).isin(batch)]
+        todo = sub[[overwrite or not (out / f"{_safe_name(i)}.npz").exists() for i in sub.ecg_id.astype(str)]]
+        rows = q(waveform_rows_sql(modality_cfg, todo.clinic_number)) if len(todo) else pd.DataFrame()
+        hits = match(todo, rows, tol) if len(todo) else {}
+        for idx, r in sub.iterrows():
+            i = str(r.ecg_id)
+            path = out / f"{_safe_name(i)}.npz"
+            if path.exists() and not overwrite:
+                m.at[idx, "waveform_uri"] = str(path)
+                continue
+            if i not in hits:
+                m.at[idx, "waveform_error"] = "no Rhythm rows at this ECG_DTM"
+                continue
+            try:
+                sig, fs, leads, units = assemble(hits[i], e)
+                np.savez_compressed(path, signal=sig.astype(np.float32), fs=fs, leads=np.asarray(leads), units=units)
+                m.at[idx, "waveform_uri"] = str(path)
+            except Exception as ex:  # noqa: BLE001  (one bad acquisition must not stop the extraction)
+                m.at[idx, "waveform_error"] = str(ex)[:200]
+        done += len(batch)
+        log(f"{done}/{len(patients)} patients; {int(m.waveform_error.notna().sum())} ECGs failed so far")
     return m

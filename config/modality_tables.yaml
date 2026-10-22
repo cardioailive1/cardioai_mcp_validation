@@ -13,29 +13,60 @@
 # LOINC measurements and NOTE text) and marks modality columns as NULL.
 # =============================================================================
 ecg:
-  enabled: false                       # set true once mapped
-  table: "{modality}.ecg_index"        # PLACEHOLDER
+  enabled: false                       # set true once ecg_index is built (ecg_training.mcp_waveforms.build_ecg_index)
+  # One row per ECG, built from FACT_ECG (+ DIM_PATIENT, person_map) into the work schema, so the training
+  # labels (labels.sql) and the Phase 2 ECG cohort read the same standard columns below.
+  table: "{work}.ecg_index"
   columns:
     person_id: person_id
+    clinic_number: clinic_number         # PATIENT_CLINIC_NUMBER: person-level key across record systems (MCP 2026-10-21)
     ecg_id: ecg_id
     acquisition_datetime: acquisition_datetime
-    waveform_uri: waveform_path        # the waveform column: a Base64 string (MCP) or a file path (see waveform_storage)
+    waveform_uri: waveform_path          # unused with base64_per_lead (extract_waveforms fills the manifest)
     sample_rate_hz: sample_rate
     n_leads: lead_count
-    read_statement: diagnosis_statement   # confirmed (over-read) interpretation text
-    is_confirmed: confirmed_flag          # cardiologist over-read flag
+    read_statement: diagnosis_statement  # confirmed (over-read) interpretation text
+    is_confirmed: confirmed_flag         # cardiologist over-read flag
     vent_rate: ventricular_rate
     pr_interval: pr_interval
     qrs_duration: qrs_duration
     qt_interval: qt_interval
     qtc_interval: qtc_interval
     qrs_axis: r_axis
-  # MCP (Adam Resnick, 2026-10-14): the ECG waveform table stores each waveform as a Base64-encoded string.
-  # base64 -> ecg_training.extract_waveforms decodes them once into .npz files for training;
-  # file   -> the column holds a path (MUSE XML / WFDB / .npz).
-  waveform_storage: base64
-  # Only used if the Base64 holds raw samples (no XML / gzip / npz / JSON inside): CONFIRM on real rows
-  # with `python -m ecg_training.probe_waveforms` before extraction.
+  # MCP (Adam Resnick and Tommy Stretch, 2026-10-21): FACT_ECG_WAVEFORM holds one row per lead; WAVEFORM_TYPE
+  # 'Rhythm' = full 10 s; leads I, II, V1-V6; each value URL-encoded Base64 -> signed 16-bit little-endian
+  # counts x 4.88 = microvolts; sample rate = ECGSAMPLEBASE in FACT_ECG_WAVEFORM_RESTING_MEASUREMENT; link to
+  # FACT_ECG via PATIENT_DK -> DIM_PATIENT -> PATIENT_CLINIC_NUMBER and ACQUISITION_TS = ECG_DTM.
+  waveform_storage: base64_per_lead      # base64 (one string per ECG) | base64_per_lead (MCP) | file
+  waveform_table: "{modality}.FACT_ECG_WAVEFORM"
+  waveform_columns: {patient_dk: PATIENT_DK, acquisition_ts: ACQUISITION_TS, lead_id: LEAD_ID, waveform_type: WAVEFORM_TYPE, waveform: WAVEFORM}
+  waveform_type: Rhythm
+  leads: [I, II, V1, V2, V3, V4, V5, V6]
+  seconds: 10
+  timestamp_tolerance_s: 0               # ACQUISITION_TS = ECG_DTM exactly
+  sample_rate:                           # CONFIRM the join keys of the resting-measurement table
+    table: "{modality}.FACT_ECG_WAVEFORM_RESTING_MEASUREMENT"
+    column: ECGSAMPLEBASE
+    patient_dk: PATIENT_DK
+    acquisition_ts: ACQUISITION_TS
+  dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
+  # PATIENT_CLINIC_NUMBER -> OMOP person_id: still open with MCP (F1). build_ecg_index refuses to run without it.
+  person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
+  fact_ecg:
+    table: "{modality}.FACT_ECG"
+    columns:                             # FACT_ECG column for each ecg_index column; null = not available
+      ecg_id: ECG_FPK
+      acquisition_datetime: ECG_DTM
+      patient_dk: PATIENT_DK             # CONFIRM
+      read_statement: null               # CONFIRM with MCP (F3): confirmed over-read text
+      is_confirmed: null                 # CONFIRM with MCP (F3): confirmed vs machine-only flag
+      vent_rate: null
+      pr_interval: null
+      qrs_duration: null
+      qt_interval: null
+      qtc_interval: null
+      qrs_axis: null
+  # Only used with waveform_storage: base64 (one string per ECG, older layout)
   waveform_raw: {dtype: "<i2", units_per_bit: 4.88, units: uV, layout: auto}
   requirements:            # agent input spec (MobileNetV3-1D; any rate, 8 or 12 leads, >= 9.5 s)
     n_leads: 12
@@ -81,7 +112,14 @@ echo:
       link: ACCESSION_NBR                      # key shared with the inventory (accession number or study UID)
       patient_dk: PATIENT_DK
     inventory_table: FACT_RADIOLOGY_DICOM_INVENTORY
-    inventory_link: DICOM_ACCESSION_NUMBER     # inventory column matching echo_test_columns.link
+    # MCP (Adam Resnick, 2026-10-21): no shared key between FACT_ECHO_TEST and the DICOM studies; link by
+    # PATIENT_CLINIC_NUMBER and date (dates are shifted equally across a patient's record). Patient-days with
+    # more than one report or US study are dropped as ambiguous until a time / study-type match exists (F5).
+    link:
+      mode: clinic_date                        # clinic_date | accession (older key-based join below)
+      study_date: {table: "{modality}.FACT_IMAGINGSTUDY", column: STUDY_DTM}   # CONFIRM the study date column
+    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER}
+    inventory_link: DICOM_ACCESSION_NUMBER     # accession mode only: inventory column matching echo_test_columns.link
     person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
     deid_ok: [Ready, Available]
   wm_requirements:        # wall-motion model input spec (echo_wm_training runtime 1.0.0)

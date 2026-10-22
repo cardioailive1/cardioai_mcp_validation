@@ -133,7 +133,10 @@ elements:
   - {name: hscrp, domain: laboratory, description: High-sensitivity CRP (mg/L), required: false, expected_completeness: 0.50, src: {type: measurement, set: hscrp, window: [-365, 0], range: [0, 300]}}
   # ---------------- OUTCOME DATA (10) — 5-year horizon
   - {name: all_cause_mortality, domain: outcome, description: Death from any cause, required: true, expected_completeness: 0.98, src: {type: death, window: [1, 1825]}}
-  - {name: cv_mortality, domain: outcome, description: "Cardiovascular death (cause I00-I99)", required: true, expected_completeness: 0.95, src: {type: death, window: [1, 1825], cause_set: cv_death_causes}}
+  # MCP (Adam Resnick, 2026-10-21): cause of death is not populated, so CV death can't be counted on its own.
+  # The deck element is kept, defined as ALL-CAUSE death (a proxy that over-counts CV death); protocol change,
+  # clinical lead to approve. FACT_MORTALITY_STATUS = Mayo record + third-party (Veritas) death data.
+  - {name: cv_mortality, domain: outcome, description: "Cardiovascular death: PROXY = all-cause death (cause of death not populated on MCP)", required: true, expected_completeness: 0.95, src: {type: death, window: [1, 1825]}}
   - {name: myocardial_infarction, domain: outcome, description: MI during follow-up (inpatient/ED), required: true, expected_completeness: 0.95,
      src: {type: outcome, set: mi_acute, window: [1, 1825], visit_concepts: [9201, 262, 9203]}}
   - {name: stroke, domain: outcome, description: Stroke during follow-up (inpatient/ED), required: true, expected_completeness: 0.95,
@@ -146,7 +149,7 @@ elements:
      src: {type: outcome, set: cabg, domain: Procedure, window: [31, 1825]}}
   - {name: unstable_angina_hospitalization, domain: outcome, description: Hospitalization for unstable angina, required: true, expected_completeness: 0.90,
      src: {type: outcome, set: unstable_angina, window: [1, 1825], visit_concepts: [9201, 262]}}
-  - {name: composite_mace, domain: outcome, role: reference, description: "MACE at 5 y (CV death, MI, stroke, HF hosp., UA hosp., late PCI/CABG); NULL if censored event-free", required: true, expected_completeness: 0.95,
+  - {name: composite_mace, domain: outcome, role: reference, description: "MACE at 5 y (death from any cause as the CV-death proxy, MI, stroke, HF hosp., UA hosp., late PCI/CABG); NULL if censored event-free", required: true, expected_completeness: 0.95,
      src: {type: derived, expr: "CASE WHEN GREATEST(cv_mortality, myocardial_infarction, stroke, heart_failure_hospitalization, revascularization_pci, revascularization_cabg, unstable_angina_hospitalization) = 1 THEN 1 WHEN cv_mortality IS NULL OR myocardial_infarction IS NULL OR stroke IS NULL OR heart_failure_hospitalization IS NULL OR revascularization_pci IS NULL OR revascularization_cabg IS NULL OR unstable_angina_hospitalization IS NULL THEN NULL ELSE 0 END"}}
   - {name: days_to_event, domain: outcome, role: reference, description: Time to first MACE or censoring (days), required: true, expected_completeness: 0.90,
      src: {type: derived, expr: "CASE WHEN composite_mace = 1 THEN LEAST(CASE WHEN cv_mortality = 1 THEN cv_mortality_days END, CASE WHEN myocardial_infarction = 1 THEN myocardial_infarction_days END, CASE WHEN stroke = 1 THEN stroke_days END, CASE WHEN heart_failure_hospitalization = 1 THEN heart_failure_hospitalization_days END, CASE WHEN revascularization_pci = 1 THEN revascularization_pci_days END, CASE WHEN revascularization_cabg = 1 THEN revascularization_cabg_days END, CASE WHEN unstable_angina_hospitalization = 1 THEN unstable_angina_hospitalization_days END) ELSE all_cause_mortality_days END"}}

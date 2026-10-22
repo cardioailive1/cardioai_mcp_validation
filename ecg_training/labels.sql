@@ -4,11 +4,13 @@ WITH e AS (
   SELECT CAST(x.{{c_person_id}} AS BIGINT)                 AS person_id,
          CAST(x.{{c_ecg_id}} AS STRING)                    AS ecg_id,
          CAST(x.{{c_acquisition_datetime}} AS DATE)        AS ecg_date,
+         CAST(x.{{c_acquisition_datetime}} AS TIMESTAMP)   AS ecg_dtm,
+         {{clinic_select}}                                 AS clinic_number,  -- person-level key for MCP FACT tables
          {{waveform_select}}                               AS waveform_uri,   -- NULL for Base64 storage: filled by extract_waveforms
          x.{{c_read_statement}}                            AS read_text,
          CAST(x.{{c_is_confirmed}} AS INT)                 AS confirmed
   FROM {{ecg_table}} x
-  WHERE x.{{c_waveform_uri}} IS NOT NULL
+  WHERE {{waveform_filter}}
     AND CAST(x.{{c_acquisition_datetime}} AS DATE) BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{data_cutoff}}' AS DATE)
 )
 SELECT e.*,
