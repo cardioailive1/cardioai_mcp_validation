@@ -27,7 +27,7 @@ def load_config(path: Optional[str] = None) -> dict:
 
 def _ecg_macros(modality_cfg: dict) -> dict:
     ecg = modality_cfg["ecg"]
-    out = {"ecg_table": ecg["table"].replace("{modality}", "{{modality}}")}
+    out = {"ecg_table": ecg["table"].replace("{modality}", "{{modality}}").replace("{work}", "{{work}}")}
     for k, v in ecg["columns"].items():
         out[f"c_{k}"] = v
     return out
@@ -37,13 +37,19 @@ def evidence_sql(engine, study: dict, cfg: dict, modality_cfg: dict) -> str:
     lab = cfg["labels"]
     t = lab["troponin_url_fallback"]
     ecg = modality_cfg["ecg"]
-    b64 = ecg.get("waveform_storage", "file") == "base64"
+    storage = ecg.get("waveform_storage", "file")
+    b64 = storage in ("base64", "base64_per_lead")
+    wf = ecg["columns"].get("waveform_uri")
     extra = {**_ecg_macros(modality_cfg), "win_lo": lab["window_days"][0], "win_hi": lab["window_days"][1],
              "clear_days": lab["clear_days"], "trop_ng_per_l": t["ng_per_l"],
              "trop_ng_per_l_male": t.get("ng_per_l_male", t["ng_per_l"]),
              "trop_ng_per_l_female": t.get("ng_per_l_female", t["ng_per_l"]), "trop_ng_per_ml": t["ng_per_ml"],
              # Base64 waveforms are not pulled into the manifest (about 160 kB each): extract_waveforms adds the paths
-             "waveform_select": "CAST(NULL AS STRING)" if b64 else f"x.{ecg['columns']['waveform_uri']}"}
+             "waveform_select": "CAST(NULL AS STRING)" if b64 else f"x.{wf}",
+             # per-lead storage has no waveform column in the ECG index: every ECG is tried, extraction reports misses
+             "waveform_filter": "TRUE" if storage == "base64_per_lead" else f"x.{wf} IS NOT NULL",
+             "clinic_select": (f"CAST(x.{ecg['columns']['clinic_number']} AS STRING)" if ecg["columns"].get("clinic_number")
+                               else "CAST(NULL AS STRING)")}
     return engine.render((HERE / "labels.sql").read_text(), extra)
 
 

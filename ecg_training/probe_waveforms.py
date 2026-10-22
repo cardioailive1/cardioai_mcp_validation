@@ -60,9 +60,12 @@ def describe(value, n_leads: Optional[int], fs: Optional[float], raw_cfg: Dict) 
 
 def probe(engine, modality_cfg: dict, n: int = 5) -> pd.DataFrame:
     e = modality_cfg["ecg"]
+    if e.get("waveform_storage") == "base64_per_lead":       # MCP FACT_ECG_WAVEFORM: one row per lead
+        from .mcp_waveforms import probe as probe_per_lead
+        return probe_per_lead(engine, modality_cfg, n)
     c = e["columns"]
     cols = [f"x.{c['waveform_uri']} AS waveform"] + [f"x.{c[k]} AS {k}" for k in ("sample_rate_hz", "n_leads") if c.get(k)]
-    sql = f"SELECT {', '.join(cols)} FROM {e['table'].replace('{modality}', '{{modality}}')} x WHERE x.{c['waveform_uri']} IS NOT NULL LIMIT {int(n)}"
+    sql = f"SELECT {', '.join(cols)} FROM {e['table'].replace('{modality}', '{{modality}}').replace('{work}', '{{work}}')} x WHERE x.{c['waveform_uri']} IS NOT NULL LIMIT {int(n)}"
     rows = engine.query(engine.render(sql, {}))
     raw_cfg = e.get("waveform_raw", {})
     out = pd.DataFrame([describe(r.waveform, r.get("n_leads"), r.get("sample_rate_hz"), raw_cfg) for _, r in rows.iterrows()])

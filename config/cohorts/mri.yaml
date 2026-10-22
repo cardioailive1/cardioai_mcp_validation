@@ -134,6 +134,7 @@ elements:
   - {name: infarct_size_report, domain: diagnostic, role: reference, description: Infarct size stated in the report (% LV), required: false, expected_completeness: 0.40,
      src: {type: derived, expr: "CASE WHEN CAST(py_ref_found AS DOUBLE) = 1 THEN CAST(py_infarct_size AS DOUBLE) ELSE (CAST(NULLIF(REGEXP_EXTRACT(LOWER(cmr_report), '(infarct size|scar burden|lge burden|extent of (late )?enhancement)[^0-9]{0,25}([0-9]{1,2}([.][0-9])?) ?%', 3), '') AS DOUBLE)) END"}}
   # ---------------- OUTCOMES after CMR (MACE, 1 year)
+  # death is all-cause: cause of death is not populated on MCP (2026-10-21)
   - {name: death_1y, domain: outcome, description: Death within 1 year, required: true, expected_completeness: 0.95, src: {type: death, window: [1, 365]}}
   - {name: recurrent_mi_1y, domain: outcome, description: Acute MI admission 31-365 days after CMR, required: true, expected_completeness: 0.90,
      src: {type: outcome, set: mi_acute, window: [31, 365], visit_concepts: [9201, 262, 9203]}}

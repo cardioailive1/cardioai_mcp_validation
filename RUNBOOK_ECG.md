@@ -48,22 +48,21 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    ```
    Snapshot the analytic table as `cardioai_work.ecg_analytic_locked`. Its window starts on 2021-01-01 (`splits.test_start`), and training excludes its patients.
 
-2. **Map the ECG waveform table.** In `config/modality_tables.yaml` → `ecg`:
-   - set the table, `waveform_uri` (the Base64 column), `sample_rate_hz`, `n_leads`, `read_statement` and `is_confirmed`;
-   - keep `waveform_storage: base64`;
-   - set `enabled: true`.
+2. **Map and probe the MCP ECG tables.** MCP (2026-10-21): `FACT_ECG_WAVEFORM` holds one row per lead; use `WAVEFORM_TYPE = 'Rhythm'` (full 10 s), leads I, II, V1–V6; each value is URL-encoded Base64 → signed 16-bit little-endian counts × 4.88 = µV; the sample rate is `ECGSAMPLEBASE` in `FACT_ECG_WAVEFORM_RESTING_MEASUREMENT`; waveforms link to `FACT_ECG` through `DIM_PATIENT` (clinic number) and `ACQUISITION_TS = ECG_DTM`. This is `waveform_storage: base64_per_lead` in `config/modality_tables.yaml` → `ecg`, already filled in.
+   - Still to fill once MCP answers: `person_map` (clinic number → OMOP `person_id`, open item F1) and the over-read columns in `fact_ecg.columns` (F3). Confirm the resting-measurement join keys.
+   - Build the ECG index once and save it as `ecg.table`, then set `enabled: true`:
+     ```python
+     from ecg_training.mcp_waveforms import build_ecg_index
+     idx = build_ecg_index(SparkEngine(spark, study), study["modality"])
+     spark.createDataFrame(idx).write.mode("overwrite").saveAsTable("cardioai_work.ecg_index")
+     ```
+   - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Acquisitions with more than one Rhythm row for a lead are skipped with a reason until MCP says how such rows relate (F2).
 
-3. **Probe five real waveform rows.**
-   ```bash
-   python -m ecg_training.probe_waveforms --n 5
-   ```
-   It reports what each Base64 string holds (MUSE XML, gzip, npz, JSON or raw samples). For raw samples it also gives the lead layout, the seconds per recording and the amplitude in mV. Expect **about 10 s** and **R waves of about 0.5–2 mV**. If either is off, adjust `waveform_raw` (`dtype`, `units_per_bit`, `layout`) and probe again.
-
-4. **Check troponin.** Mayo's test is **Troponin T, 5th generation** (TRPS, "Troponin T, 5th gen, P", LOINC 67151-1), reported in ng/L.
+3. **Check troponin.** Mayo's test is **Troponin T, 5th generation** (TRPS, "Troponin T, 5th gen, P", LOINC 67151-1), reported in ng/L.
    - A row is raised if it is above its own `range_high`. Rows without one use Mayo's sex-specific limits: **males > 15 ng/L, females > 10 ng/L**.
    - For older rows in ng/mL, look up the assay by reporting name on [mayocliniclabs.com](https://www.mayocliniclabs.com/search#q=troponin), under "Clinical and Interpretive" and "Fees & Codes". Then confirm `labels.troponin_url_fallback.ng_per_ml` in `ecg_training/config.yaml`.
 
-5. **Build the manifest and decode the waveforms once.**
+4. **Build the manifest and decode the waveforms once.**
    ```python
    from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
    from ecg_training.dataset import load_config, build_manifest, summary
@@ -78,7 +77,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    - Extraction can be re-run; it resumes where it stopped.
    - ECGs that fail to decode keep the reason in `waveform_error`.
 
-6. **Audit the automatic labels** before training. The protocol is in [`annotation/LABEL_AUDIT.md`](annotation/LABEL_AUDIT.md).
+5. **Audit the automatic labels** before training. The protocol is in [`annotation/LABEL_AUDIT.md`](annotation/LABEL_AUDIT.md).
    ```bash
    # troponin / acute MI / STEMI: recomputed independently from the raw lab rows (must match 100%)
    python -m annotation.label_audit troponin --manifest /workspace/ecg/manifest.parquet --out /workspace/audit/troponin
@@ -91,21 +90,21 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    - The cardiologist reads `troponin_concepts.csv` (which assays the troponin concept set really contains, with units and reference limits) and signs it off.
    - AF must PASS (PPV and NPV at least 0.95, lower bound at least 0.90). On a FAIL, fix `af_regex` or the `context` trigger words (`cardioai_mcp/report_context.py`), rebuild and re-audit on a fresh sample.
 
-7. **Train on the A100.**
+6. **Train on the A100.**
    ```bash
    python -m ecg_training.train --manifest /workspace/ecg/manifest.parquet --out /workspace/ecg/runs/v1
    ```
    - Thresholds are fitted on 2020 only, with headroom above the goals: target sensitivity 0.96 for STEMI, 0.97 for AF and 0.96 for acute MI.
    - ECGs with no decoded waveform are dropped and counted in the model card.
 
-8. **Review `model_card.json`** before opening the test set:
+7. **Review `model_card.json`** before opening the test set:
    - data summary and label definitions;
    - thresholds; check **STEMI and AF specificity on the tuning split against the 93% goal**;
    - test metrics (`test_time`, `test_site`), `ecgs_without_waveform`, runtime fingerprint, weights hash and code commit.
 
    Copy the `test_time` values into the `phase1` fields of `config/cohorts/ecg.yaml`, then rerun `scripts/sample_size_report.py`.
 
-9. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Manifests, waveforms and per-ECG predictions stay in MCP.
+8. **Export** only `weights.pt`, `thresholds.json` and `model_card.json`. Manifests, waveforms and per-ECG predictions stay in MCP.
 
 ## 3. Phase 2 validation
 

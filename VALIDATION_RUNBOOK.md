@@ -189,7 +189,7 @@ python scripts/evaluate_cohorts.py --cohorts <cohort> --cluster-by-site
 ```
 - the adjudicated-subset reference
 - CCTA-referenced CAD
-- all-cause death in place of CV death
+- (no CV-death analysis: cause of death is not populated on MCP, so death outcomes are all-cause throughout)
 - weighted vs unweighted ECG accuracy
 - subgroups by sex, age, race/ethnicity and site
 

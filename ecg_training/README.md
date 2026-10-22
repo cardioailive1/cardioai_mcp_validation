@@ -13,10 +13,15 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
 ## Order of work in the MCP workspace
 
 1. **Lock the Phase 2 ECG cohort first.** Run step 7a of the runbook for `ecg`. Its index window starts on 2021-01-01, the same date as `splits.test_start`. Snapshot the result as `ecg_analytic_locked`. Training excludes these patients.
-2. **Map the ECG waveform table and probe it.** MCP confirmed (2026-10-14) that the waveform table stores each waveform as a **Base64-encoded string** (`waveform_storage: base64`).
-   - Fill in `config/modality_tables.yaml` → `ecg`: the table, the waveform column, sample rate, lead count and the confirmed-read column. Then set `enabled: true`.
-   - Run `python -m ecg_training.probe_waveforms --n 5`. It reports what the Base64 holds (MUSE XML, gzip, npz, JSON, or raw samples) and, for raw samples, the lead layout, the seconds per recording and the amplitude in mV. Expect about 10 s and R waves of about 0.5–2 mV. If not, adjust `waveform_raw` (`dtype`, `units_per_bit`, `layout`) and probe again.
-   - The MCP Resource Hub's ECG training covers the table.
+2. **Map and probe the MCP ECG tables.** MCP (2026-10-21): `FACT_ECG_WAVEFORM` holds one row per lead; use `WAVEFORM_TYPE = 'Rhythm'` (full 10 s), leads I, II, V1–V6; each value is URL-encoded Base64 → signed 16-bit little-endian counts × 4.88 = µV; the sample rate is `ECGSAMPLEBASE` in `FACT_ECG_WAVEFORM_RESTING_MEASUREMENT`; waveforms link to `FACT_ECG` through `DIM_PATIENT` (clinic number) and `ACQUISITION_TS = ECG_DTM`. This is `waveform_storage: base64_per_lead` in `config/modality_tables.yaml` → `ecg`, already filled in.
+   - Still to fill once MCP answers: `person_map` (clinic number → OMOP `person_id`, open item F1) and the over-read columns in `fact_ecg.columns` (F3). Confirm the resting-measurement join keys.
+   - Build the ECG index once and save it as `ecg.table`, then set `enabled: true`:
+     ```python
+     from ecg_training.mcp_waveforms import build_ecg_index
+     idx = build_ecg_index(SparkEngine(spark, study), study["modality"])
+     spark.createDataFrame(idx).write.mode("overwrite").saveAsTable("cardioai_work.ecg_index")
+     ```
+   - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Acquisitions with more than one Rhythm row for a lead are skipped with a reason until MCP says how such rows relate (F2).
 3. **Troponin.** Mayo's troponin is **Troponin T, 5th generation**: [TRPS](https://www.testcatalog.org/show/TRPS), reporting name "Troponin T, 5th gen, P", LOINC 67151-1, in ng/L.
    - Rows above the row's own `range_high` count as raised. Rows without one fall back to the sex-specific Mayo reference values: **males ≤ 15 ng/L, females ≤ 10 ng/L** (`labels.troponin_url_fallback`).
    - For older troponin rows in other units, look up the assay by its reporting name on [mayocliniclabs.com](https://www.mayocliniclabs.com/search#q=troponin), under the "Clinical and Interpretive" and "Fees & Codes" tabs. Then confirm `ng_per_ml`.

@@ -348,3 +348,36 @@ def test_clusters_auto_label_and_person_sheet(tmp_path):
     v = read_clusters(str(tmp_path))
     assert set(v.groupby("view").clip_uri.count().to_dict().items()) == {("A4C", 6), ("A2C", 6)}
     assert set(v.cluster_source) == {"auto", "person"}
+
+
+def test_echo_link_by_clinic_number_and_date():
+    """MCP 2026-10-21: FACT_ECHO_TEST -> DICOM study by PATIENT_CLINIC_NUMBER and date; ambiguous days dropped."""
+    import duckdb
+    from cardioai_mcp.config import load_study
+    from cardioai_mcp.engine import DuckDBEngine
+    from echo_wm_training import mcp_echo as me
+    st = load_study()
+    st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
+    con = duckdb.connect()
+    con.execute("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR)")
+    con.execute("INSERT INTO DIM_PATIENT VALUES (1, 'C1'), (2, 'C1'), (3, 'C2')")
+    con.execute("CREATE TABLE FACT_ECHO_TEST (PATIENT_DK BIGINT, ECHO_TEST_DTM TIMESTAMP, ECHO_NOTE VARCHAR, ACCESSION_NBR VARCHAR)")
+    con.execute("""INSERT INTO FACT_ECHO_TEST VALUES
+        (2, TIMESTAMP '2019-04-01 09:00:00', 'Inferior hypokinesis. LVEF 45%.', NULL),
+        (3, TIMESTAMP '2019-06-01 08:00:00', 'Normal wall motion.', NULL),
+        (3, TIMESTAMP '2019-06-01 15:00:00', 'Limited study, apical views only.', NULL)""")
+    con.execute("CREATE TABLE FACT_RADIOLOGY_DICOM_INVENTORY (STMO_NAME_IN_ADL VARCHAR, MODALITY VARCHAR, STUDY_INSTANCE_UID VARCHAR, PATIENT_CLINIC_NUMBER VARCHAR, IMAGE_DEID_STATUS VARCHAR)")
+    con.execute("""INSERT INTO FACT_RADIOLOGY_DICOM_INVENTORY SELECT 'stmo', 'US', uid, cn, 'Ready'
+        FROM (VALUES ('u1', 'C1'), ('u2', 'C2'), ('u3', 'C2'), ('u9', 'C9')) v(uid, cn), range(12)""")
+    con.execute("CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP)")
+    con.execute("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('stmo', 'US', 'u1', TIMESTAMP '2019-04-01 08:40:00'),
+        ('stmo', 'US', 'u2', TIMESTAMP '2019-06-01 07:50:00'), ('stmo', 'US', 'u3', TIMESTAMP '2019-06-01 14:55:00'),
+        ('stmo', 'US', 'u9', TIMESTAMP '2019-04-01 08:00:00')""")
+    logs = []
+    df = me.find_echo_studies(DuckDBEngine(con, st), st["modality"], log=logs.append)
+    # C1: the report sits under record key 2, the study under the clinic number -> linked; C2 has two reports
+    # and two studies on 2019-06-01 -> dropped as ambiguous
+    assert df.study_uid.tolist() == ["u1"] and df.clinic_number.tolist() == ["C1"] and df.n_deid_ok[0] == 12
+    assert df.attrs["link_report"]["ambiguous_days"] == 1 and "F5" in logs[0]
+    sql = me.echo_studies_sql(st["modality"])
+    assert "i.study_date = e.study_date" in sql and "DIM_PATIENT" in sql

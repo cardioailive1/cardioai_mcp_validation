@@ -156,7 +156,8 @@ def test_label_sql_runs_on_omop():
     con = build(2500)
     con.execute("ALTER TABLE measurement ADD COLUMN range_high DOUBLE")
     con.execute("""CREATE TABLE ecg_index AS
-        SELECT ROW_NUMBER() OVER () AS ecg_id, po.person_id, CAST(po.procedure_date AS TIMESTAMP) AS acquisition_datetime,
+        SELECT ROW_NUMBER() OVER () AS ecg_id, po.person_id, CAST(po.person_id AS VARCHAR) AS clinic_number,
+               CAST(po.procedure_date AS TIMESTAMP) AS acquisition_datetime,
                'synthetic/' || CAST(po.person_id AS VARCHAR) || '.npz' AS waveform_path, 500 AS sample_rate, 12 AS lead_count,
                (SELECT MAX(n.note_text) FROM note n WHERE n.person_id = po.person_id AND n.note_date = po.procedure_date
                   AND n.note_title ILIKE '%ecg%') AS diagnosis_statement, 1 AS confirmed_flag
@@ -281,3 +282,60 @@ if os.environ.get("CARDIOAI_APP_REPO"):  # cross-repo: the app must pin exactly 
         import yaml
         reg = yaml.safe_load((Path(os.environ["CARDIOAI_APP_REPO"]) / "app" / "validated_agents" / "registry.yaml").read_text())
         assert reg["agents"]["ecg"]["output_adapter"]["runtime_fingerprint"] == runtime.fingerprint()
+
+
+def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
+    """MCP layout (2026-10-21): FACT_ECG + DIM_PATIENT + person map -> ecg_index; FACT_ECG_WAVEFORM one row per lead,
+    URL-encoded Base64 int16 x 4.88 uV, WAVEFORM_TYPE 'Rhythm', ECGSAMPLEBASE; matched on clinic number + time."""
+    import copy
+    import urllib.parse
+    import duckdb
+    from cardioai_mcp.config import load_study
+    from cardioai_mcp.engine import DuckDBEngine
+    from ecg_training.extract_waveforms import extract_waveforms
+    from ecg_training.io import read_any
+    from ecg_training.mcp_waveforms import build_ecg_index, decode_lead
+    st = load_study()
+    st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
+    mod = copy.deepcopy(st["modality"])
+    mod["ecg"]["person_map"]["table"] = "{modality}.PERSON_MAP"
+    con = duckdb.connect()
+    con.execute("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_MERGED_FLAG VARCHAR)")
+    # clinic number C1 has two record-system keys (10, 11): its ECGs and waveforms may sit under either
+    con.execute("INSERT INTO DIM_PATIENT VALUES (10, 'C1', 'N'), (11, 'C1', 'Y'), (20, 'C2', 'N')")
+    con.execute("CREATE TABLE PERSON_MAP (PATIENT_CLINIC_NUMBER VARCHAR, person_id BIGINT)")
+    con.execute("INSERT INTO PERSON_MAP VALUES ('C1', 1), ('C2', 2)")
+    con.execute("CREATE TABLE FACT_ECG (ECG_FPK BIGINT, PATIENT_DK BIGINT, ECG_DTM TIMESTAMP)")
+    con.execute("""INSERT INTO FACT_ECG VALUES (100, 10, TIMESTAMP '2019-03-01 08:00:00'), (101, 11, TIMESTAMP '2019-05-01 09:30:00'),
+                   (200, 20, TIMESTAMP '2020-01-02 10:00:00'), (201, 20, TIMESTAMP '2020-02-02 10:00:00')""")
+    con.execute("CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK BIGINT, PATIENT_DK BIGINT, ACQUISITION_TS TIMESTAMP, LEAD_ID VARCHAR, WAVEFORM_TYPE VARCHAR, WAVEFORM VARCHAR)")
+    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_DK BIGINT, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
+    leads = ["I", "II", "V1", "V2", "V3", "V4", "V5", "V6"]
+
+    def enc(x):
+        return urllib.parse.quote(base64.b64encode(np.round(x / 4.88).astype("<i2").tobytes()).decode())
+    rows, k = [], 0
+    for dk, ts, fs, extra in ((11, "2019-03-01 08:00:00", 500, None), (10, "2019-05-01 09:30:00", 250, None),
+                              (20, "2020-01-02 10:00:00", 500, "V1")):
+        t = np.arange(fs * 10) / fs
+        for j, ld in enumerate(leads):
+            for _ in range(2 if ld == extra else 1):
+                k += 1
+                rows.append((k, dk, ts, ld, "Rhythm", enc(800 * np.sin(2 * np.pi * 1.1 * t + j))))
+            k += 1
+            rows.append((k, dk, ts, ld, "Median", enc(np.zeros(600))))
+        con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ({dk}, TIMESTAMP '{ts}', {fs})")
+    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, CAST(? AS TIMESTAMP), ?, ?, ?)", rows)
+    eng = DuckDBEngine(con, st)
+    idx = build_ecg_index(eng, mod)
+    assert set(idx.ecg_id) == {"100", "101", "200", "201"} and dict(zip(idx.ecg_id, idx.person_id))["101"] == 1
+    m = idx.rename(columns={"acquisition_datetime": "ecg_dtm"})
+    out = extract_waveforms(eng, m, mod, str(tmp_path), batch_size=1)
+    got = dict(zip(out.ecg_id, out.waveform_uri))
+    err = dict(zip(out.ecg_id, out.waveform_error))
+    # ECG 100 sits under DK 10 but its waveform under DK 11: linked through the clinic number
+    sig, fs, names, units = read_any(got["100"])
+    assert fs == 500 and names == leads and sig.shape == (8, 5000) and units == "uV" and abs(sig.max() - 800) < 10
+    assert read_any(got["101"])[1] == 250
+    assert "several Rhythm rows" in err["200"] and "no Rhythm rows" in err["201"]
+    assert abs(decode_lead("AQA%3D")[0] - 4.88) < 1e-9              # URL-encoded '=' padding

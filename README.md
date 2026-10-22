@@ -72,4 +72,4 @@ Both engines give identical attrition counts and concept-set resolution on the s
 
   Run `python scripts/sample_size_report.py` to compare the plans (writes `exports/sample_size_plans.csv`). The endpoint tables report the plan, the threshold, the rule, and whether the deck goal was met as a point estimate.
 * **Reference standards from notes.** Cath-report stenosis %, the echo report findings and the ECG over-read text are extracted with regex rules. The protocol requires double manual adjudication of a 10% random sample (κ is reported).
-* **Death causes.** `DEATH.cause_concept_id` can be sparse, so CV mortality is a likely under-count. A sensitivity analysis uses all-cause death.
+* **Death causes.** Cause of death is not populated on MCP (Adam Resnick, 2026-10-21), so every death outcome uses all-cause death; the Risk cohort's `cv_mortality` element is defined as all-cause death (a proxy that over-counts CV death). This is a protocol change for the clinical lead to approve.

@@ -27,7 +27,7 @@ The model is trained **only on Mayo data** inside the MCP workspace, like the EC
 |---|---|
 | Accounts, trainings, GPU | As for the MRI agent (RUNBOOK_MRI.md §1): DUA forms, Radiology training, an A100 40 GB from the shared reservation |
 | Code | `cardioai_mcp_validation` (main) in the workspace; `pip install -r requirements.txt -r requirements-echo-wm.txt` (CUDA torch) |
-| Echo link | **Confirm with MCP** how a `FACT_ECHO_TEST` row links to its DICOM study (accession number or study UID), and the column names. Fill `config/modality_tables.yaml` → `echo.mcp` |
+| Echo link | MCP (2026-10-21): no shared key; a `FACT_ECHO_TEST` row links to its DICOM study by `PATIENT_CLINIC_NUMBER` and date (`echo.mcp.link.mode: clinic_date`). Confirm the study-date column (`link.study_date`) and the `FACT_ECHO_TEST` column names. Patient-days with two reports or two studies are dropped and counted (`find_echo_studies`) |
 | Clinical lead | Signs the sign-off sheet "Echo Wall-Motion Agent: Clinical Lead Sign-off": the echo rule sheet (LABEL_AUDIT.md §1.3), the A3C apical slots (proposed: not scored) and the AHA territory map (`runtime/segments.py`), the red-flag cut-offs (`config.yaml` → `red_flags`) and the Phase 2 goals (`config/cohorts/echo.yaml`). The code already holds the proposals; amendments are applied before training |
 
 Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data").
@@ -154,7 +154,7 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
 | Step | Must hold | If not |
 |---|---|---|
 | Cohort lock | Phase 2 echo cohort snapshotted before any training run | Stop and re-lock |
-| Echo link | `echo.mcp` link columns confirmed with MCP; study counts plausible | Stop: labels would attach to the wrong images |
+| Echo link | Clinic-number + date link run; the share of patient-days dropped as ambiguous is small and reported | Stop: labels would attach to the wrong images |
 | Label audit | Every echo label PASS; no adjudication pending | Fix `labels.py`, rebuild, re-audit on a fresh sample |
 | Views | `coverage.json` reviewed; view labels spot-checked by the cardiologist per source; most training clips labelled by a source or confidently predicted | Label more clusters or clips |
 | Pretraining | Card shows only studies before 2020 | Rebuild the manifest |

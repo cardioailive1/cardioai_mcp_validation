@@ -97,10 +97,11 @@ def _omop_with_ecgs(waveform_sql):
     from cardioai_mcp.engine import DuckDBEngine
     st = load_study()
     st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
+    st["modality"]["ecg"]["waveform_storage"] = "base64"       # older layout: one Base64 string per ECG
     con = build(1500)
     con.execute("ALTER TABLE measurement ADD COLUMN range_high DOUBLE")
     con.execute(f"""CREATE TABLE ecg_index AS
-        SELECT CAST(ROW_NUMBER() OVER () AS VARCHAR) AS ecg_id, po.person_id,
+        SELECT CAST(ROW_NUMBER() OVER () AS VARCHAR) AS ecg_id, po.person_id, CAST(po.person_id AS VARCHAR) AS clinic_number,
                CAST(po.procedure_date AS TIMESTAMP) AS acquisition_datetime, {waveform_sql} AS waveform_path,
                500 AS sample_rate, 12 AS lead_count, 'Sinus rhythm.' AS diagnosis_statement, 1 AS confirmed_flag
         FROM procedure_occurrence po
