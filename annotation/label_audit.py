@@ -5,10 +5,13 @@ Everything stays in the MCP workspace (the sheets contain report text).
 
 Report-derived labels (MRI report labels, ECG AF from confirmed reads)
     python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --out /workspace/audit/mri
-        -> key.csv (automatic labels: NOT for the auditors), sheet_ds1.xlsx, sheet_ds2.xlsx (blinded)
-        add --auto assist  : the automatic auditor (annotation/auto_audit.py) adds the relevant sentences
-            --auto triage  : it also settles rows where it agrees with the code; the data scientists read the rest
-                             plus a blinded 25% of those rows to verify it
+        -> key.csv (automatic labels: NOT for the auditors), sheet_ds1.xlsx, sheet_ds2.xlsx (blinded),
+           auto_audit_summary.csv (tier 0: the automatic auditor vs the code, per label; aggregate only)
+        The automatic audit (tier 0, annotation/auto_audit.py) is REQUIRED for every agent and always runs first:
+            --auto triage (default): it settles rows where it agrees with the code on every label; the data
+                             scientists read the rest plus a blinded 25% of those rows to verify it
+            --auto assist  : the fallback when triage FAILs for a label: every row is read by people, with the
+                             auditor's evidence sentences on the sheets
     ... data scientists fill their sheets by the rule sheet (1 / 0 / U; numbers as stated) ...
     python -m annotation.label_audit score mri --dir /workspace/audit/mri
         -> adjudication_1.xlsx for the cardiologist (every disagreement, every U, plus a blinded spot-check)
@@ -113,21 +116,23 @@ def _hard_mask(text: pd.Series, keywords: str, hedge: str) -> pd.Series:
     return text.fillna("").map(lambda t: bool(pat.search(t)))
 
 
-AUTO_MODES = ("off", "assist", "triage")
+AUTO_MODES = ("triage", "assist")       # the automatic audit is required: there is no "off"
 
 
 def sample(m: pd.DataFrame, modality: str, auditors: List[str], cfg: Optional[dict] = None,
-           extra_ids: Iterable[str] = (), auto: str = "off") -> pd.DataFrame:
+           extra_ids: Iterable[str] = (), auto: str = "triage") -> pd.DataFrame:
     """Rows to audit, with why each was picked. Deterministic (seeded).
 
-    auto = "off"   : data scientists read every row.
-           "assist": the automatic auditor adds an 'evidence' column (relevant sentences) to the sheets.
-           "triage": also settles rows where it agrees with the code on EVERY label and value, except hard,
+    The automatic auditor (tier 0) always reads every sampled row first; its reading is stored in key.csv.
+    auto = "triage": it settles rows where it agrees with the code on EVERY label and value, except hard,
                      flagged and missing-value rows; data scientists read the rest plus a blinded
                      verify_fraction of the auto-settled rows (tasks.yaml label_audit.auto_audit).
+           "assist": data scientists read every row, with the auditor's evidence sentences on their sheets
+                     (the fallback when triage FAILs for a label).
     """
     if auto not in AUTO_MODES:
-        raise ValueError(f"auto must be one of {AUTO_MODES}")
+        raise ValueError(f"auto must be one of {AUTO_MODES}: the automatic audit is a required step before the "
+                         "data scientists and the cardiologist (use assist to have people read every row)")
     cfg = cfg or load_tasks()["label_audit"]
     c = cfg[modality]
     if not auditors:
@@ -174,7 +179,7 @@ def sample(m: pd.DataFrame, modality: str, auditors: List[str], cfg: Optional[di
     key["auto_mode"] = auto
     key["auto_settled"] = False
     key["ds_verify"] = False
-    if auto != "off":
+    if True:                                            # tier 0: always
         from .auto_audit import AutoAuditor
         aa = AutoAuditor(modality, cfg)
         reads = [aa.read(t) for t in key.text]
@@ -342,6 +347,33 @@ def _find(d: Path, stem: str) -> Optional[Path]:
     return None
 
 
+def auto_audit_summary(key: pd.DataFrame, modality: str, cfg: Optional[dict] = None) -> pd.DataFrame:
+    """Tier 0 result, per label / value: how often the automatic auditor agrees with the code on the sampled
+    rows, how often it finds the text uncertain or silent, and (triage) how many rows it settled.
+    Aggregate counts only: safe to share; the row-level readings stay in key.csv."""
+    cfg = cfg or load_tasks()["label_audit"]
+    labels, values = _columns(cfg, modality)
+    tol = cfg["pass"]["value_tolerance"]
+    rows = []
+    for col in labels + values:
+        is_val = col in values
+        code = [_auto(v) for v in key[f"auto_{col}"]]
+        aa = [(norm_value if is_val else norm_label)(v) for v in key[f"aa_{col}"]]
+        if not is_val:
+            code = [NM if c is None else c for c in code]
+        agree = [same(c, a, tol if is_val else None) for c, a in zip(code, aa)]
+        rows.append({"column": col, "kind": "value" if is_val else "label", "rows": len(key),
+                     "auditor_agrees_with_code": int(sum(agree)),
+                     "agreement": float(np.mean(agree)) if len(agree) else float("nan"),
+                     "auditor_uncertain": int(sum(a == U for a in aa)),
+                     "auditor_not_mentioned": int(sum(a == NM for a in aa)) if not is_val else None,
+                     "auditor_differs": int(len(agree) - sum(agree)),
+                     "auto_mode": key["auto_mode"].iloc[0] if len(key) else None,
+                     "rows_settled_automatically": int(key.auto_settled.sum()),
+                     "rows_read_by_people": int((key.auditor_1 != "").sum())})
+    return pd.DataFrame(rows)
+
+
 def write_auditor_sheets(key: pd.DataFrame, out: Path, modality: str, cfg: Optional[dict] = None) -> List[Path]:
     cfg = cfg or load_tasks()["label_audit"]
     labels, values = _columns(cfg, modality)
@@ -356,6 +388,7 @@ def write_auditor_sheets(key: pd.DataFrame, out: Path, modality: str, cfg: Optio
         write_sheet(rows, p, labels, values, modality, f"{modality.upper()} label audit - auditor {a} - {len(rows)} rows")
         paths.append(p)
     key.drop(columns=[c for c in ("text", "evidence") if c in key]).to_csv(out / "key.csv", index=False)
+    auto_audit_summary(key, modality, cfg).to_csv(out / "auto_audit_summary.csv", index=False)
     key[["audit_id", "text"]].to_csv(out / "texts.csv.gz", index=False)
     (out / "README.txt").write_text(
         "key.csv holds the automatic labels (the code's and the automatic auditor's): do NOT open it or share it\n"
@@ -444,9 +477,13 @@ def _auto_checks(r: pd.DataFrame, done: pd.Series, tol: Optional[float]) -> Dict
     spot = r[r.spot_check & r.cardiologist.notna() & r.ds1.isna()]
     agree = [same(a, b, tol) for a, b in zip(ver.auto_auditor, ver.reference)]
     sp = [same(a, b, tol) for a, b in zip(spot.auto_auditor, spot.cardiologist)]
+    read = r[done & r.ds1.notna()]
+    allr = [same(a, b, tol) for a, b in zip(read.auto_auditor, read.reference)]
     return {"auto_settled": int((r.status == "auto auditor").sum() + len(spot)), "auto_verify_n": len(ver),
             "auto_vs_reference": float(np.mean(agree)) if agree else float("nan"),
-            "auto_vs_cardiologist": float(np.mean(sp)) if sp else float("nan"), "auto_spot_n": len(sp)}
+            "auto_vs_cardiologist": float(np.mean(sp)) if sp else float("nan"), "auto_spot_n": len(sp),
+            # every row people read (assist: all rows): how the auditor did; information, not a pass rule
+            "auto_vs_reference_all": float(np.mean(allr)) if allr else float("nan"), "auto_read_n": len(allr)}
 
 
 def _auto_fails(row: dict, cfg: dict) -> List[str]:
@@ -534,6 +571,9 @@ def score(d: str, modality: str, cfg: Optional[dict] = None, log=print) -> Dict[
     dp = Path(d)
     labels, values = _columns(cfg, modality)
     key = pd.read_csv(dp / "key.csv", dtype=str, keep_default_na=False)
+    if not all(f"aa_{c}" in key for c in labels + values):
+        raise ValueError("this sample has no automatic audit (tier 0), which is required before the data scientists "
+                         "and the cardiologist: draw it again with --auto triage or --auto assist")
     for c in labels + values:
         key[f"auto_{c}"] = pd.to_numeric(key[f"auto_{c}"].replace("", np.nan))
         if f"aa_{c}" in key:
@@ -865,9 +905,10 @@ def main(argv=None):
     s.add_argument("--auditors", required=True, help="data scientist codes, comma-separated (no names)")
     s.add_argument("--out", required=True)
     s.add_argument("--extra", help="CSV with an id column (e.g. rr_flags.csv rows with a flag) to add as 'flagged'")
-    s.add_argument("--auto", choices=AUTO_MODES, default="off",
-                   help="automatic auditor: assist = evidence sentences on the sheets; triage = also settles rows "
-                        "where it agrees with the code (a blinded share is still verified by the data scientists)")
+    s.add_argument("--auto", choices=AUTO_MODES, default="triage",
+                   help="the automatic audit (tier 0) always runs first. triage (default) = it settles rows where it "
+                        "agrees with the code, a blinded share still verified by the data scientists; assist = people "
+                        "read every row with its evidence sentences (the fallback when triage FAILs for a label)")
     sc = sub.add_parser("score")
     sc.add_argument("modality", choices=["mri", "ecg", "echo"])
     sc.add_argument("--dir", required=True)
@@ -897,13 +938,17 @@ def main(argv=None):
                      auto=a.auto)
         paths = write_auditor_sheets(key, Path(a.out), a.modality, cfg)
         print(key.picked.str.split(";").explode().str.split(":").str[0].value_counts().to_string())
+        summ = auto_audit_summary(key, a.modality, cfg)
+        print("tier 0, automatic auditor vs the code:")
+        print(summ[["column", "rows", "agreement", "auditor_uncertain", "auditor_differs"]].to_string(index=False))
         n_ds = int((key.auditor_1 != "").sum())
         print(f"{len(key)} rows; data scientists read {n_ds} ({int(key.ds_verify.sum())} of them verify the automatic "
               f"auditor); {len(key) - n_ds} settled automatically; sheets: {', '.join(p.name for p in paths)}")
     elif a.cmd == "score":
         r = score(a.dir, a.modality, cfg)
         cols = [c for c in ["column", "ppv", "ppv_n", "ppv_ci_low", "npv", "npv_n", "npv_ci_low", "kappa_ds1_ds2",
-                            "value_match", "value_miss_rate", "auto_vs_reference", "pending_cardiologist", "result"]
+                            "value_match", "value_miss_rate", "auto_vs_reference", "auto_vs_reference_all",
+                            "pending_cardiologist", "result"]
                 if c in r["results"]]
         print(r["results"][cols].to_string(index=False))
     elif a.cmd == "troponin":
