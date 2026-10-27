@@ -92,8 +92,8 @@ def test_wilson_and_kappa():
 
 def test_sampling_is_blinded_deterministic_and_covers_every_label(tmp_path):
     m = _manifest()
-    k1 = L.sample(m, "mri", ["ds1", "ds2"], CFG)
-    k2 = L.sample(m, "mri", ["ds1", "ds2"], CFG)
+    k1 = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="assist")
+    k2 = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="assist")
     assert k1.equals(k2)
     assert k1.study_id.is_unique
     whys = k1.picked.str.split(";").explode()
@@ -112,7 +112,7 @@ def test_sampling_is_blinded_deterministic_and_covers_every_label(tmp_path):
 
 def test_full_cycle_catches_the_bad_thrombus_rule(tmp_path):
     m = _manifest()
-    key = L.sample(m, "mri", ["ds1", "ds2"], CFG)
+    key = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="assist")
     L.write_auditor_sheets(key, tmp_path, "mri", CFG)
     kinds = _kinds(tmp_path, m)
     with pytest.raises(ValueError, match="not filled"):
@@ -236,8 +236,8 @@ def test_auto_auditor_reads_like_the_rule_sheet():
 def test_triage_settles_agreeing_rows_and_verifies_a_blinded_share(tmp_path):
     m = _manifest()
     key = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="triage")
-    off = L.sample(m, "mri", ["ds1", "ds2"], CFG)
-    assert key.audit_id.tolist() == off.audit_id.tolist()                  # same sample, fewer rows to read
+    allrows = L.sample(m, "mri", ["ds1", "ds2"], CFG, auto="assist")
+    assert key.audit_id.tolist() == allrows.audit_id.tolist()              # same sample, fewer rows to read
     n_ds = (key.auditor_1 != "").sum()
     assert n_ds < 0.6 * len(key)
     settled = key[key.auto_settled]
@@ -284,3 +284,22 @@ def test_assist_keeps_every_row_for_the_data_scientists(tmp_path):
     L.write_auditor_sheets(key, tmp_path, "mri", CFG)
     sh = pd.read_excel(tmp_path / "sheet_ds1.xlsx", sheet_name="audit")
     assert list(sh.columns[:3]) == ["audit_id", "text", "evidence"] and sh.evidence.notna().mean() > 0.9
+
+
+def test_automatic_audit_is_required(tmp_path):
+    """Tier 0 runs for every sample: there is no 'off', the default is triage, every row carries the auditor's
+    reading, an aggregate summary is written, and scoring refuses a sample made without it."""
+    m = _manifest()
+    with pytest.raises(ValueError, match="required"):
+        L.sample(m, "mri", ["ds1"], CFG, auto="off")
+    key = L.sample(m, "mri", ["ds1", "ds2"], CFG)
+    assert (key.auto_mode == "triage").all() and key.auto_settled.any()
+    assert all(key[f"aa_{c}"].notna().all() for c in ("infarct", "lv_thrombus", "report_mvo"))
+    L.write_auditor_sheets(key, tmp_path, "mri", CFG)
+    summ = pd.read_csv(tmp_path / "auto_audit_summary.csv").set_index("column")
+    assert summ.loc["lv_thrombus", "auditor_differs"] > 0                 # the planted hedge bug shows up at tier 0
+    assert summ.loc["infarct", "agreement"] > 0.9 and "study_id" not in summ.columns
+    k = pd.read_csv(tmp_path / "key.csv", dtype=str, keep_default_na=False)
+    k.drop(columns=[c for c in k if c.startswith("aa_")]).to_csv(tmp_path / "key.csv", index=False)
+    with pytest.raises(ValueError, match="no automatic audit"):
+        L.score(str(tmp_path), "mri", CFG, log=lambda s: None)

@@ -84,7 +84,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    # AF: rhythm cross-check from the waveform, then the blinded text audit of the over-reads
    python -m annotation.label_audit af-rhythm --manifest /workspace/ecg/manifest.parquet --out /workspace/audit/ecg/rr_flags.csv
    python -m annotation.label_audit sample ecg --manifest /workspace/ecg/manifest.parquet --auditors ds1,ds2 \
-          --extra /workspace/audit/ecg/rr_flags.csv --auto triage --out /workspace/audit/ecg      # --auto off | assist | triage
+          --extra /workspace/audit/ecg/rr_flags.csv --auto triage --out /workspace/audit/ecg      # tier 0 required: triage (default) | assist
    python -m annotation.label_audit score ecg --dir /workspace/audit/ecg     # twice: before and after the cardiologist
    ```
    - The cardiologist reads `troponin_concepts.csv` (which assays the troponin concept set really contains, with units and reference limits) and signs it off.

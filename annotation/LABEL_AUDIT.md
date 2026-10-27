@@ -1,13 +1,15 @@
 # Auditing the automatic labels
 
-Most training and test labels for the ECG and MRI agents are produced by code. Regular-expression rules read CMR reports and ECG over-reads, the troponin and diagnosis-code logic builds the acute MI and STEMI labels, and the pre-drawing model draws MRI outlines. This protocol checks those labels before any training. It runs in two tiers.
+Most training and test labels for the ECG, MRI and echo wall-motion agents are produced by code. Regular-expression rules read CMR reports, echo reports and ECG over-reads, the troponin and diagnosis-code logic builds the acute MI and STEMI labels, and the pre-drawing model draws MRI outlines. This protocol checks those labels before any training. It runs in three tiers, **always in this order, for every agent**:
 
-- **Tier 1, data scientists:** they check every sampled label against its source (the report text, the lab rows, the image), **without seeing the automatic value**, using written rule sheets.
-- **Tier 2, cardiologist:** they adjudicate everything the data scientists can't settle. That means every disagreement (automatic vs data scientist, or data scientist vs data scientist) and every case marked uncertain. The cardiologist also re-reads a **blinded 10% spot-check** of rows the data scientists settled, which measures whether the data scientists read the reports the way a cardiologist would.
+- **Tier 0, automatic audit (required):** independent automatic checks run on the automatic labels before any person reads them (see [Part 1b](#part-1b-tier-0-automatic-audit-required)):
+  - **all three agents:** the automatic auditor (`annotation/auto_audit.py`) re-reads every sampled report with its own vocabulary;
+  - **ECG:** also the troponin, acute MI and STEMI recomputation from the raw lab rows (part 2) and the AF rhythm cross-check (part 3);
+  - **MRI:** also the automatic outline checks (part 4.1).
+- **Tier 1, data scientists:** they check the sampled labels against their source (the report text, the lab rows, the image), **without seeing the automatic value**, using written rule sheets.
+- **Tier 2, cardiologist:** they adjudicate everything the data scientists can't settle. That means every disagreement (automatic vs data scientist, or data scientist vs data scientist) and every case marked uncertain. The cardiologist also re-reads a **blinded 10% spot-check** of rows that were settled without them, which measures whether the earlier tiers read the reports the way a cardiologist would.
 
-Data scientists do the volume and the cardiologist's time goes to the hard cases: typically 10–20% of the sample.
-
-**Optional automatic first pass (tier 0).** An automatic auditor (`annotation/auto_audit.py`) can read the reports before the data scientists do. It either points them to the relevant sentences, or settles the reports where it agrees with the code, with a blinded share still checked by a person. See [Part 1b](#part-1b-optional-automatic-auditor). Everything below runs **inside the MCP workspace**. The sheets contain report text and never leave it.
+Data scientists do the volume and the cardiologist's time goes to the hard cases: typically 10–20% of the sample. Tier 0 cannot be skipped: `label_audit sample` has no "off" mode, and `label_audit score` refuses a sample drawn without it. Everything below runs **inside the MCP workspace**. The sheets contain report text and never leave it.
 
 Code: `annotation/label_audit.py`. Numbers and pass rules: `annotation/tasks.yaml` → `label_audit`.
 
@@ -37,7 +39,7 @@ Code: `annotation/label_audit.py`. Numbers and pass rules: `annotation/tasks.yam
 ### 1.1 Sample
 
 ```bash
-python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --out /workspace/audit/mri
+python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --auto triage --out /workspace/audit/mri
 ```
 
 The sample is seeded, so the same manifest gives the same sample. It contains:
@@ -155,9 +157,9 @@ The output files are:
 - `resolved.csv`: every row × label, with who settled it.
 - `errors.csv`: the errors listed above.
 
-## Part 1b: optional automatic auditor
+## Part 1b: tier 0, automatic audit (required)
 
-This is a **second, independent reader** of the report text that runs before the data scientists. It doesn't reuse the training rules. It uses its own vocabulary (`tasks.yaml` → `label_audit.auto_terms`) and reads sentence by sentence, deciding with NegEx-style triggers whether each mention is:
+The automatic auditor is a **second, independent reader** of the report text. It runs on every sampled report of every agent, after the automatic labels are made and before any person reads the sample. It doesn't reuse the training rules. It uses its own vocabulary (`tasks.yaml` → `label_audit.auto_terms`) and reads sentence by sentence, deciding with NegEx-style triggers whether each mention is:
 
 - **affirmed:** stated as present;
 - **negated:** "no", "without", "not seen", "resolved";
@@ -166,13 +168,14 @@ This is a **second, independent reader** of the report text that runs before the
 
 It skips indication and history lines. A single hedged mention makes the whole sentence uncertain. It returns the same entries as the rule sheet: `1`, `0`, `U`, `NM` and numbers, where LVEF ranges and conflicting values give `U`. It runs in the workspace on the standard library only: no model, no network, and no text leaves MCP.
 
-Add `--auto` to the `sample` command:
+**What tier 0 produces.** `sample` stores the auditor's reading of every row in `key.csv` (not for auditors) and writes `auto_audit_summary.csv`: per label, how often the auditor agrees with the code, finds the text uncertain or silent, and how many rows it settled. The summary holds counts only, so it can be shared. A label with low agreement is an early warning that a rule is wrong, before anyone reads a report.
+
+`--auto` on the `sample` command chooses how the data scientists use tier 0 (there is no "off"):
 
 | `--auto` | What the data scientists read | What the automatic auditor does |
 |---|---|---|
-| `off` (default) | Every sampled report | Nothing |
-| `assist` | Every sampled report | Adds an **evidence** column to the sheets: the sentences that mention any label's words. This is not its answer, so the sheets stay blinded. Reading is faster |
-| `triage` | Reports it **cannot** settle, plus a **blinded 25%** of the ones it did settle (mixed in, indistinguishable) | Settles a report only when it agrees with the code on **every** label and number, and the report wasn't picked as hard, missing-value or rhythm-flagged. Also adds the evidence column |
+| `triage` (default) | Reports it **cannot** settle, plus a **blinded 25%** of the ones it did settle (mixed in, indistinguishable) | Settles a report only when it agrees with the code on **every** label and number, and the report wasn't picked as hard, missing-value or rhythm-flagged. Also adds the evidence column |
+| `assist` (fallback) | Every sampled report | Adds an **evidence** column to the sheets: the sentences that mention any label's words. This is not its answer, so the sheets stay blinded. Used when triage FAILs for a label |
 
 ```bash
 python -m annotation.label_audit sample mri --manifest /workspace/mri/manifest.parquet --auditors ds1,ds2 --auto triage --out /workspace/audit/mri

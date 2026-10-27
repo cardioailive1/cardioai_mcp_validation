@@ -99,7 +99,7 @@ label_audit:
       report_lvef: {keywords: 'lvef|ejection fraction|\bef\b'}
     missing: 25
   hedge: '\b(no|not|without|negative for|cannot (be )?(excluded?|ruled out)|can ?not exclude|possible|possibly|probable|probably|suspicious|suggestive|equivocal|questionable|history of|prior|previous|old|resolved|rule out|r/o|vs\.?|versus)\b'
-  auto_audit:                     # optional automatic first pass (sample --auto assist | triage)
+  auto_audit:                     # REQUIRED automatic first pass (tier 0) for every agent: sample --auto triage (default) | assist
     verify_fraction: 0.25         # triage: share of auto-settled rows still read (blinded) by the data scientists
     verify_min: 0.98              # automatic auditor vs data scientists on those rows, per label; below -> FAIL
   auto_terms:                     # the automatic auditor's OWN vocabulary (independent of the training rules)
