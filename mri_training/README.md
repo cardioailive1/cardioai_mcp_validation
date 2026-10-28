@@ -47,22 +47,22 @@ No public dataset or outside pretrained weights are used: `use_public_datasets: 
    report
    # after delivery (one folder per study):
    cmr = mi.build_study_table(studies, "/workspace/mri/dicom")
-   spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")   # = modality_tables mri.table
+   eng.write_table(cmr, "cmr_study")   # = modality_tables mri.table
    ```
    - Only the series the model uses are requested. Localisers, long-axis cines, mapping and perfusion series are left out, which keeps the request much smaller.
    - Studies without a de-identifiable LGE series aren't requested; `report` counts them.
    - **Before running, confirm:**
      - the schema of the FACT tables (`mri.mcp.schema`);
      - the final-report status values;
-     - how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id` (`mri.mcp.person_map`).
+     - `mri.mcp.person_map` is filled in: OMOP `person.person_source_value` = `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28).
    - Check one delivered study with `mri_training.io.read_study_path`.
 3. **Build the manifest:**
    ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
    from mri_training.dataset import load_config, build_manifest, summary
-   study, cfg = load_study(), load_config()
-   excl = spark.table("cardioai_work.mri_analytic_locked").select("person_id").toPandas().person_id
-   m = build_manifest(SparkEngine(spark, study), study, cfg, study["modality"], exclude_persons=excl)
+   study, cfg = load_study(), load_config(); eng = make_engine("bigquery", study)
+   excl = eng.read_table("mri_analytic_locked").person_id
+   m = build_manifest(eng, study, cfg, study["modality"], exclude_persons=excl)
    summary(m, cfg["study_heads"]); m.to_parquet("/workspace/mri/manifest.parquet")
    ```
    The build refuses to continue if any patient appears in two splits. Adults only: tests done before age 18 (`splits.min_age`, the Phase 2 cohort rule) are dropped from every split, and `m.attrs["n_under_min_age"]` gives the count.

@@ -40,7 +40,7 @@ index:
     SELECT q.person_id, q.index_date, MAX(COALESCE(q.care_site_id, p.care_site_id)) AS care_site_id, MIN(q.visit_concept_id) AS index_visit_concept_id
     FROM qual q JOIN {{cdm}}.person p ON p.person_id = q.person_id
     WHERE q.index_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end_long}}' AS DATE)
-      AND YEAR(q.index_date) - p.year_of_birth >= {{min_age}}
+      AND YEAR(q.index_date) - NULLIF(p.year_of_birth, 1800) >= {{min_age}}
       AND (SELECT COUNT(DISTINCT m.measurement_date) FROM {{cdm}}.measurement m WHERE m.person_id = q.person_id
            AND (m.measurement_concept_id IN {{cs:sbp}} OR m.measurement_source_concept_id IN {{cs:sbp}})
            AND DATEDIFF(m.measurement_date, q.index_date) BETWEEN -30 AND 180) >= 3

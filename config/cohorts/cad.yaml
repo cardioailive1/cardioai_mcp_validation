@@ -32,7 +32,7 @@ index:
     FROM proc pr JOIN {{cdm}}.person p ON p.person_id = pr.person_id
     LEFT JOIN {{cdm}}.visit_occurrence v ON v.visit_occurrence_id = pr.visit_occurrence_id
     WHERE pr.index_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end}}' AS DATE)
-      AND YEAR(pr.index_date) - p.year_of_birth >= {{min_age}}
+      AND YEAR(pr.index_date) - NULLIF(p.year_of_birth, 1800) >= {{min_age}}
     GROUP BY pr.person_id, pr.index_date
 
 exclusions:

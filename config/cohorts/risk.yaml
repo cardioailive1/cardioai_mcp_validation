@@ -36,7 +36,7 @@ index:
     )
     SELECT v.person_id, v.index_date, MAX(COALESCE(v.care_site_id, p.care_site_id)) AS care_site_id, MIN(v.visit_concept_id) AS index_visit_concept_id
     FROM v JOIN {{cdm}}.person p ON p.person_id = v.person_id
-    WHERE YEAR(v.index_date) - p.year_of_birth BETWEEN {{min_age_risk}} AND {{max_age_risk}}
+    WHERE YEAR(v.index_date) - NULLIF(p.year_of_birth, 1800) BETWEEN {{min_age_risk}} AND {{max_age_risk}}
       AND EXISTS (SELECT 1 FROM {{cdm}}.measurement m WHERE m.person_id = v.person_id
                   AND (m.measurement_concept_id IN {{cs:total_chol}} OR m.measurement_source_concept_id IN {{cs:total_chol}})
                   AND DATEDIFF(m.measurement_date, v.index_date) BETWEEN -365 AND 0)

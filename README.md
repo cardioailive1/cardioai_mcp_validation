@@ -2,7 +2,7 @@
 
 Study **CA-AGENTS-VAL-PHASE2**. This toolkit builds and evaluates the five agent-validation cohorts from the Phase 2 data-elements deck: Echo, ECG, CAD, Risk Stratification and Longitudinal Monitoring. The Women's CVD cohort and the five risk calculators are out of scope.
 
-It runs inside a **Mayo Clinic Platform (MCP) Discover workspace**. There the EHR data is in **OMOP CDM** format and is queried through the **SparkSQL API** in JupyterLab. The same code runs offline on DuckDB against synthetic OMOP data for testing.
+It runs inside a **Mayo Clinic Platform (MCP) Discover workspace**. There the EHR data is in **OMOP CDM** format, provisioned in **BigQuery** and queried with the BigQuery client from JupyterLab. The SQL is written in Spark SQL and translated to BigQuery SQL by the engine (sqlglot). The same code runs offline on DuckDB against synthetic OMOP data for testing.
 
 | Cohort | Study ID | N | Sites | Elements (REQ) | Reference standard |
 |---|---|---|---|---|---|
@@ -33,7 +33,7 @@ config/
                           index event, exclusions, sampling quotas, every data element, agent
                           output contract, endpoints with goals and Phase 1 values
 cardioai_mcp/
-  engine.py      SparkEngine (MCP) / DuckDBEngine (tests; Spark SQL transpiled with sqlglot)
+  engine.py      BigQueryEngine (MCP) / SparkEngine / DuckDBEngine (tests); Spark SQL transpiled with sqlglot
   concepts.py    set-based concept-set resolution -> cs_members
   extractors.py  14 element extractors (measurement, flag, outcome, death, visit_count, note NLP, modality, series ...)
   builder.py     candidates -> exclusions (attrition) -> 1/patient -> sites -> stratified sampling + weights -> elements
@@ -41,7 +41,7 @@ cardioai_mcp/
   metrics.py, power.py, risk_scores.py (ACC/AHA PCE, descriptive only), qc.py (completeness, Table 1, small-cell suppression)
 scripts/
   discover_schema.py      onboarding inventory (tables, modality candidates, care sites, note titles)
-  run_cohorts.py          build cohorts (spark | duckdb-synthetic)
+  run_cohorts.py          build cohorts (bigquery | spark | duckdb-synthetic)
   sample_size_report.py   power of the planned N for every endpoint -> exports/sample_size.csv
 notebooks/01_build_and_validate.py   end-to-end MCP notebook (Jupytext percent format)
 docs/data_dictionary_omop_mapping.csv   179 elements -> OMOP source, window, fill / transform
@@ -53,7 +53,7 @@ tests/            synthetic OMOP generator, pytest end-to-end, local-Spark check
 
 1. **Onboard.** Run `python scripts/discover_schema.py`, then set `schemas` and `site_map` in `config/study.yaml` and the ECG/echo table names in `config/modality_tables.yaml` (`enabled: true`). Until these are set, the builder falls back to OMOP proxies: procedure codes, LOINC ECG/echo measurements, and NOTE text.
 2. **Concept sign-off.** `exports/concept_sets_detail_for_review.csv` lists every concept. Rows with `needs_review = 1` came from concept-name searches (the echo dimensions and pack-years) and need a clinician's sign-off.
-3. **Build.** Run `python scripts/run_cohorts.py --engine spark --save-tables` or the notebook. Only aggregate exports are written: attrition, completeness, sites and Table 1, with cells under 11 suppressed.
+3. **Build.** Run `python scripts/run_cohorts.py --save-tables` or the notebook. Only aggregate exports are written: attrition, completeness, sites and Table 1, with cells under 11 suppressed.
 4. **Run the agents inside the workspace.** Each agent writes `{cohort}_predictions` following the YAML `predictions` contract.
 5. **Evaluate.** `evaluate()` writes `exports/{cohort}_endpoints.csv`, with each endpoint's estimate, 95% CI, goal and pass/fail.
 

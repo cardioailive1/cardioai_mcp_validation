@@ -37,10 +37,13 @@ Agents within a wave can run in parallel. Wave 1 also proves the pipeline end-to
    python -c "from cardioai_mcp import encoders; print(encoders.fingerprint())"
    ```
    The printed fingerprint must equal `model_lock.encoders_fingerprint` in `config/study.yaml` (the tests check this too). Record it and this repo's commit SHA (`git rev-parse HEAD`) in the analysis log; they are part of the validation lock.
-3. Confirm Spark works from a notebook cell:
+3. Confirm BigQuery works from a notebook cell (MCP provisions the data in BigQuery), then list the datasets:
    ```python
-   from pyspark.sql import SparkSession
-   spark = SparkSession.builder.getOrCreate(); spark.sql("SHOW DATABASES").show()
+   from google.cloud import bigquery
+   client = bigquery.Client(); print([d.dataset_id for d in client.list_datasets()])
+   ```
+   ```bash
+   python scripts/discover_schema.py --out exports/schema_inventory   # tables, columns and types -> config/study.yaml
    ```
 4. Confirm with Mayo that the study is not human-subjects research, and file the determination letter in `docs/governance/`.
 
@@ -60,7 +63,7 @@ This writes `tables.csv` (every table, with ECG / echo / waveform candidates fla
 ## Step 3: Sign off the concept sets (once)
 
 ```bash
-python scripts/run_cohorts.py --engine spark --cohorts risk     # any cohort; this resolves all concept sets
+python scripts/run_cohorts.py --cohorts risk     # any cohort; this resolves all concept sets
 ```
 Send `exports/concept_sets_detail_for_review.csv` to the study cardiologist, who:
 - checks each set's codes (MI, HF, STEMI, CPT angiography, LOINC labs …)
@@ -71,7 +74,7 @@ Edits go in `config/concept_sets.yaml`. Rerun until it's signed. Record the sign
 ## Step 4: Check feasibility (once; no agent outputs)
 
 ```bash
-python scripts/run_cohorts.py --engine spark --save-tables
+python scripts/run_cohorts.py --save-tables
 ```
 For each cohort, review the files in `exports/`:
 - `*_attrition.csv`: the eligible pool at each step; any **SHORTFALL** in the sampling line (e.g. VT ECGs)
@@ -117,7 +120,7 @@ Each agent goes through the same six sub-steps, **a → f**. Swap `<cohort>` for
 
 ### 7a. Build the cohort
 ```bash
-python scripts/run_cohorts.py --engine spark --cohorts <cohort> --save-tables
+python scripts/run_cohorts.py --cohorts <cohort> --save-tables
 ```
 This creates `<work>.<cohort>_analytic` (one row per patient, every deck data element) and, for Longitudinal, `<work>.longitudinal_series`.
 
@@ -126,9 +129,11 @@ Review `exports/<cohort>_attrition.csv`, `_completeness.csv`, `_sites.csv` and `
 
 **MRI only (before 7b):** the MRI reference is built in Python by the training label code, from the cohort's own report text. After the first 7a run:
 ```python
+from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+eng = make_engine("bigquery", load_study())
 from mri_training.reference import reference_table, check_reference
-ref = reference_table(spark.table("cardioai_work.mri_analytic").toPandas())
-spark.createDataFrame(ref).write.mode("overwrite").saveAsTable("cardioai_work.mri_reference")
+ref = reference_table(eng.read_table("mri_analytic"))
+eng.write_table(ref, "mri_reference")
 ```
 Set `mri_ref.enabled: true` in `config/modality_tables.yaml`, re-run 7a for `mri`, and call `check_reference` on the new `mri_analytic` before 7c. Without this the cohort falls back to older word-level SQL rules, and `evaluate_cohorts.py` warns.
 
@@ -160,8 +165,10 @@ The agent reads the locked analytic table and writes a predictions table that fo
 
 Encode the model inputs with the **same code the app serves with**, so the validated encoding is the deployed one. `encode_cohort` renames the analytic columns into the app's request fields, applies the pre-specified missing-data rules and calls the shared encoders:
 ```python
+from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+eng = make_engine("bigquery", load_study())
 from cardioai_mcp.agent_inputs import encode_cohort
-analytic = spark.table("cardioai_work.risk_analytic_locked").toPandas()
+analytic = eng.read_table("risk_analytic_locked")
 enc = encode_cohort("risk", analytic)        # person_id, scorable, reason, vector, imputed   ("cad" for CAD)
 X = list(enc.vector[enc.scorable])           # send each vector to the locked model; Risk: report 1 - output
 ```
@@ -171,9 +178,11 @@ The Longitudinal EHR vitals model can't be scored until its raw-unit normalizati
 A template for writing the table:
 ```python
 import pandas as pd
-cohort = spark.table("cardioai_work.cad_analytic_locked").toPandas()
+from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+eng = make_engine("bigquery", load_study())
+cohort = eng.read_table("cad_analytic_locked")
 preds = my_cad_agent.predict(cohort)          # your locked agent -> DataFrame with the contract columns
-spark.createDataFrame(preds).write.mode("overwrite").saveAsTable("cardioai_work.cad_predictions")
+eng.write_table(preds, "cad_predictions")
 ```
 The **Longitudinal** agent must never see data after day t when predicting for day t. Build each day's input by filtering `longitudinal_series` to `day <= t`.
 
@@ -207,7 +216,7 @@ python scripts/evaluate_cohorts.py --cohorts <cohort> --cluster-by-site
 
 ## Checklist
 
-- [ ] 1 Workspace + toolkit + Spark verified; IRB determination filed
+- [ ] 1 Workspace + toolkit + BigQuery verified; IRB determination filed
 - [ ] 2 `study.yaml` / `modality_tables.yaml` mapped; ≥ 12 sites
 - [ ] 3 Concept sets signed off
 - [ ] 4 Feasibility run; Plan C confirmed with real rates

@@ -366,18 +366,82 @@ def test_echo_link_by_clinic_number_and_date():
         (2, TIMESTAMP '2019-04-01 09:00:00', 'Inferior hypokinesis. LVEF 45%.', NULL),
         (3, TIMESTAMP '2019-06-01 08:00:00', 'Normal wall motion.', NULL),
         (3, TIMESTAMP '2019-06-01 15:00:00', 'Limited study, apical views only.', NULL)""")
-    con.execute("CREATE TABLE FACT_RADIOLOGY_DICOM_INVENTORY (STMO_NAME_IN_ADL VARCHAR, MODALITY VARCHAR, STUDY_INSTANCE_UID VARCHAR, PATIENT_CLINIC_NUMBER VARCHAR, IMAGE_DEID_STATUS VARCHAR)")
-    con.execute("""INSERT INTO FACT_RADIOLOGY_DICOM_INVENTORY SELECT 'stmo', 'US', uid, cn, 'Ready'
+    con.execute("CREATE TABLE FACT_RADIOLOGY_DICOM_INVENTORY (STMO_NAME_IN_ADL VARCHAR, MODALITY VARCHAR, STUDY_INSTANCE_UID VARCHAR, PATIENT_CLINIC_NUMBER VARCHAR, IMAGE_DEID_STATUS VARCHAR, STUDY_DESCRIPTION VARCHAR)")
+    con.execute("""INSERT INTO FACT_RADIOLOGY_DICOM_INVENTORY SELECT 'stmo', 'US', uid, cn, 'Ready', 'ECHO TTE'
         FROM (VALUES ('u1', 'C1'), ('u2', 'C2'), ('u3', 'C2'), ('u9', 'C9')) v(uid, cn), range(12)""")
     con.execute("CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP)")
     con.execute("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('stmo', 'US', 'u1', TIMESTAMP '2019-04-01 08:40:00'),
         ('stmo', 'US', 'u2', TIMESTAMP '2019-06-01 07:50:00'), ('stmo', 'US', 'u3', TIMESTAMP '2019-06-01 14:55:00'),
         ('stmo', 'US', 'u9', TIMESTAMP '2019-04-01 08:00:00')""")
+    st["modality"]["echo"]["mcp"].update(test_type=None, person_map=None)   # the 10-21 layout: no test type, no person map
     logs = []
     df = me.find_echo_studies(DuckDBEngine(con, st), st["modality"], log=logs.append)
     # C1: the report sits under record key 2, the study under the clinic number -> linked; C2 has two reports
     # and two studies on 2019-06-01 -> dropped as ambiguous
     assert df.study_uid.tolist() == ["u1"] and df.clinic_number.tolist() == ["C1"] and df.n_deid_ok[0] == 12
-    assert df.attrs["link_report"]["ambiguous_days"] == 1 and "F5" in logs[0]
+    assert df.attrs["link_report"]["ambiguous_days"] == 1 and "one day" in logs[0]
     sql = me.echo_studies_sql(st["modality"])
     assert "i.study_date = e.study_date" in sql and "DIM_PATIENT" in sql
+
+
+def test_echo_link_tte_filter_and_lvef_from_echo_results():
+    """MCP 2026-10-28: TTE kept on both sides before the same-day link; LVEF from FACT_ECHO_RESULTS; OMOP person_id
+    from person.person_source_value."""
+    import duckdb
+    from cardioai_mcp.config import load_study
+    from cardioai_mcp.engine import DuckDBEngine
+    from echo_wm_training import mcp_echo as me
+    st = load_study()
+    st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
+    con = duckdb.connect()
+    q = con.execute
+    q("CREATE TABLE person (person_id BIGINT, person_source_value VARCHAR)")
+    q("INSERT INTO person VALUES (1, 'A100'), (2, 'B200')")
+    q("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR)")
+    q("INSERT INTO DIM_PATIENT VALUES (10, 'A100'), (11, 'A100'), (20, 'B200')")
+    q("CREATE TABLE DIM_ECHO_TEST (ECHO_TEST_DK BIGINT, ECHO_TEST_DESCRIPTION VARCHAR)")
+    q("INSERT INTO DIM_ECHO_TEST VALUES (1, 'Echocardiogram TTE complete'), (2, 'Transesophageal echo (TEE)')")
+    q("""CREATE TABLE FACT_ECHO_TEST (ECHO_TEST_FPK BIGINT, PATIENT_DK BIGINT, ECHO_TEST_DTM TIMESTAMP, ECHO_NOTE VARCHAR,
+         ECHO_PERFORMED_TEST_DK BIGINT, ACCESSION_NBR VARCHAR)""")
+    q("""INSERT INTO FACT_ECHO_TEST VALUES
+         (1, 10, TIMESTAMP '2019-04-02 09:00:00', 'Inferior akinesis. LVEF 45%.', 1, NULL),
+         (2, 11, TIMESTAMP '2019-04-02 14:00:00', 'No LA appendage thrombus.', 2, NULL),
+         (3, 20, TIMESTAMP '2020-02-03 08:00:00', 'Normal wall motion.', 1, NULL),
+         (4, 20, TIMESTAMP '2020-02-03 16:00:00', 'Normal wall motion. Limited study.', 1, NULL)""")
+    q("""CREATE TABLE FACT_RADIOLOGY_DICOM_INVENTORY (STMO_NAME_IN_ADL VARCHAR, MODALITY VARCHAR, STUDY_INSTANCE_UID VARCHAR,
+         PATIENT_CLINIC_NUMBER VARCHAR, IMAGE_DEID_STATUS VARCHAR, STUDY_DESCRIPTION VARCHAR)""")
+    q("""INSERT INTO FACT_RADIOLOGY_DICOM_INVENTORY VALUES
+         ('s', 'US', 'a-tte', 'A100', 'Ready', 'ECHO TTE COMPLETE'), ('s', 'US', 'a-tee', 'A100', 'Ready', 'ECHO TEE'),
+         ('s', 'US', 'a-abd', 'A100', 'Ready', 'US ABDOMEN COMPLETE'),
+         ('s', 'US', 'b-1', 'B200', 'Ready', 'ECHO TTE COMPLETE'), ('s', 'US', 'b-2', 'B200', 'Ready', 'ECHO TTE LIMITED')""")
+    q("CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP)")
+    q("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('s', 'US', 'a-tte', TIMESTAMP '2019-04-02 09:05:00'),
+         ('s', 'US', 'a-tee', TIMESTAMP '2019-04-02 14:10:00'), ('s', 'US', 'a-abd', TIMESTAMP '2019-04-02 11:00:00'),
+         ('s', 'US', 'b-1', TIMESTAMP '2020-02-03 08:05:00'), ('s', 'US', 'b-2', TIMESTAMP '2020-02-03 16:05:00')""")
+    eng = DuckDBEngine(con, st)
+    mod = st["modality"]
+    studies = me.find_echo_studies(eng, mod, log=lambda s: None)
+    # A: the TEE report and the TEE / abdominal studies no longer make the day ambiguous; B: two TTEs on one day -> dropped
+    assert studies.study_uid.tolist() == ["a-tte"] and int(studies.person_id[0]) == 1
+    assert studies.attrs["link_report"]["ambiguous_days"] == 1
+
+    q("CREATE TABLE DIM_ECHO_TEST_RESULT_TYPE (ECHO_TEST_RESULT_TYPE_DK BIGINT, ECHO_TEST_RESULT_NAME VARCHAR, ECHO_TEST_RESULT_DESCRIPTION VARCHAR)")
+    q("""INSERT INTO DIM_ECHO_TEST_RESULT_TYPE VALUES (1, 'LVEF_BIPLANE', 'LV ejection fraction, biplane (method of discs)'),
+         (2, 'LVEF_VISUAL', 'LV ejection fraction, visual estimate'), (3, 'RVEF', 'Right ventricular ejection fraction'),
+         (4, 'LVEDV', 'LV end-diastolic volume')""")
+    q("CREATE TABLE FACT_ECHO_RESULTS (ECHO_TEST_FPK BIGINT, ECHO_TEST_RESULT_TYPE_DK BIGINT, ECHO_RESULT_VALUE VARCHAR)")
+    q("INSERT INTO FACT_ECHO_RESULTS VALUES (1, 2, '55-60'), (1, 1, '52'), (1, 3, '40'), (1, 4, '120'), (3, 2, '0.35')")
+    t = me.build_lvef_table(eng, mod, log=lambda s: None).sort_values("clinic_number").reset_index(drop=True)
+    assert t.lvef.tolist() == [52.0, 35.0] and t.lvef_method.tolist() == ["biplane", "visual"]
+    assert t.person_id.astype(int).tolist() == [1, 2] and t.n_values.tolist() == [2, 1]
+
+
+def test_birth_year_1800_is_unknown_everywhere():
+    """MCP OMOP ETL: a redacted birth year is stored as 1800; ages must treat it as unknown (never 'adult')."""
+    import re as _re
+    root = Path(__file__).resolve().parents[1]
+    files = list((root / "config" / "cohorts").glob("*.yaml")) + list(root.glob("*_training/labels.sql")) + \
+        [root / "cardioai_mcp" / "extractors.py"]
+    for f in files:
+        txt = f.read_text()
+        assert not _re.search(r"-\s*p\.year_of_birth", txt), f"{f.name}: birth year 1800 not treated as unknown"

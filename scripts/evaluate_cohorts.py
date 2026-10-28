@@ -34,24 +34,23 @@ def check_contract(c, preds, patient_level: bool = False) -> None:
 
 
 def main():
-    from pyspark.sql import SparkSession
+    from cardioai_mcp.engine import make_engine
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--cohorts", nargs="+", required=True)
     ap.add_argument("--boot", type=int, default=5000, help="bootstrap resamples (protocol: 5000 for the final analysis)")
     ap.add_argument("--cluster-by-site", action="store_true")
+    ap.add_argument("--engine", choices=["bigquery", "spark"], default="bigquery")
     a = ap.parse_args()
-    spark = SparkSession.builder.getOrCreate()
     study = load_study()
+    eng = make_engine(a.engine, study)
     work = study["schemas"]["work"]
 
     def table(name):
-        for full in (f"{work}.{name}", name):
-            try:
-                return spark.table(full).toPandas()
-            except Exception:  # noqa: BLE001
-                continue
-        raise SystemExit(f"table {name} not found in {work} or as a temp view")
+        try:
+            return eng.read_table(name)
+        except KeyError:
+            raise SystemExit(f"table {name} not found in {work}")
 
     for key in a.cohorts:
         c = load_cohort(key)

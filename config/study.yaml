@@ -9,11 +9,16 @@ seed: 20261012
 # --- Where the data lives inside the MCP workspace -------------------------
 # Confirm these names in the MCP Schema Visualizer at onboarding.  Spark SQL
 # accepts catalog.schema.table; leave catalog empty if not used.
+# MCP provisions the data in BigQuery and the workspace queries it with the BigQuery client (MCP, 2026-10-28), so
+# each schema is a BigQuery dataset: "`<project>`.<dataset>" (backticks because MCP project ids contain hyphens).
+# CONFIRM the project and dataset names in the workspace (scripts/discover_schema.py lists them). The MCP OMOP ETL
+# guide names the warehouse dataset `mcp` (FACT_*, DIM_*) and the OMOP delivery dataset OMOP_v6_1.
+bq_project: null       # project the BigQuery client bills queries to (null = the workspace default)
 schemas:
-  cdm: omop            # OMOP CDM clinical tables (person, measurement, ...)
-  vocab: omop          # OMOP vocabulary tables (concept, concept_ancestor, ...)
-  work: cardioai_work  # project scratch schema (write access) — or temp views only
-  modality: modality   # MCP-specific ECG waveform / echo DICOM index tables (see modality_tables.yaml)
+  cdm: omop            # OMOP CDM clinical tables (person, measurement, ...)          e.g. "`<project>`.OMOP_v6_1"
+  vocab: omop          # OMOP vocabulary tables (concept, concept_ancestor, ...)     usually the same dataset as cdm
+  work: cardioai_work  # project dataset with write access (MCP confirmed 2026-10-28) e.g. "`<project>`.cardioai_work"
+  modality: modality   # MCP FACT_ / DIM_ tables (ECG waveforms, echo, radiology)     e.g. "`<project>`.mcp"
 
 # --- Study calendar --------------------------------------------------------
 # Retrospective window. Index events must fall inside; follow-up uses data

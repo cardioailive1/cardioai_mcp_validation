@@ -35,6 +35,7 @@ class CohortBuilder:
 
     def _cohort_macros(self) -> dict:
         m = {k: v for k, v in self.c.raw.get("calendar", {}).items()}
+        m.update(self.c.raw.get("macros") or {})       # cohort-level SQL pieces, e.g. echo lvef_rows
         return m
 
     def candidates(self) -> None:

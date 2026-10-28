@@ -298,13 +298,13 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
     st = load_study()
     st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
     mod = copy.deepcopy(st["modality"])
-    mod["ecg"]["person_map"]["table"] = "{modality}.PERSON_MAP"
+    assert mod["ecg"]["person_map"]["table"] == "{cdm}.person"      # MCP 2026-10-28: person_source_value = clinic number
     con = duckdb.connect()
     con.execute("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_MERGED_FLAG VARCHAR)")
     # clinic number C1 has two record-system keys (10, 11): its ECGs and waveforms may sit under either
     con.execute("INSERT INTO DIM_PATIENT VALUES (10, 'C1', 'N'), (11, 'C1', 'Y'), (20, 'C2', 'N')")
-    con.execute("CREATE TABLE PERSON_MAP (PATIENT_CLINIC_NUMBER VARCHAR, person_id BIGINT)")
-    con.execute("INSERT INTO PERSON_MAP VALUES ('C1', 1), ('C2', 2)")
+    con.execute("CREATE TABLE person (person_id BIGINT, person_source_value VARCHAR)")
+    con.execute("INSERT INTO person VALUES (1, 'C1'), (2, 'C2')")
     con.execute("CREATE TABLE FACT_ECG (ECG_FPK BIGINT, PATIENT_DK BIGINT, ECG_DTM TIMESTAMP)")
     con.execute("""INSERT INTO FACT_ECG VALUES (100, 10, TIMESTAMP '2019-03-01 08:00:00'), (101, 11, TIMESTAMP '2019-05-01 09:30:00'),
                    (200, 20, TIMESTAMP '2020-01-02 10:00:00'), (201, 20, TIMESTAMP '2020-02-02 10:00:00')""")
@@ -339,3 +339,18 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
     assert read_any(got["101"])[1] == 250
     assert "several Rhythm rows" in err["200"] and "no Rhythm rows" in err["201"]
     assert abs(decode_lead("AQA%3D")[0] - 4.88) < 1e-9              # URL-encoded '=' padding
+
+
+def test_clinic_number_used_directly_when_tables_carry_it():
+    """MCP OMOP ETL guide: PATIENT_DK is deprecated in some MCP tables; a configured clinic_number skips DIM_PATIENT."""
+    import copy
+    from cardioai_mcp.config import load_study
+    from ecg_training.mcp_waveforms import ecg_index_sql, waveform_rows_sql
+    mod = copy.deepcopy(load_study()["modality"])
+    assert "DIM_PATIENT" in ecg_index_sql(mod) and "person_source_value" in ecg_index_sql(mod)
+    mod["ecg"]["fact_ecg"]["columns"]["clinic_number"] = "PATIENT_CLINIC_NUMBER"
+    mod["ecg"]["waveform_columns"]["clinic_number"] = "PATIENT_CLINIC_NUMBER"
+    mod["ecg"]["sample_rate"]["clinic_number"] = "PATIENT_CLINIC_NUMBER"
+    for sql in (ecg_index_sql(mod), waveform_rows_sql(mod, ["C1"])):
+        assert "DIM_PATIENT" not in sql and "PATIENT_CLINIC_NUMBER" in sql
+    assert "r.PATIENT_CLINIC_NUMBER = w.PATIENT_CLINIC_NUMBER" in waveform_rows_sql(mod, ["C1"])

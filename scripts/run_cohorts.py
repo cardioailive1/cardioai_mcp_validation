@@ -1,7 +1,7 @@
 """Build the Phase 2 validation cohorts.
 
-Inside a Mayo Clinic Platform workspace (Spark session available):
-    python scripts/run_cohorts.py --engine spark --cohorts echo ecg cad risk longitudinal
+Inside the Mayo Clinic Platform workspace (BigQuery client):
+    python scripts/run_cohorts.py --cohorts echo ecg cad risk longitudinal --save-tables
 
 Offline smoke test on synthetic OMOP (DuckDB):
     python scripts/run_cohorts.py --engine duckdb-synthetic
@@ -21,19 +21,16 @@ from cardioai_mcp.pipeline import build_all  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", choices=["spark", "duckdb-synthetic"], default="spark")
+    ap.add_argument("--engine", choices=["bigquery", "spark", "duckdb-synthetic"], default="bigquery")
     ap.add_argument("--cohorts", nargs="+", default=COHORTS, choices=COHORTS + EXTRA_COHORTS)
     ap.add_argument("--export-dir", default=None)
-    ap.add_argument("--save-tables", action="store_true", help="persist analytic + series tables to the work schema (spark)")
+    ap.add_argument("--save-tables", action="store_true", help="persist analytic + series tables to the work schema")
     a = ap.parse_args()
     study = load_study()
-    if a.engine == "spark":
-        from pyspark.sql import SparkSession
+    if a.engine in ("bigquery", "spark"):
+        from cardioai_mcp.engine import make_engine
 
-        from cardioai_mcp.engine import SparkEngine
-
-        spark = SparkSession.builder.getOrCreate()
-        eng = SparkEngine(spark, study)
+        eng = make_engine(a.engine, study)
     else:
         from cardioai_mcp.engine import DuckDBEngine
         from tests.synthetic_omop import build
@@ -46,10 +43,10 @@ def main():
         print(r["attrition"].to_string(index=False))
         comp = r["completeness"]
         print(f"required elements below expected completeness: {int((comp.required & (comp.flag != '')).sum())}")
-        if a.save_tables and a.engine == "spark":
+        if a.save_tables and a.engine != "duckdb-synthetic":
             for v in (f"{k}_analytic", f"{k}_series"):
                 if eng.table_exists(v):
-                    spark.table(v).write.mode("overwrite").saveAsTable(f"{study['schemas']['work']}.{v}")
+                    print(f"saved {eng.save_view(v)}")
 
 
 if __name__ == "__main__":

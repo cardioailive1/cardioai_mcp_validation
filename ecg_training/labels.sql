@@ -15,7 +15,7 @@ WITH e AS (
 )
 SELECT e.*,
        COALESCE(p.care_site_id, -1)                        AS site,
-       YEAR(e.ecg_date) - p.year_of_birth                  AS age,
+       YEAR(e.ecg_date) - NULLIF(p.year_of_birth, 1800)                  AS age,
        p.gender_concept_id,
        CASE WHEN EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence co WHERE co.person_id = e.person_id
               AND DATEDIFF(co.condition_start_date, e.ecg_date) BETWEEN {{win_lo}} AND {{win_hi}}

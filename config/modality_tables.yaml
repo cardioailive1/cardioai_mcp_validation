@@ -50,8 +50,10 @@ ecg:
     patient_dk: PATIENT_DK
     acquisition_ts: ACQUISITION_TS
   dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
-  # PATIENT_CLINIC_NUMBER -> OMOP person_id: still open with MCP (F1). build_ecg_index refuses to run without it.
-  person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
+  # OMOP person_id: person.person_source_value = DIM_PATIENT.PATIENT_CLINIC_NUMBER (Adam Resnick 2026-10-28; MCP
+  # OMOP ETL guide, lk_person / cdm_person). PATIENT_DK is deprecated in some MCP tables (15 Oct 2026 release): if a
+  # table below carries PATIENT_CLINIC_NUMBER, add it as `clinic_number` in its column map and it is used directly.
+  person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}
   fact_ecg:
     table: "{modality}.FACT_ECG"
     columns:                             # FACT_ECG column for each ecg_index column; null = not available
@@ -110,7 +112,9 @@ echo:
       note: ECHO_NOTE
       datetime: ECHO_TEST_DTM
       link: ACCESSION_NBR                      # key shared with the inventory (accession number or study UID)
-      patient_dk: PATIENT_DK
+      patient_dk: PATIENT_DK                   # add clinic_number: PATIENT_CLINIC_NUMBER if the table carries it
+      performed_test_dk: ECHO_PERFORMED_TEST_DK   # -> DIM_ECHO_TEST (MCP 2026-10-28)
+      test_key: ECHO_TEST_FPK                  # FACT_ECHO_RESULTS rows -> their echo test (CONFIRM)
     inventory_table: FACT_RADIOLOGY_DICOM_INVENTORY
     # MCP (Adam Resnick, 2026-10-21): no shared key between FACT_ECHO_TEST and the DICOM studies; link by
     # PATIENT_CLINIC_NUMBER and date (dates are shifted equally across a patient's record). Patient-days with
@@ -120,8 +124,30 @@ echo:
       study_date: {table: "{modality}.FACT_IMAGINGSTUDY", column: STUDY_DTM}   # CONFIRM the study date column
     dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER}
     inventory_link: DICOM_ACCESSION_NUMBER     # accession mode only: inventory column matching echo_test_columns.link
-    person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
+    person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}   # MCP 2026-10-28
     deid_ok: [Ready, Available]
+    # Same-day studies (MCP 2026-10-28): FACT_ECHO_TEST.ECHO_PERFORMED_TEST_DK -> DIM_ECHO_TEST names the exact
+    # ordered test; the inventory STUDY_DESCRIPTION names the imaged study. Both sides are kept to transthoracic
+    # echo before the date link, so a same-day TEE, stress echo or non-cardiac ultrasound no longer drops the day.
+    test_type: {table: "{modality}.DIM_ECHO_TEST", key: ECHO_TEST_DK, description: ECHO_TEST_DESCRIPTION}   # CONFIRM key / description names
+    filters:                                   # PROPOSED: check against the real descriptions (counts in the workspace)
+      test_keep_regex: '(?i)(transthoracic|\btte\b|echocardiogra|\becho\b)'
+      study_keep_regex: '(?i)(echo|transthoracic|\btte\b)'
+      exclude_regex: '(?i)(transesophageal|trans-esophageal|\btee\b|stress|dobutamine|exercise|fetal|intracardiac|\bice\b|vascular|carotid|venous|abdom|renal|thyroid|obstetric)'
+    # LVEF (MCP 2026-10-28): FACT_ECHO_RESULTS.ECHO_RESULT_VALUE, result type named in DIM_ECHO_TEST_RESULT_TYPE.
+    # Not in OMOP (the ETL loads no echo tables): mcp_echo.build_lvef_table -> {work}.echo_lvef, read by the echo cohort.
+    results:
+      table: "{modality}.FACT_ECHO_RESULTS"
+      columns: {test_key: ECHO_TEST_FPK, result_type_key: ECHO_TEST_RESULT_TYPE_DK, value: ECHO_RESULT_VALUE}   # CONFIRM key names
+      result_type: {table: "{modality}.DIM_ECHO_TEST_RESULT_TYPE", key: ECHO_TEST_RESULT_TYPE_DK,                # CONFIRM key name
+                    name: ECHO_TEST_RESULT_NAME, description: ECHO_TEST_RESULT_DESCRIPTION}
+      lvef_regex: '(?i)(\blvef\b|\blv ef\b|left ventric\w* ejection fraction|\bejection fraction\b|\bef\b)'
+      exclude_regex: '(?i)(\brv\b|right ventric|\bla\b|left atri|fractional (shortening|area)|strain|\bgls\b|stress|peak|post|exercise)'
+      method_priority:                         # PROPOSED (clinical lead confirms): one LVEF per study, first match wins
+        - {method: biplane, regex: '(?i)(biplane|bi-plane|simpson|method of discs|\bmod\b|\bbp\b)'}
+        - {method: 3d, regex: '(?i)(\b3[- ]?d\b|three[- ]dimensional)'}
+        - {method: single_plane, regex: '(?i)(a4c|a2c|4[- ]?ch|2[- ]?ch|single[- ]plane|monoplane)'}
+        - {method: visual, regex: '(?i)(visual|estimat|eyeball|qualitative)'}
   wm_requirements:        # wall-motion model input spec (echo_wm_training runtime 1.0.0)
     views: [A4C, A2C, A3C]   # at least one; all three for all 17 AHA segments
     mode: greyscale B-mode
@@ -191,9 +217,9 @@ mri:
     cmr_cpt: ["75557", "75559", "75561", "75563", "75565"]
     cmr_description_regex: '(?i)(cardiac|heart|myocard|cmr|mr[ ]?heart|mri[ ]?heart)'
     final_report_status_regex: '(?i)(final|verified|signed|complete)'   # SERVICE_RESULT_STATUS values to keep (CONFIRM)
-    # Patient key: the inventory and FACT_IMAGINGSTUDY carry PATIENT_CLINIC_NUMBER; OMOP uses person_id.
-    # CONFIRM with MCP how they map (a crosswalk table, or the same value) and fill this in:
-    person_map: {table: null, clinic_number_column: PATIENT_CLINIC_NUMBER, person_id_column: person_id}
+    # Patient key: the inventory and FACT_IMAGINGSTUDY carry PATIENT_CLINIC_NUMBER; OMOP person.person_source_value
+    # holds the same clinic number (Adam Resnick 2026-10-28):
+    person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}
     deid_ok: [Ready, Available]
     # De-identification request (MCP TSM, 2026-10-15): a CSV of the selected studies with STUDY_INSTANCE_UID,
     # PATIENT_DK, MODALITY, STMO_NAME_IN_ADL (mcp_imaging.deid_request). PATIENT_DK is read from this column

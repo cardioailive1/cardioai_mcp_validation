@@ -953,11 +953,10 @@ def main(argv=None):
         print(r["results"][cols].to_string(index=False))
     elif a.cmd == "troponin":
         from cardioai_mcp.config import load_study
-        from cardioai_mcp.engine import SparkEngine
+        from cardioai_mcp.engine import make_engine
         from ecg_training.dataset import load_config
-        from pyspark.sql import SparkSession
         study = load_study()
-        eng = SparkEngine(SparkSession.builder.getOrCreate(), study)
+        eng = make_engine("bigquery", study)
         m = _read_table(a.manifest)
         smp = troponin_sample(m, cfg, a.n)
         rows = eng.query(eng.render(troponin_rows_sql(study["modality"], smp.ecg_id.astype(str)), {}))

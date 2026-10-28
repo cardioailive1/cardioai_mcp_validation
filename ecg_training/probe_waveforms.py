@@ -75,12 +75,12 @@ def probe(engine, modality_cfg: dict, n: int = 5) -> pd.DataFrame:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=5)
+    ap.add_argument("--engine", choices=["bigquery", "spark"], default="bigquery")
     a = ap.parse_args()
     from cardioai_mcp.config import load_study
-    from cardioai_mcp.engine import SparkEngine
-    from pyspark.sql import SparkSession
+    from cardioai_mcp.engine import make_engine
     study = load_study()
-    print(probe(SparkEngine(SparkSession.builder.getOrCreate(), study), study["modality"], a.n).to_string())
+    print(probe(make_engine(a.engine, study), study["modality"], a.n).to_string())
 
 
 if __name__ == "__main__":
