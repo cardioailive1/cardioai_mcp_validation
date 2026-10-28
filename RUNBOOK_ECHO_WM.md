@@ -32,7 +32,7 @@ The model is trained **only on Mayo data** inside the MCP workspace, like the EC
 | Expert LVEF | MCP (2026-10-28): `FACT_ECHO_RESULTS.ECHO_RESULT_VALUE`, type in `DIM_ECHO_TEST_RESULT_TYPE` (`ECHO_TEST_RESULT_NAME` / `_DESCRIPTION`). The OMOP ETL loads no echo tables, so this is the LVEF source: `echo.mcp.results` (confirm the key names; the method order biplane > 3-D > single-plane > visual is proposed for the clinical lead) |
 | Clinical lead | Signs the sign-off sheet "Echo Wall-Motion Agent: Clinical Lead Sign-off": the echo rule sheet (LABEL_AUDIT.md §1.3), the A3C apical slots (proposed: not scored) and the AHA territory map (`runtime/segments.py`), the red-flag cut-offs (`config.yaml` → `red_flags`) and the Phase 2 goals (`config/cohorts/echo.yaml`). The code already holds the proposals; amendments are applied before training |
 
-Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data").
+Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md, "Querying the data").
 
 ## 2. Steps
 
@@ -41,20 +41,20 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
    ```python
    from echo_wm_training import mcp_echo as me
    lvef = me.build_lvef_table(eng, study["modality"])        # one LVEF per patient and echo date, with its method
-   spark.createDataFrame(lvef).write.mode("overwrite").saveAsTable("cardioai_work.echo_lvef")
+   eng.write_table(lvef, "echo_lvef")
    # config/cohorts/echo.yaml -> macros.lvef_rows: switch to the {{work}}.echo_lvef form
    ```
    Then:
    ```bash
-   python scripts/run_cohorts.py --engine spark --cohorts echo --save-tables
+   python scripts/run_cohorts.py --cohorts echo --save-tables
    ```
    Snapshot the analytic table as `cardioai_work.echo_analytic_locked`.
 
 2. **Find echo studies and build the de-identification request.**
    ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
    from echo_wm_training import mcp_echo as me
-   study = load_study(); eng = SparkEngine(spark, study)
+   study = load_study(); eng = make_engine("bigquery", study)
    studies = me.find_echo_studies(eng, study["modality"])           # echo reports joined to their DICOM study
    req, report = me.build_request(studies)                           # de-identifiable + a wall-motion statement
    me.deid_request(studies, req).to_csv("/workspace/echo/deid_request.csv", index=False); report
@@ -64,12 +64,12 @@ Queries use Spark SQL through `SparkEngine` (RUNBOOK_MRI.md, "Querying the data"
 3. **After delivery, build the tables.**
    ```python
    t = me.build_study_table(studies, "/workspace/echo/dicom")
-   spark.createDataFrame(t).write.saveAsTable("cardioai_work.echo_wm_study")
+   eng.write_table(t, "echo_wm_study")
    ref = me.reference_table(studies)                                 # report-derived reference (Phase 2 and audit)
-   spark.createDataFrame(ref).write.saveAsTable("cardioai_work.echo_wm_reference")
+   eng.write_table(ref, "echo_wm_reference")
    from echo_wm_training.dataset import load_config, build_manifest, build_clip_table
    cfg = load_config()
-   excl = spark.table("cardioai_work.echo_analytic_locked").select("person_id").toPandas().person_id
+   excl = eng.read_table("echo_analytic_locked").person_id
    m = build_manifest(eng, study, cfg, study["modality"], exclude_persons=excl)
    m.to_parquet("/workspace/echo/manifest.parquet")
    clips = build_clip_table(m)                                       # every 2-D greyscale cine (colour, Doppler, M-mode skipped)

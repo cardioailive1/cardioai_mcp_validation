@@ -27,30 +27,32 @@ The model is trained **only on Mayo data** inside the MCP workspace. No public d
 | Reader tools | 3D Slicer and ITK-SNAP are already installed |
 | Workspace check | `python -m annotation.check_workspace` |
 
-### Querying the data (Spark SQL)
+### Querying the data (BigQuery)
 
-Mayo's data on MCP sit in Apache Spark. Every query in this repository is Spark SQL, run through the `spark` session that JupyterLab provides.
-- **Templates:** the SQL is written with placeholders such as `{{cdm}}` (OMOP schema), `{{modality}}` and `{{cs:stemi}}` (a concept set).
-- **Filling them in:** `SparkEngine` replaces the placeholders with the real names from `config/study.yaml` and `config/modality_tables.yaml`, runs the query on Spark, and returns a pandas table.
+MCP provisions Mayo's data in BigQuery, and the workspace queries it with the BigQuery client (MCP, 2026-10-28). The SQL in this repository is written once, in Spark SQL, and `BigQueryEngine` translates every statement to BigQuery SQL (sqlglot) before running it.
+- **Templates:** the SQL is written with placeholders such as `{{cdm}}` (OMOP dataset), `{{modality}}` and `{{cs:stemi}}` (a concept set).
+- **Filling them in:** the engine replaces the placeholders with the dataset names in `config/study.yaml` and `config/modality_tables.yaml`, runs the query in one BigQuery session, and returns a pandas table. Intermediate steps are session temp tables.
 - **When names change:** edit the config, not the SQL.
 
 First time in the workspace:
-```python
-spark.sql("SHOW DATABASES").show(100, False)                 # find the OMOP and FACT_ schemas
-spark.sql("SHOW TABLES IN <schema>").show(200, False)
-spark.sql("SELECT COUNT(*) FROM <schema>.FACT_IMAGINGSTUDY WHERE MODALITY_1 = 'MR'").show()   # one test query
-# put the schema names into config/study.yaml (schemas: cdm, vocab, modality, work), then:
-from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
-study = load_study(); eng = SparkEngine(spark, study)
-eng.query("SELECT COUNT(*) AS n FROM {{cdm}}.person")         # placeholders filled from the config
+```bash
+python scripts/discover_schema.py --out exports/schema_inventory   # datasets, tables, columns and their types
 ```
-Model training does not use Spark: Spark builds the training list and pulls the data, then PyTorch trains on the GPU from files.
+```python
+# put the dataset names into config/study.yaml (schemas: cdm, vocab, modality, work as "`<project>`.<dataset>"), then:
+from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+study = load_study(); eng = make_engine("bigquery", study)
+eng.query("SELECT COUNT(*) AS n FROM {{cdm}}.person")         # placeholders filled from the config
+eng.query("SELECT COUNT(*) AS n FROM {{modality}}.FACT_IMAGINGSTUDY WHERE MODALITY_1 = 'MR'")   # one test query
+```
+Saving and reading tables: `eng.write_table(df, "name")` writes `{work}.name`; `eng.read_table("name")` reads it back.
+Model training does not use BigQuery: the queries build the training list and pull the data, then PyTorch trains on the GPU from files.
 
 ## 2. Steps
 
 1. **Lock the Phase 2 MRI cohort first.** The clinical lead confirms the proposed goals and the red-flag cut-offs (`mri_training/config.yaml` → `red_flags`) beforehand.
    ```bash
-   python scripts/run_cohorts.py --engine spark --cohorts mri --save-tables
+   python scripts/run_cohorts.py --cohorts mri --save-tables
    ```
    Snapshot the analytic table as `cardioai_work.mri_analytic_locked`.
 
@@ -61,9 +63,9 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 
    Then run:
    ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
    from mri_training import mcp_imaging as mi
-   study = load_study(); eng = SparkEngine(spark, study)
+   study = load_study(); eng = make_engine("bigquery", study)
    studies = mi.find_cmr_studies(eng, study["modality"])     # MR cardiac studies with a final report
    series = mi.list_series(eng, study["modality"], studies)
    req, report = mi.build_request(series)                     # short-axis LGE + cine series only
@@ -80,10 +82,10 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 4. **After delivery, build the study table and the manifest.**
    ```python
    cmr = mi.build_study_table(studies, "/workspace/mri/dicom")      # one row per delivered study folder
-   spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")
+   eng.write_table(cmr, "cmr_study")
    from mri_training.dataset import load_config, build_manifest
    cfg = load_config()
-   excl = spark.table("cardioai_work.mri_analytic_locked").select("person_id").toPandas().person_id
+   excl = eng.read_table("mri_analytic_locked").person_id
    m = build_manifest(eng, study, cfg, study["modality"], exclude_persons=excl)
    m.to_parquet("/workspace/mri/manifest.parquet")
    ```

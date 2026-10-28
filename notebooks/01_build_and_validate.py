@@ -2,7 +2,7 @@
 # # CardioAI Phase 2 — cohort build & agent validation on Mayo Clinic Platform
 # Study **CA-AGENTS-VAL-PHASE2** · 5 agent cohorts (Echo, ECG, CAD, Risk, Longitudinal)
 #
-# Run inside an MCP Discover **JupyterLab workspace** (Spark session available).
+# Run inside an MCP Discover **JupyterLab workspace** (data in BigQuery, queried with the BigQuery client).
 # Open as a notebook with Jupytext, or run the cells in order.
 #
 # 0. Onboarding: `python scripts/discover_schema.py` → fill `config/modality_tables.yaml`, `config/study.yaml`
@@ -14,14 +14,12 @@
 # %%
 import sys, os
 sys.path.insert(0, os.path.abspath(".."))
-from pyspark.sql import SparkSession
 from cardioai_mcp.config import load_study, load_cohort
-from cardioai_mcp.engine import SparkEngine
+from cardioai_mcp.engine import make_engine
 from cardioai_mcp.pipeline import build_all
 
-spark = SparkSession.builder.getOrCreate()
 study = load_study()
-eng = SparkEngine(spark, study)
+eng = make_engine("bigquery", study)
 
 # %% Build all five cohorts
 res = build_all(eng, ["echo", "ecg", "cad", "risk", "longitudinal"])
@@ -44,12 +42,15 @@ from cardioai_mcp.evaluate import evaluate
 from cardioai_mcp.qc import export
 for k, r in res.items():
     c = r["cohort"]
-    preds = spark.table(c.predictions["table"]).toPandas() if eng.table_exists(c.predictions["table"]) else None
+    try:
+        preds = eng.read_table(c.predictions["table"])
+    except KeyError:
+        preds = None
     daily = series = None
     if k == "longitudinal" and preds is not None:
         daily = preds
-        preds = spark.table("longitudinal_predictions_patient").toPandas()
-        series = spark.table("longitudinal_series").toPandas()
+        preds = eng.read_table("longitudinal_predictions_patient")
+        series = eng.read_table("longitudinal_series")
     ep = evaluate(c, r["analytic"], preds, series=series, daily=daily, cluster_by_site=False)
     export(c, "endpoints", ep, study["export_dir"])
     display(ep)  # noqa: F821

@@ -113,7 +113,7 @@ def x_measurement(el, idx, study):
         "nearest": "ABS(DATEDIFF(m.measurement_date, i.index_date)), m.measurement_date DESC",
         "latest": "m.measurement_date DESC",
         "earliest": "m.measurement_date ASC",
-    }[pick]
+    }[pick] + ", m.measurement_id"          # same-day ties: a fixed choice, so a rebuild gives the same values
     return (
         f"SELECT person_id, index_date, value FROM (SELECT i.person_id, i.index_date, {v} AS value, "
         f"ROW_NUMBER() OVER (PARTITION BY i.person_id, i.index_date ORDER BY {order}) AS rn {base}) t WHERE rn = 1"
@@ -261,7 +261,7 @@ def x_observation_value(el, idx, study):
         SELECT i.person_id, i.index_date,
                COALESCE(vc.concept_name, ob.value_as_string, CAST(ob.value_as_number AS STRING)) AS value,
                ROW_NUMBER() OVER (PARTITION BY i.person_id, i.index_date
-                                  ORDER BY ABS(DATEDIFF(ob.observation_date, i.index_date)), ob.observation_date DESC) AS rn
+                                  ORDER BY ABS(DATEDIFF(ob.observation_date, i.index_date)), ob.observation_date DESC, ob.observation_id) AS rn
         FROM {idx} i JOIN {{{{cdm}}}}.observation ob ON ob.person_id = i.person_id
         LEFT JOIN {{{{vocab}}}}.concept vc ON vc.concept_id = ob.value_as_concept_id AND ob.value_as_concept_id <> 0
         WHERE (ob.observation_concept_id IN {{{{cs:{s['set']}}}}} OR ob.observation_source_concept_id IN {{{{cs:{s['set']}}}}})
@@ -291,7 +291,7 @@ def x_note_regex(el, idx, study):
     SELECT person_id, index_date, {outer} AS value FROM (
         SELECT i.person_id, i.index_date, {val} AS value,
                ROW_NUMBER() OVER (PARTITION BY i.person_id, i.index_date
-                                  ORDER BY ABS(DATEDIFF(n.note_date, i.index_date)), n.note_date DESC) AS rn
+                                  ORDER BY ABS(DATEDIFF(n.note_date, i.index_date)), n.note_date DESC, n.note_id) AS rn
         FROM {idx} i JOIN {{{{cdm}}}}.note n ON n.person_id = i.person_id
         WHERE {_win('n.note_date', w)}{_note_title(s, study)} AND n.note_text RLIKE '{pat}'
     ) t WHERE rn = 1 AND value IS NOT NULL AND value <> ''
@@ -307,7 +307,7 @@ def x_note_text(el, idx, study):
     SELECT person_id, index_date, value FROM (
         SELECT i.person_id, i.index_date, LOWER(SUBSTRING(n.note_text, 1, {n})) AS value,
                ROW_NUMBER() OVER (PARTITION BY i.person_id, i.index_date
-                                  ORDER BY ABS(DATEDIFF(n.note_date, i.index_date)), n.note_date DESC) AS rn
+                                  ORDER BY ABS(DATEDIFF(n.note_date, i.index_date)), n.note_date DESC, n.note_id) AS rn
         FROM {idx} i JOIN {{{{cdm}}}}.note n ON n.person_id = i.person_id
         WHERE {_win('n.note_date', w)}{_note_title(s, study)}
     ) t WHERE rn = 1

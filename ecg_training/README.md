@@ -18,8 +18,9 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
    - Build the ECG index once and save it as `ecg.table`, then set `enabled: true`:
      ```python
      from ecg_training.mcp_waveforms import build_ecg_index
-     idx = build_ecg_index(SparkEngine(spark, study), study["modality"])
-     spark.createDataFrame(idx).write.mode("overwrite").saveAsTable("cardioai_work.ecg_index")
+     eng = make_engine("bigquery", study)
+     idx = build_ecg_index(eng, study["modality"])
+     eng.write_table(idx, "ecg_index")
      ```
    - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Acquisitions with more than one Rhythm row for a lead are skipped with a reason until MCP says how such rows relate (F2).
 3. **Troponin.** Mayo's troponin is **Troponin T, 5th generation**: [TRPS](https://www.testcatalog.org/show/TRPS), reporting name "Troponin T, 5th gen, P", LOINC 67151-1, in ng/L.
@@ -27,12 +28,12 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
    - For older troponin rows in other units, look up the assay by its reporting name on [mayocliniclabs.com](https://www.mayocliniclabs.com/search#q=troponin), under the "Clinical and Interpretive" and "Fees & Codes" tabs. Then confirm `ng_per_ml`.
 4. **Build the training manifest, then decode the waveforms once:**
    ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import SparkEngine
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
    from ecg_training.dataset import load_config, build_manifest, summary
    from ecg_training.extract_waveforms import extract_waveforms
    study, cfg = load_study(), load_config()
-   eng = SparkEngine(spark, study)
-   excl = spark.table("cardioai_work.ecg_analytic_locked").select("person_id").toPandas().person_id
+   eng = make_engine("bigquery", study)
+   excl = eng.read_table("ecg_analytic_locked").person_id
    m = build_manifest(eng, study, cfg, study["modality"], exclude_persons=excl)
    m = extract_waveforms(eng, m, study["modality"], "/workspace/ecg/waveforms")   # Base64 -> one .npz per ECG
    summary(m, cfg["heads"]); m.to_parquet("/workspace/ecg/manifest.parquet")
