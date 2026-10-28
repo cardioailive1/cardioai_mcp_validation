@@ -49,7 +49,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
    Snapshot the analytic table as `cardioai_work.ecg_analytic_locked`. Its window starts on 2021-01-01 (`splits.test_start`), and training excludes its patients.
 
 2. **Map and probe the MCP ECG tables.** MCP (2026-10-21): `FACT_ECG_WAVEFORM` holds one row per lead; use `WAVEFORM_TYPE = 'Rhythm'` (full 10 s), leads I, II, V1–V6; each value is URL-encoded Base64 → signed 16-bit little-endian counts × 4.88 = µV; the sample rate is `ECGSAMPLEBASE` in `FACT_ECG_WAVEFORM_RESTING_MEASUREMENT`; waveforms link to `FACT_ECG` through `DIM_PATIENT` (clinic number) and `ACQUISITION_TS = ECG_DTM`. This is `waveform_storage: base64_per_lead` in `config/modality_tables.yaml` → `ecg`, already filled in.
-   - Still to fill once MCP answers: `person_map` (clinic number → OMOP `person_id`, open item F1) and the over-read columns in `fact_ecg.columns` (F3). Confirm the resting-measurement join keys.
+   - `person_map` is filled in: OMOP `person.person_source_value` holds `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28). Still to fill once MCP answers: the over-read columns in `fact_ecg.columns` (F3). Confirm the resting-measurement join keys. If `FACT_ECG` or `FACT_ECG_WAVEFORM` carries `PATIENT_CLINIC_NUMBER` (MCP is retiring `PATIENT_DK` in some tables), add it as `clinic_number` in that table's column map: it is then used directly.
    - Build the ECG index once and save it as `ecg.table`, then set `enabled: true`:
      ```python
      from ecg_training.mcp_waveforms import build_ecg_index

@@ -73,7 +73,7 @@ def x_index_col(el, idx, study):
 def x_person(el, idx, study):
     field = el.src["field"]
     if field == "age":
-        expr = "YEAR(i.index_date) - p.year_of_birth"
+        expr = "YEAR(i.index_date) - NULLIF(p.year_of_birth, 1800)"
     elif field == "gender":
         expr = "CASE WHEN p.gender_concept_id = 8507 THEN 'Male' WHEN p.gender_concept_id = 8532 THEN 'Female' ELSE NULL END"
     elif field == "race":

@@ -43,7 +43,7 @@ index:
       FROM cmr e JOIN {{cdm}}.person p ON p.person_id = e.person_id
       LEFT JOIN {{cdm}}.visit_occurrence v ON v.visit_occurrence_id = e.visit_occurrence_id
       WHERE e.index_date BETWEEN CAST('{{index_start_mri}}' AS DATE) AND CAST('{{index_end}}' AS DATE)
-        AND YEAR(e.index_date) - p.year_of_birth >= {{min_age}}
+        AND YEAR(e.index_date) - NULLIF(p.year_of_birth, 1800) >= {{min_age}}
       GROUP BY e.person_id, e.index_date
     ),
     dx AS (   -- MI diagnosis in the 30 days before the CMR (enrichment strata only, not the reference)

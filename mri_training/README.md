@@ -54,7 +54,7 @@ No public dataset or outside pretrained weights are used: `use_public_datasets: 
    - **Before running, confirm:**
      - the schema of the FACT tables (`mri.mcp.schema`);
      - the final-report status values;
-     - how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id` (`mri.mcp.person_map`).
+     - `mri.mcp.person_map` is filled in: OMOP `person.person_source_value` = `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28).
    - Check one delivered study with `mri_training.io.read_study_path`.
 3. **Build the manifest:**
    ```python

@@ -51,10 +51,11 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
     c = _cfg(modality_cfg)
     cpt = ", ".join(_q(x) for x in c["cmr_cpt"])
     pm = c.get("person_map") or {}
-    if pm.get("table"):                       # crosswalk clinic number -> OMOP person_id (CONFIRM with MCP)
+    if pm.get("table"):                       # OMOP person: person_source_value = PATIENT_CLINIC_NUMBER (MCP 2026-10-28)
         person = f"pm.{pm['person_id_column']}"
         pm_table = _macro(pm["table"])
-        pjoin = f"LEFT JOIN {pm_table} pm ON pm.{pm['clinic_number_column']} = s.PATIENT_CLINIC_NUMBER"
+        pjoin = (f"LEFT JOIN {pm_table} pm ON CAST(pm.{pm['clinic_number_column']} AS STRING) "
+                 f"= CAST(s.PATIENT_CLINIC_NUMBER AS STRING)")
     else:
         person, pjoin = "s.PATIENT_CLINIC_NUMBER", ""
     return f"""

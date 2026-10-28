@@ -12,6 +12,6 @@ WITH s AS (
 )
 SELECT s.*,
        COALESCE(p.care_site_id, -1)                   AS site,
-       YEAR(s.study_date) - p.year_of_birth           AS age,
+       YEAR(s.study_date) - NULLIF(p.year_of_birth, 1800)           AS age,
        p.gender_concept_id
 FROM s JOIN {{cdm}}.person p ON p.person_id = s.person_id

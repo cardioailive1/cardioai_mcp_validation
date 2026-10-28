@@ -21,6 +21,17 @@ expected: {total_elements: 27, required: 19, avg_completeness: 86.6}
 
 calendar: {}
 
+# Expert LVEF (the reference standard). MCP (Adam Resnick, 2026-10-28): echo LVEF is in FACT_ECHO_RESULTS
+# (ECHO_RESULT_VALUE, type named in DIM_ECHO_TEST_RESULT_TYPE). The MCP OMOP ETL loads no echo tables, so OMOP
+# measurement is expected to hold little or no echo LVEF. Before building this cohort on Mayo data, build
+# {work}.echo_lvef (echo_wm_training.mcp_echo.build_lvef_table) and switch lvef_rows to the second form.
+macros:
+  lvef_rows: >-
+    (SELECT m.person_id, CAST(m.measurement_date AS DATE) AS lvef_date, m.value_as_number AS lvef
+     FROM {{cdm}}.measurement m
+     WHERE m.measurement_concept_id IN {{cs:lvef}} OR m.measurement_source_concept_id IN {{cs:lvef}})
+  # lvef_rows: "(SELECT person_id, CAST(lvef_date AS DATE) AS lvef_date, lvef FROM {{work}}.echo_lvef WHERE person_id IS NOT NULL)"
+
 index:
   description: "adult TTE in study window with a same-day expert LVEF on the echo report"
   one_per_person: earliest
@@ -35,16 +46,15 @@ index:
       LEFT JOIN {{cdm}}.visit_occurrence v ON v.visit_occurrence_id = po.visit_occurrence_id
       WHERE (po.procedure_concept_id IN {{cs:tte}} OR po.procedure_source_concept_id IN {{cs:tte}})
         AND po.procedure_date BETWEEN CAST('{{index_start}}' AS DATE) AND CAST('{{index_end}}' AS DATE)
-        AND YEAR(po.procedure_date) - p.year_of_birth >= {{min_age}}
+        AND YEAR(po.procedure_date) - NULLIF(p.year_of_birth, 1800) >= {{min_age}}
     ),
     ef AS (
-      SELECT t.person_id, t.index_date, m.value_as_number AS lvef_ref,
+      SELECT t.person_id, t.index_date, m.lvef AS lvef_ref,
              ROW_NUMBER() OVER (PARTITION BY t.person_id, t.index_date
-                                ORDER BY ABS(DATEDIFF(m.measurement_date, t.index_date))) AS rn
-      FROM tte t JOIN {{cdm}}.measurement m ON m.person_id = t.person_id
-      WHERE (m.measurement_concept_id IN {{cs:lvef}} OR m.measurement_source_concept_id IN {{cs:lvef}})
-        AND DATEDIFF(m.measurement_date, t.index_date) BETWEEN 0 AND 1
-        AND m.value_as_number BETWEEN 5 AND 90
+                                ORDER BY ABS(DATEDIFF(m.lvef_date, t.index_date))) AS rn
+      FROM tte t JOIN {{lvef_rows}} m ON m.person_id = t.person_id
+      WHERE DATEDIFF(m.lvef_date, t.index_date) BETWEEN 0 AND 1
+        AND m.lvef BETWEEN 5 AND 90
     )
     SELECT t.person_id, t.index_date, MAX(t.care_site_id) AS care_site_id,
            MAX(t.index_visit_concept_id) AS index_visit_concept_id, MAX(ef.lvef_ref) AS lvef_ref

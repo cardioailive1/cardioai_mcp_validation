@@ -25,6 +25,8 @@ def _db():
     st = load_study()
     st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
     con = duckdb.connect()
+    # OMOP person: person_source_value = PATIENT_CLINIC_NUMBER (MCP 2026-10-28)
+    con.execute("CREATE TABLE person AS SELECT * FROM (VALUES (11, 'C1'), (12, 'C2'), (13, 'C3'), (14, 'C4'), (15, 'C5')) v(person_id, person_source_value)")
     con.execute("""CREATE TABLE FACT_IMAGINGSTUDY (PATIENT_CLINIC_NUMBER VARCHAR, STUDY_INSTANCE_UID VARCHAR, STMO_NAME_IN_ADL VARCHAR,
                    MODALITY_1 VARCHAR, MODALITY_2 VARCHAR, PROCEDURE_CODE_TEXT VARCHAR, PROCEDURE_CODE_CODING_CODE VARCHAR,
                    STUDY_DESCRIPTION VARCHAR, NUMBER_OF_SERIES INT, NUMBER_OF_INSTANCES INT)""")
@@ -59,6 +61,7 @@ def test_find_request_and_build_study_table(tmp_path):
     studies = mi.find_cmr_studies(eng, st["modality"])
     assert sorted(studies.study_uid) == ["1.1", "1.2", "1.5"]                     # cardiac + final report only
     assert "infarction" in studies.set_index("study_uid").loc["1.1", "report_text"]
+    assert dict(zip(studies.study_uid, studies.person_id.astype(int))) == {"1.1": 11, "1.2": 12, "1.5": 15}
     series = mi.list_series(eng, st["modality"], studies)
     req, rep = mi.build_request(series)
     assert set(req.study_uid) == {"1.1", "1.2"} and rep["studies_without_lge_or_not_deidentifiable"] == 1

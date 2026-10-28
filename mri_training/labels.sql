@@ -12,7 +12,7 @@ WITH s AS (
 )
 SELECT s.*,
        COALESCE(p.care_site_id, -1)                   AS site,
-       YEAR(s.study_date) - p.year_of_birth           AS age,
+       YEAR(s.study_date) - NULLIF(p.year_of_birth, 1800)           AS age,
        p.gender_concept_id,
        CASE WHEN EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence co WHERE co.person_id = s.person_id
               AND DATEDIFF(s.study_date, co.condition_start_date) BETWEEN 0 AND 30

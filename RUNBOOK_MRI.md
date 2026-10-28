@@ -57,7 +57,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 2. **Find the CMR studies and build the DICOM request.** First fill in `config/modality_tables.yaml` → `mri.mcp`:
    - the schema of the FACT tables;
    - the final-report `SERVICE_RESULT_STATUS` values;
-   - `person_map`: how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id`.
+   - `person_map` is filled in: OMOP `person.person_source_value` holds `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28).
 
    Then run:
    ```python
@@ -187,7 +187,7 @@ Model training does not use Spark: Spark builds the training list and pulls the 
 | Step | Must hold | If not |
 |---|---|---|
 | Cohort lock | Phase 2 cohort snapshotted before any training run | Stop and re-lock |
-| Patient IDs | `person_map` confirmed; no patient in two splits | Stop: splits and STEMI links depend on it |
+| Patient IDs | Every study has an OMOP `person_id` through `person.person_source_value`; no patient in two splits | Stop: splits and STEMI links depend on it |
 | DICOM request | Only SA LGE and cine series; studies without LGE counted | Review the series descriptions |
 | Label audit | Every report label PASS in `audit_results.csv`; no adjudication pending | Fix the rule, rebuild, re-audit on a fresh sample |
 | Pretraining | Card shows only studies before 2020 | Rebuild the manifest |

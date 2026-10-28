@@ -12,11 +12,16 @@ MCP (Adam Resnick and Tommy Stretch, 2026-10-21):
     the sample count (10 s), and inferred from the count (2,500 -> 250 Hz, 5,000 -> 500 Hz) when missing.
   * Link to FACT_ECG: PATIENT_DK -> DIM_PATIENT -> PATIENT_CLINIC_NUMBER (the person-level key across
     medical-record systems), then ACQUISITION_TS = ECG_DTM. ECG_WAVEFORM_FPK does not join to ECG_FPK.
+  * MCP OMOP ETL guide (2026-10-15 release): PATIENT_DK is deprecated in some MCP tables and PATIENT_CLINIC_NUMBER
+    is the patient key. If a table carries PATIENT_CLINIC_NUMBER, name it as `clinic_number` in its column map
+    and it is used directly (no DIM_PATIENT join). OMOP person.person_source_value = PATIENT_CLINIC_NUMBER
+    (Adam Resnick, 2026-10-28), so person_map is the OMOP person table.
 
 Config: config/modality_tables.yaml -> ecg (waveform_storage: base64_per_lead).
 """
 from __future__ import annotations
 
+import re
 from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote
 
@@ -29,7 +34,13 @@ Record = Tuple[np.ndarray, float, List[str], str]
 
 
 def _t(name: str) -> str:
-    return name.replace("{modality}", "{{modality}}").replace("{work}", "{{work}}")
+    """'{modality}.X' / '{work}.X' / '{cdm}.person' -> engine schema macros."""
+    return re.sub(r"(?<!\{)\{(\w+)\}(?!\})", r"{{\1}}", name)
+
+
+def _key(cols: dict) -> Tuple[str, str]:
+    """(kind, column) of a table's patient key: PATIENT_CLINIC_NUMBER when the table has it, else PATIENT_DK."""
+    return ("clinic_number", cols["clinic_number"]) if cols.get("clinic_number") else ("patient_dk", cols["patient_dk"])
 
 
 def _q(v) -> str:
@@ -87,22 +98,28 @@ def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
     e = modality_cfg["ecg"]
     w, d, sr = e["waveform_columns"], e["dim_patient"], e.get("sample_rate") or {}
     ids = ", ".join(_q(c) for c in sorted({str(x) for x in clinic_numbers}))
+    kind, wk = _key(w)
+    if kind == "clinic_number":                       # the waveform table carries the clinic number itself
+        clinic, djoin = f"w.{wk}", ""
+    else:
+        clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = w.{wk}"
     if sr.get("table"):
+        sk = sr.get(kind) or sr.get("patient_dk")
         rate, rjoin = (f"r.{sr['column']}",
-                       f"LEFT JOIN {_t(sr['table'])} r ON r.{sr['patient_dk']} = w.{w['patient_dk']} "
+                       f"LEFT JOIN {_t(sr['table'])} r ON r.{sk} = w.{wk} "
                        f"AND r.{sr['acquisition_ts']} = w.{w['acquisition_ts']}")
     else:
         rate, rjoin = "CAST(NULL AS DOUBLE)", ""
     return f"""
-    SELECT CAST(d.{d['clinic_number']} AS STRING) AS clinic_number,
+    SELECT CAST({clinic} AS STRING) AS clinic_number,
            CAST(w.{w['acquisition_ts']} AS TIMESTAMP) AS acquisition_ts,
            CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform,
            CAST({rate} AS DOUBLE) AS sample_rate
     FROM {_t(e['waveform_table'])} w
-    JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = w.{w['patient_dk']}
+    {djoin}
     {rjoin}
     WHERE w.{w['waveform_type']} = {_q(e.get('waveform_type', 'Rhythm'))}
-      AND CAST(d.{d['clinic_number']} AS STRING) IN ({ids})
+      AND CAST({clinic} AS STRING) IN ({ids})
     """
 
 
@@ -126,13 +143,14 @@ def probe(engine, modality_cfg: dict, n: int = 20) -> pd.DataFrame:
     """Numbers only, for n acquisitions: Rhythm rows per lead, samples, stated rate, seconds, amplitude."""
     e = modality_cfg["ecg"]
     w = e["waveform_columns"]
+    _, wk = _key(w)
     keys = engine.query(engine.render(
-        f"SELECT DISTINCT w.{w['patient_dk']} AS dk, w.{w['acquisition_ts']} AS ts FROM {_t(e['waveform_table'])} w "
+        f"SELECT DISTINCT w.{wk} AS dk, w.{w['acquisition_ts']} AS ts FROM {_t(e['waveform_table'])} w "
         f"WHERE w.{w['waveform_type']} = {_q(e.get('waveform_type', 'Rhythm'))} LIMIT {int(n)}", {}))
     out = []
     for _, k in keys.iterrows():
         sql = (f"SELECT CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform FROM {_t(e['waveform_table'])} w "
-               f"WHERE w.{w['patient_dk']} = {_q(k.dk)} AND w.{w['acquisition_ts']} = CAST({_q(k.ts)} AS TIMESTAMP) "
+               f"WHERE w.{wk} = {_q(k.dk)} AND w.{w['acquisition_ts']} = CAST({_q(k.ts)} AS TIMESTAMP) "
                f"AND w.{w['waveform_type']} = {_q(e.get('waveform_type', 'Rhythm'))}")
         rows = engine.query(engine.render(sql, {}))
         r = {"rows": len(rows), "max_rows_per_lead": int(rows.lead_id.value_counts().max()) if len(rows) else 0,
@@ -155,16 +173,21 @@ INDEX_COLUMNS = ["read_statement", "is_confirmed", "vent_rate", "pr_interval", "
 
 def ecg_index_sql(modality_cfg: dict) -> str:
     """One row per FACT_ECG record with the standard ecg_index columns (config ecg.columns names):
-    OMOP person_id (via DIM_PATIENT and person_map), clinic number, ecg_id, acquisition time, read, measurements.
+    OMOP person_id (person_map: OMOP person, person_source_value = clinic number), clinic number, ecg_id, acquisition time, read, measurements.
     FACT_ECG columns not yet confirmed (null in ecg.fact_ecg.columns) come through as NULL."""
     e = modality_cfg["ecg"]
     f, d, pm, out = e["fact_ecg"], e["dim_patient"], e.get("person_map") or {}, e["columns"]
     fc = f["columns"]
     if not pm.get("table"):
-        raise ValueError("ecg.person_map.table is not set: how PATIENT_CLINIC_NUMBER maps to the OMOP person_id "
-                         "is still open with MCP (open item F1)")
+        raise ValueError("ecg.person_map.table is not set: OMOP person_id comes from person.person_source_value "
+                         "= PATIENT_CLINIC_NUMBER (config/modality_tables.yaml)")
+    kind, fk = _key(fc)
+    if kind == "clinic_number":                       # FACT_ECG carries the clinic number itself
+        clinic, djoin = f"f.{fk}", ""
+    else:
+        clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = f.{fk}"
     sel = [f"CAST(pm.{pm['person_id_column']} AS BIGINT) AS {out['person_id']}",
-           f"CAST(d.{d['clinic_number']} AS STRING) AS {out['clinic_number']}",
+           f"CAST({clinic} AS STRING) AS {out['clinic_number']}",
            f"CAST(f.{fc['ecg_id']} AS STRING) AS {out['ecg_id']}",
            f"CAST(f.{fc['acquisition_datetime']} AS TIMESTAMP) AS {out['acquisition_datetime']}"]
     for k in INDEX_COLUMNS:
@@ -173,8 +196,8 @@ def ecg_index_sql(modality_cfg: dict) -> str:
     return f"""
     SELECT {', '.join(sel)}
     FROM {_t(f['table'])} f
-    JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = f.{fc['patient_dk']}
-    LEFT JOIN {_t(pm['table'])} pm ON CAST(pm.{pm['clinic_number_column']} AS STRING) = CAST(d.{d['clinic_number']} AS STRING)
+    {djoin}
+    LEFT JOIN {_t(pm['table'])} pm ON CAST(pm.{pm['clinic_number_column']} AS STRING) = CAST({clinic} AS STRING)
     """
 
 
