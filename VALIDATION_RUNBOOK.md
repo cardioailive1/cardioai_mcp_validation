@@ -87,6 +87,18 @@ python scripts/sample_size_report.py
 ```
 If Plan C still powers every primary endpoint, keep it. If not, enlarge that cohort in `config/study.yaml → plans.C.sizes`, rerun, and record the change.
 
+## Step 4b: Request the images for de-identification (once; MRI and echo)
+
+MCP gives access to the images only after it has de-identified them, and it needs a list of the studies first (TSM, 2026-11-02): a CSV with `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY` and `STMO_NAME_IN_ADL`. Build it in the workspace:
+```bash
+python scripts/deid_request.py --modality mri echo --dry-run           # counts per step and per year; no CSV written
+python scripts/deid_request.py --modality mri echo --out /workspace/deid
+```
+- Send `deid_request_mri.csv` and `deid_request_echo.csv` (or both in `deid_request_all.csv`) to the TSM, the way the TSM asks: they hold study and patient keys.
+- Agree the echo number with the TSM after the dry run; `--max-studies N --phase2-table echo_analytic_locked` caps it and keeps the Phase 2 patients first.
+- `deid_selection_<modality>.parquet` stays in the workspace; the study tables are built from it after delivery (`RUNBOOK_MRI.md` step 4, `RUNBOOK_ECHO_WM.md` step 3).
+- `deid_summary.json` holds the counts (aggregate only).
+
 ## Step 5: Lock everything (once, before any inference)
 
 1. **Agents:** for each agent, record the model file's SHA-256 and its decision thresholds exactly as in Phase 1:
@@ -220,6 +232,7 @@ python scripts/evaluate_cohorts.py --cohorts <cohort> --cluster-by-site
 - [ ] 2 `study.yaml` / `modality_tables.yaml` mapped; ≥ 12 sites
 - [ ] 3 Concept sets signed off
 - [ ] 4 Feasibility run; Plan C confirmed with real rates
+- [ ] 4b Image de-identification request sent to the TSM (MRI, echo); delivery received
 - [ ] 5 Agents, thresholds, plan and code locked (git tag)
 - [ ] 6 Agents uploaded; hashes verified
 - [ ] 7 Wave 1: CAD ☐ Risk ☐ · Wave 2: Longitudinal ☐ · Wave 3: ECG ☐ Echo ☐ (each a → f)
