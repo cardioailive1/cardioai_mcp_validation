@@ -26,11 +26,11 @@ def _db():
     st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
     con = duckdb.connect()
     # OMOP person: person_source_value = PATIENT_CLINIC_NUMBER (MCP 2026-10-28)
-    con.execute("CREATE TABLE person AS SELECT * FROM (VALUES (11, 'C1', 1960, 5, 2), (12, 'C2', 1970, NULL, NULL), (13, 'C3', 1950, 1, 1), "
-                "(14, 'C4', 1950, 1, 1), (15, 'C5', 1950, 1, 1)) v(person_id, person_source_value, year_of_birth, month_of_birth, day_of_birth)")
-    # DIM_PATIENT: one row per record system; PATIENT_MERGED_FLAG = 'N' is the person's row (MCP 2026-10-21)
-    con.execute("CREATE TABLE DIM_PATIENT AS SELECT * FROM (VALUES (501, 'C1', 'N'), (502, 'C1', 'Y'), (503, 'C2', 'N'), "
-                "(504, 'C3', 'N'), (505, 'C4', 'N'), (506, 'C5', 'N')) v(PATIENT_DK, PATIENT_CLINIC_NUMBER, PATIENT_MERGED_FLAG)")
+    # PATIENT_DK for the de-identification CSV comes from DIM_PATIENT by clinic number (active rows only);
+    # C1 also has a merged (inactive) row that must be ignored
+    con.execute("""CREATE TABLE DIM_PATIENT AS SELECT * FROM (VALUES (1000, 'C1', 'N'), (999, 'C1', 'Y'), (1001, 'C2', 'N'),
+                   (1002, 'C3', 'N'), (1003, 'C4', 'N'), (1004, 'C5', NULL)) v(PATIENT_DK, PATIENT_CLINIC_NUMBER, PATIENT_MERGED_FLAG)""")
+    con.execute("CREATE TABLE person AS SELECT * FROM (VALUES (11, 'C1'), (12, 'C2'), (13, 'C3'), (14, 'C4'), (15, 'C5')) v(person_id, person_source_value)")
     con.execute("""CREATE TABLE FACT_IMAGINGSTUDY (PATIENT_CLINIC_NUMBER VARCHAR, STUDY_INSTANCE_UID VARCHAR, STMO_NAME_IN_ADL VARCHAR,
                    MODALITY_1 VARCHAR, MODALITY_2 VARCHAR, PROCEDURE_CODE_TEXT VARCHAR, PROCEDURE_CODE_CODING_CODE VARCHAR,
                    STUDY_DESCRIPTION VARCHAR, NUMBER_OF_SERIES INT, NUMBER_OF_INSTANCES INT)""")
@@ -71,14 +71,10 @@ def test_find_request_and_build_study_table(tmp_path):
     assert set(req.study_uid) == {"1.1", "1.2"} and rep["studies_without_lge_or_not_deidentifiable"] == 1
     assert sorted(req.series_description.unique()) == ["SA LGE PSIR", "SA cine SSFP"]   # no localiser, 4ch, mapping
     assert rep["instances_requested"] == 2 * (250 + 10) < rep["instances_total"]
-    with pytest.raises(ValueError, match="attach_patient_dk"):
-        mi.deid_request(studies, req)                                             # PATIENT_DK not looked up yet
-    from cardioai_mcp.deid import attach_patient_dk
-    with_dk, _ = attach_patient_dk(eng, st["modality"]["mri"]["mcp"], studies)   # DIM_PATIENT, unmerged row
-    deid = mi.deid_request(with_dk, req)                                          # the file MCP asked for
+    deid = mi.deid_request(studies, req)                                          # the file MCP asked for
     assert list(deid.columns) == ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
     assert sorted(deid.STUDY_INSTANCE_UID) == ["1.1", "1.2"] and set(deid.MODALITY) == {"MR"}
-    assert sorted(deid.PATIENT_DK) == [501, 503] and set(deid.STMO_NAME_IN_ADL) == {"STMO1"}
+    assert sorted(deid.PATIENT_DK) == [1000, 1001] and set(deid.STMO_NAME_IN_ADL) == {"STMO1"}
     # delivery: one folder per study (here written as synthetic DICOM)
     lge, cine, _ = S.study(seed=3, n_slices=6, phases=8)
     import io
@@ -101,3 +97,28 @@ def test_series_rules():
     assert mi.classify_series("cine 4ch", 25) == "other"
     assert mi.classify_series("T1 MAP MOLLI SA", 8) == "other"
     assert mi.classify_series("localizer", 3) == "other"
+
+
+def test_deid_request_script_selection():
+    """scripts/deid_request.py (MCP TSM, 2026-11-02): the four-column CSV, PATIENT_DK from active DIM_PATIENT rows,
+    and the Phase 2 cohort's index studies requested even when the training rules skip them."""
+    import importlib.util
+
+    import pandas as pd
+    spec = importlib.util.spec_from_file_location("deid_request", Path(__file__).resolve().parents[1] / "scripts" / "deid_request.py")
+    dr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dr)
+    con, st, eng = _db()
+    studies, train_uids, rep = dr.select_mri(eng, st["modality"], "1900-01-01", "2100-01-01")
+    assert train_uids == {"1.1", "1.2"}                                    # LGE + de-identifiable
+    assert dict(zip(studies.study_uid, studies.deid_ok)) == {"1.1": True, "1.2": True, "1.5": False}
+    csv = dr.to_csv(studies[studies.study_uid.isin(train_uids)], "MR")
+    assert list(csv.columns) == ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
+    assert dict(zip(csv.STUDY_INSTANCE_UID, csv.PATIENT_DK)) == {"1.1": 1000, "1.2": 1001}  # 999 is a merged row
+    # Phase 2 cohort: person 12 (index on the study date) and 15 (its only study is not de-identifiable)
+    cohort = pd.DataFrame({"person_id": [12, 15], "index_date": ["2022-03-01", "2022-03-01"]})
+    idx, unmatched = dr.cohort_index_studies(studies, cohort, "study_datetime")
+    assert idx.study_uid.tolist() == ["1.2"] and unmatched == 1
+    late = pd.DataFrame({"person_id": [11], "index_date": ["2022-03-05"]})               # 4 days off: not the index study
+    assert dr.cohort_index_studies(studies, late, "study_datetime")[1] == 1
+    assert len(dr.sample(studies, 1, 0)) == 1 and dr._years(studies, "study_datetime") == {"2022": 3}

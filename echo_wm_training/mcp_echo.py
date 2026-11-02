@@ -11,7 +11,7 @@ dropped and counted. LVEF comes from FACT_ECHO_RESULTS (lvef_rows / lvef_table),
     from echo_wm_training import mcp_echo as me
     studies = me.find_echo_studies(eng, study["modality"])                 # echo exams with a report
     req, report = me.build_request(eng, study["modality"], studies)         # studies with de-identifiable instances
-    me.deid_request(studies, req).to_csv("/workspace/echo/deid_request.csv", index=False)   # -> TSM
+    # the request file itself: python scripts/deid_request.py --modality echo --out /workspace/deid
     ... after delivery:
     table = me.build_study_table(studies, "/workspace/echo/dicom")          # one row per delivered study folder
     ref = me.reference_table(studies)                                       # report-derived wall-motion reference
@@ -28,7 +28,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from mri_training.mcp_imaging import DEID_COLUMNS, _macro, _q
+from mri_training.mcp_imaging import DEID_COLUMNS, _macro, _q, patient_dk_join
 
 from .labels import label_columns, parse_report
 
@@ -94,20 +94,23 @@ def echo_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "
         pjoin = f"LEFT JOIN {_macro(pm['table'])} pm ON CAST(pm.{pm['clinic_number_column']} AS STRING) = e.clinic_number"
     else:
         person, pjoin = "e.clinic_number", ""
-    if sd.get("table"):
-        sjoin = (f"JOIN {_macro(sd['table'])} s ON s.STMO_NAME_IN_ADL = i.STMO_NAME_IN_ADL AND s.MODALITY_1 = i.MODALITY "
+    if sd.get("table"):             # MCP Radiology deck: inventory <-> FACT_IMAGINGSTUDY on STMO + STUDY_INSTANCE_UID
+        sjoin = (f"JOIN {_macro(sd['table'])} s ON s.STMO_NAME_IN_ADL = i.STMO_NAME_IN_ADL "
                  f"AND s.STUDY_INSTANCE_UID = i.STUDY_INSTANCE_UID")
         sdate = f"s.{sd['column']}"
+        # FACT_IMAGINGSTUDY is "the most accurate place to find a specific type of imaging study": its description
+        # and procedure text are read with the inventory's STUDY_DESCRIPTION
+        desc = ("CONCAT(COALESCE(i.STUDY_DESCRIPTION, ''), ' | ', COALESCE(s.STUDY_DESCRIPTION, ''), ' | ', "
+                "COALESCE(s.PROCEDURE_CODE_TEXT, ''))")
     else:
         sjoin, sdate = "", f"i.{sd['column']}"
+        desc = "COALESCE(i.STUDY_DESCRIPTION, '')"
     # patient key of FACT_ECHO_TEST: its own PATIENT_CLINIC_NUMBER when configured (PATIENT_DK is deprecated in some
     # MCP tables), else PATIENT_DK -> DIM_PATIENT
     if e.get("clinic_number"):
         clinic, djoin = f"t.{e['clinic_number']}", ""
-        dk = f"t.{e['patient_dk']}" if e.get("patient_dk") else "CAST(NULL AS STRING)"
     else:
         clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_macro(d['table'])} d ON d.{d['patient_dk']} = t.{e['patient_dk']}"
-        dk = f"t.{e['patient_dk']}"
     # MCP (2026-10-28): FACT_ECHO_TEST.ECHO_PERFORMED_TEST_DK -> DIM_ECHO_TEST names the exact test; the inventory's
     # STUDY_DESCRIPTION names the imaged study. Both are filtered to transthoracic echo, so a same-day TEE, stress
     # echo or non-cardiac ultrasound no longer makes the day ambiguous.
@@ -124,13 +127,14 @@ def echo_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "
         twhere += f"\n        AND NOT ({tsel} RLIKE {_rx(f['exclude_regex'])})"
     iwhere = ""
     if f.get("study_keep_regex"):
-        iwhere += f"\n        AND COALESCE(i.STUDY_DESCRIPTION, '') RLIKE {_rx(f['study_keep_regex'])}"
+        iwhere += f"\n        AND {desc} RLIKE {_rx(f['study_keep_regex'])}"
     if f.get("exclude_regex"):
-        iwhere += f"\n        AND NOT (COALESCE(i.STUDY_DESCRIPTION, '') RLIKE {_rx(f['exclude_regex'])})"
+        iwhere += f"\n        AND NOT ({desc} RLIKE {_rx(f['exclude_regex'])})"
+    dk, ndk, dkjoin = patient_dk_join({**c, "patient_dk_source": c.get("patient_dk_source", "dim_patient")}, "e.clinic_number")
     return f"""
     WITH e AS (
       SELECT CAST({clinic} AS STRING) AS clinic_number, t.{e['datetime']} AS study_datetime,
-             CAST(t.{e['datetime']} AS DATE) AS study_date, t.{e['note']} AS report_text, {dk} AS patient_dk,
+             CAST(t.{e['datetime']} AS DATE) AS study_date, t.{e['note']} AS report_text,
              {tsel} AS test_description
       FROM {_t(c, 'echo_test_table')} t
       {djoin}
@@ -141,18 +145,20 @@ def echo_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "
     i AS (
       SELECT i.STMO_NAME_IN_ADL, i.MODALITY, i.STUDY_INSTANCE_UID,
              CAST(MAX(i.PATIENT_CLINIC_NUMBER) AS STRING) AS clinic_number, MAX(CAST({sdate} AS DATE)) AS study_date,
-             MAX(i.STUDY_DESCRIPTION) AS study_description, COUNT(*) AS n_instances,
+             MAX({desc}) AS study_description, COUNT(*) AS n_instances,
              SUM(CASE WHEN i.IMAGE_DEID_STATUS IN ({', '.join(_q(x) for x in c['deid_ok'])}) THEN 1 ELSE 0 END) AS n_deid_ok
       FROM {_t(c, 'inventory_table')} i
       {sjoin}
       WHERE i.MODALITY = 'US'{iwhere}
       GROUP BY i.STMO_NAME_IN_ADL, i.MODALITY, i.STUDY_INSTANCE_UID
     )
-    SELECT {person} AS person_id, e.clinic_number, e.patient_dk, i.STUDY_INSTANCE_UID AS study_uid,
+    SELECT {person} AS person_id, e.clinic_number, {dk} AS patient_dk, {ndk} AS n_patient_dk,
+           i.STUDY_INSTANCE_UID AS study_uid,
            i.STMO_NAME_IN_ADL AS stmo, i.MODALITY AS modality, e.study_datetime, e.study_date, e.report_text,
            e.test_description, i.study_description, i.n_instances, i.n_deid_ok
     FROM e JOIN i ON i.clinic_number = e.clinic_number AND i.study_date = e.study_date
     {pjoin}
+    {dkjoin}
     """
 
 

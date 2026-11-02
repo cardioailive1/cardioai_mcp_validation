@@ -51,22 +51,19 @@ Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md
    Snapshot the analytic table as `cardioai_work.echo_analytic_locked`.
 
 2. **Find echo studies and build the de-identification request.**
-   ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
-   from echo_wm_training import mcp_echo as me
-   study = load_study(); eng = make_engine("bigquery", study)
-   studies = me.find_echo_studies(eng, study["modality"])           # echo reports joined to their DICOM study
-   req, report = me.build_request(studies)                           # de-identifiable + a wall-motion statement
-   me.deid_request(studies, req).to_csv("/workspace/echo/deid_request.csv", index=False); report
-   ```
-   To write the file MCP asks for (STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL), use the one command shared with MRI:
    ```bash
-   python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
+   python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
+   python scripts/deid_request.py --modality echo --out /workspace/deid  # deid_request_echo.csv + selection + summary
    ```
-   It runs only after the Phase 2 cohort is locked (step 1), keeps adults only, takes `PATIENT_DK` from the unmerged `DIM_PATIENT` row, and checks the file before writing it. The summary shows how many locked Phase 2 index echoes are in the request. The training pool is built after delivery (step 3 onward), with the locked cohort's patients excluded. Send `/workspace/deid/deid_request.csv` to the MCP TSM. Echo studies are requested whole; the cines are selected after delivery.
+   Echo reports are joined to their DICOM study (clinic number + date, transthoracic only); a study is selected when it is de-identifiable and its report has a wall-motion statement. Send `deid_request_echo.csv` (STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL) to the MCP TSM; `PATIENT_DK` comes from `DIM_PATIENT` by clinic number. Echo studies are requested whole; the cines are selected after delivery. Run this **after step 1**: the script reads the Phase 2 echo cohort (`echo_analytic_locked`, else `echo_analytic`) and always requests each cohort patient's index echo, including those with no wall-motion statement, because the EF agent is scored on them. It stops if the cohort table is missing. Echo is far more common than CMR: run the dry run first and agree the number with the TSM; `--max-studies N` caps only the training studies. Only adults are requested (age ≥ 18 at the study; unknown or redacted birth year: not requested). A clinic number with no unmerged `DIM_PATIENT` row, or with several, is left out and counted. The file is checked (exact columns, no empty cells or duplicates, MR / US, DICOM UIDs) and nothing is written if a check fails.
 
 3. **After delivery, build the tables.**
    ```python
+   import pandas as pd
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+   from echo_wm_training import mcp_echo as me
+   study = load_study(); eng = make_engine("bigquery", study)
+   studies = pd.read_parquet("/workspace/deid/deid_selection_echo.parquet")   # written by scripts/deid_request.py
    t = me.build_study_table(studies, "/workspace/echo/dicom")
    eng.write_table(t, "echo_wm_study")
    ref = me.reference_table(studies)                                 # report-derived reference (Phase 2 and audit)

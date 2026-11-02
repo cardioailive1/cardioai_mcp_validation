@@ -1,13 +1,12 @@
 """The de-identification request MCP needs before it releases imaging (MCP TSM): a CSV of the selected studies with
-exactly STUDY_INSTANCE_UID, PATIENT_DK, MODALITY and STMO_NAME_IN_ADL.
+exactly STUDY_INSTANCE_UID, PATIENT_DK, MODALITY and STMO_NAME_IN_ADL. Shared checks for scripts/deid_request.py:
 
-Shared by the MRI (mri_training.mcp_imaging) and echo (echo_wm_training.mcp_echo) request builders; run it all with
-    python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
+    python scripts/deid_request.py --modality mri echo --out /workspace/deid
 
 PATIENT_DK: the DICOM inventory and FACT_IMAGINGSTUDY carry PATIENT_CLINIC_NUMBER, not PATIENT_DK (MCP Radiology
-slides). DIM_PATIENT has one row per medical-record system; PATIENT_MERGED_FLAG = 'N' gives one row per person
-(Adam Resnick, 2026-10-21). So PATIENT_DK is looked up there from the study's clinic number, and a clinic number
-with no row, or with several unmerged rows, stops the request instead of guessing.
+slides). The study queries look it up in DIM_PATIENT (PATIENT_MERGED_FLAG = 'N', one row per person; Adam Resnick,
+2026-10-21) and count the unmerged rows per clinic number (mri_training.mcp_imaging.patient_dk_join). A clinic number
+with no unmerged row, or with several, is left out of the request and counted, rather than guessed.
 
 Only adults are requested (age >= study.yaml min_age at the study, from OMOP person; dates are shifted by the same
 amount across a patient's record, so age is preserved). Studies with no OMOP person or birth date are not requested.
@@ -36,44 +35,6 @@ def _chunks(values: List[str], n: int = 2000):
         yield values[i:i + n]
 
 
-# ------------------------------------------------------------------------------------------------ PATIENT_DK
-def dim_patient_sql(dim: dict, clinic_numbers: List[str]) -> str:
-    flag = dim.get("merged_flag_column", "PATIENT_MERGED_FLAG")
-    keep = dim.get("merged_flag_keep", "N")
-    return f"""
-    SELECT CAST(d.{dim['clinic_number']} AS STRING) AS clinic_number, d.{dim['patient_dk']} AS patient_dk
-    FROM {_macro(dim['table'])} d
-    WHERE d.{flag} = {_q(keep)}
-      AND CAST(d.{dim['clinic_number']} AS STRING) IN ({', '.join(_q(c) for c in clinic_numbers)})
-    """
-
-
-def attach_patient_dk(engine, mcp_cfg: dict, studies: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
-    """Set studies.patient_dk from DIM_PATIENT (unmerged row of the study's clinic number).
-
-    Returns (studies with patient_dk, counts). Clinic numbers with no unmerged row are counted and their studies
-    dropped; clinic numbers with several unmerged rows raise, because MCP would get an ambiguous patient key."""
-    if mcp_cfg.get("patient_dk_source") != "dim_patient":
-        return studies, {"patient_dk_from": "study query"}
-    dim = mcp_cfg["dim_patient"]
-    s = studies.copy()
-    s["clinic_number"] = s["clinic_number"].astype(str)
-    clinics = sorted(s.clinic_number.dropna().unique().tolist())
-    parts = [engine.query(engine.render(dim_patient_sql(dim, c), {})) for c in _chunks(clinics)]
-    dk = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["clinic_number", "patient_dk"])
-    dk["clinic_number"] = dk["clinic_number"].astype(str)
-    dk = dk.drop_duplicates()
-    n_per = dk.groupby("clinic_number").patient_dk.nunique()
-    if (n_per > 1).any():
-        raise ValueError(f"{int((n_per > 1).sum())} clinic numbers have more than one unmerged DIM_PATIENT row "
-                         f"({dim.get('merged_flag_column', 'PATIENT_MERGED_FLAG')} = "
-                         f"'{dim.get('merged_flag_keep', 'N')}'); ask MCP which PATIENT_DK to send")
-    s = s.drop(columns=["patient_dk"], errors="ignore").merge(dk, on="clinic_number", how="left")
-    missing = s.patient_dk.isna()
-    counts = {"patient_dk_from": "DIM_PATIENT", "studies_without_patient_dk": int(missing.sum())}
-    return s[~missing].reset_index(drop=True), counts
-
-
 # ------------------------------------------------------------------------------------------------ adults only
 def person_birth_sql(person_table: str, person_ids: List) -> str:
     ids = ", ".join(str(int(p)) for p in person_ids)
@@ -85,13 +46,15 @@ def person_birth_sql(person_table: str, person_ids: List) -> str:
 
 
 def adults_only(engine, mcp_cfg: dict, studies: pd.DataFrame, min_age: float = 18) -> Tuple[pd.DataFrame, Dict[str, int]]:
-    """Keep studies done at age >= min_age (OMOP person birth date; missing month/day -> 1 July / 15th)."""
+    """Keep studies done at age >= min_age (OMOP person birth date; missing month/day -> 1 July / 15th; a redacted
+    birth year, stored as 1800, is unknown)."""
     s = studies.copy()
     table = (mcp_cfg.get("person_map") or {}).get("table", "{cdm}.person")
     ids = pd.to_numeric(s.get("person_id"), errors="coerce").dropna().astype("int64").unique().tolist()
     parts = [engine.query(engine.render(person_birth_sql(table, c), {})) for c in _chunks(ids)]
     b = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["person_id", "year_of_birth"])
     if len(b):
+        b = b[pd.to_numeric(b.year_of_birth, errors="coerce") != 1800]     # 1800 = redacted birth year (MCP OMOP ETL)
         dob = pd.to_datetime(dict(year=b.year_of_birth.astype("Int64"),
                                   month=b.month_of_birth.fillna(7).astype("Int64"),
                                   day=b.day_of_birth.fillna(15).astype("Int64")), errors="coerce")

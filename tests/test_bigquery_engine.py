@@ -27,6 +27,8 @@ def test_translation_rules():
     assert "(SELECT MAX(v) FROM UNNEST([x, y, NULL]) AS v)" in sql and "(SELECT MIN(v) FROM UNNEST([x, y]) AS v)" in sql
     assert "DATE_DIFF(" in sql and "REGEXP_CONTAINS(t, '(?i)\\\\btee\\\\b')" in sql
     assert "`ml-mps`.mcp.FACT_ECG" in spark_to_bigquery("SELECT * FROM `ml-mps`.mcp.FACT_ECG")
+    more = spark_to_bigquery("SELECT CONCAT_WS(' ', r.a, r.b), PERCENTILE_APPROX(m.v, 0.5) FROM t")
+    assert "ARRAY_TO_STRING([r.a, r.b], ' ')" in more and "APPROX_QUANTILES(m.v, 100)[OFFSET(50)]" in more
     with pytest.raises(ValueError, match="literal pattern"):
         spark_to_bigquery("SELECT REGEXP_EXTRACT(t, p, 1)")
 
@@ -144,4 +146,6 @@ def test_training_and_mcp_queries_translate():
     for s in sqls:
         import re
         out = re.sub(r"/\*.*?\*/", "", eng.transpile(s), flags=re.S)        # comments may mention {{macros}}
-        assert out and "{{" not in out and "YEAR(" not in out and "GREATEST(" not in out
+        assert out and "{{" not in out
+        names = set(re.findall(r"\b([A-Z_][A-Z0-9_]*)\s*\(", re.sub(r"'(?:[^'\\]|\\.)*'", "''", out)))
+        assert not names & {"YEAR", "GREATEST", "LEAST", "CONCAT_WS", "APPROX_QUANTILE", "PERCENTILE_APPROX", "XXHASH64"}, names

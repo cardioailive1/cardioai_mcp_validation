@@ -159,9 +159,23 @@ def _one_group(pattern: str, keep: int) -> str:
 def _bq_fix(node):
     """Spark constructs sqlglot does not carry over to GoogleSQL (applied until nothing changes):
     YEAR/MONTH/DAY -> EXTRACT; REGEXP_EXTRACT group -> a single capturing group; GREATEST/LEAST skip NULLs in
-    Spark but return NULL in GoogleSQL when any argument is NULL -> MAX/MIN over UNNEST (NULLs skipped)."""
+    Spark but return NULL in GoogleSQL when any argument is NULL -> MAX/MIN over UNNEST (NULLs skipped);
+    CONCAT_WS -> ARRAY_TO_STRING; PERCENTILE_APPROX -> APPROX_QUANTILES(...)[OFFSET(...)]."""
     import sqlglot
     from sqlglot import exp
+    if isinstance(node, exp.ConcatWs):                  # no CONCAT_WS in GoogleSQL; ARRAY_TO_STRING skips NULLs too
+        sep, *args = node.expressions
+        out = sqlglot.parse_one("ARRAY_TO_STRING([0], ' ')", read="bigquery")
+        out.find(exp.Array).set("expressions", [a.copy() for a in args])
+        out.set("expression", sep.copy())
+        return out
+    if isinstance(node, exp.ApproxQuantile):            # PERCENTILE_APPROX(x, q) -> APPROX_QUANTILES(x, 100)[OFFSET(q*100)]
+        q = node.args.get("quantile")
+        if q is None or not q.is_number:
+            raise ValueError(f"PERCENTILE_APPROX needs a literal quantile for BigQuery: {node.sql('spark')}")
+        out = sqlglot.parse_one(f"APPROX_QUANTILES(x, 100)[OFFSET({round(float(q.name) * 100)})]", read="bigquery")
+        out.find(exp.Column).replace(node.this.copy())
+        return out
     if isinstance(node, (exp.Greatest, exp.Least)):
         args = [node.this] + list(node.expressions or [])
         if len(args) > 1:

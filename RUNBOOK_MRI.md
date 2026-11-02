@@ -61,32 +61,25 @@ Model training does not use BigQuery: the queries build the training list and pu
    - the final-report `SERVICE_RESULT_STATUS` values;
    - `person_map` is filled in: OMOP `person.person_source_value` holds `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28).
 
-   Then run:
-   ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
-   from mri_training import mcp_imaging as mi
-   study = load_study(); eng = make_engine("bigquery", study)
-   studies = mi.find_cmr_studies(eng, study["modality"])     # MR cardiac studies with a final report
-   series = mi.list_series(eng, study["modality"], studies)
-   req, report = mi.build_request(series)                     # short-axis LGE + cine series only
-   deid = mi.deid_request(studies, req)                       # one row per selected study
-   deid.to_csv("/workspace/mri/deid_request.csv", index=False); report
-   ```
-   Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `report`.
-
-3. **Build and send the de-identification request.** MCP releases images only after this request. One command builds it for MRI and echo together:
+   Then run, counts first:
    ```bash
-   python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
+   python scripts/deid_request.py --modality mri --dry-run            # how many studies, per year; nothing written
+   python scripts/deid_request.py --modality mri --out /workspace/deid   # deid_request_mri.csv + selection + summary
    ```
-   Send `/workspace/deid/deid_request.csv` to the MCP Technical Success Manager (TSM) through the workspace's approved channel. It has one row per selected study, with exactly the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
-   - **Order:** after the Phase 2 cohort is locked (step 1), before the training pool. The script refuses to run until `mri_analytic_locked` (and `echo_analytic_locked` for echo) exists. The training pool (the manifest, step 4) is built from the delivered studies, with the locked cohort's patients excluded.
-   - **Which studies:** the ones step 2 selects, for patients aged 18 or over at the study. This covers both the training candidates and the locked cohort's index studies, because Phase 2 scores their images too. `deid_request_summary.json` gives the counts at each step, including how many locked index studies are requested and how many have no requestable images. Review any of the latter before sending.
-   - **`PATIENT_DK`:** the DICOM inventory and `FACT_IMAGINGSTUDY` carry `PATIENT_CLINIC_NUMBER`, not `PATIENT_DK` (MCP Radiology slides). The script looks up the person's unmerged `DIM_PATIENT` row (`PATIENT_MERGED_FLAG = 'N'`). A clinic number with two unmerged rows stops the script; one with none is dropped and counted.
-   - **Checks:** the script writes nothing if a file has an empty cell, a duplicate study, a wrong modality or a malformed UID.
-   - **What MCP returns:** MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
+   Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `deid_summary.json`. Run this **after step 1**: the script reads the Phase 2 MRI cohort (`mri_analytic_locked`, else `mri_analytic`) and always requests each cohort patient's index study, even one the training rules would skip, because the agent is scored on those images. It stops if the cohort table is missing. `--max-studies N` caps only the training studies. Only adults are requested (age ≥ 18 at the study; unknown or redacted birth year: not requested). A clinic number with no unmerged `DIM_PATIENT` row, or with several, is left out and counted. The file is checked (exact columns, no empty cells or duplicates, MR / US, DICOM UIDs) and nothing is written if a check fails.
+
+3. **Send `deid_request_mri.csv` to the MCP Technical Success Manager (TSM).** MCP needs it before it gives access to the images (2026-11-02). It has one row per selected study, with the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
+   - MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
+   - The radiology tables carry `PATIENT_CLINIC_NUMBER`, not `PATIENT_DK` (MCP Radiology deck), so `PATIENT_DK` is looked up in `DIM_PATIENT` by clinic number (active rows only; `mri.mcp.patient_dk_source: dim_patient`). The summary counts any clinic number with more than one active `PATIENT_DK`; mention these to the TSM.
+   - Check the file before sending: no empty cells, and the row count matches `selected_studies` in `deid_summary.json`.
+   - The file holds study and patient keys: send it the way the TSM asks, not as an ordinary attachment.
 
 4. **After delivery, build the study table and the manifest.**
    ```python
+   import pandas as pd; from mri_training import mcp_imaging as mi
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+   study = load_study(); eng = make_engine("bigquery", study)
+   studies = pd.read_parquet("/workspace/deid/deid_selection_mri.parquet")   # written by scripts/deid_request.py
    cmr = mi.build_study_table(studies, "/workspace/mri/dicom")      # one row per delivered study folder
    eng.write_table(cmr, "cmr_study")
    from mri_training.dataset import load_config, build_manifest
@@ -206,8 +199,7 @@ Model training does not use BigQuery: the queries build the training list and pu
 
 ## 6. Open items
 
-- [x] MCP: `PATIENT_CLINIC_NUMBER` = OMOP `person.person_source_value` (2026-10-28); the request format is a CSV of `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL` sent to the TSM (`scripts/build_deid_request.py`).
-- [ ] MCP: turnaround and delivery folder for de-identified studies; confirm `PATIENT_DK` = the unmerged `DIM_PATIENT` row; the final `SERVICE_RESULT_STATUS` values (the Radiology slides describe the column but not its values).
+- [ ] MCP: how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id`; the de-identification request steps, turnaround and delivery folder; the final `SERVICE_RESULT_STATUS` values.
 - [ ] Clinical lead: MRI goals, red-flag cut-offs, and the reader protocol (scar threshold, basal slice).
 - [ ] Hire up to 5 outside cardiac MRI readers; each submits the DUA form.
 - [ ] Write the scoring script that produces `mri_predictions` from the locked bundle.

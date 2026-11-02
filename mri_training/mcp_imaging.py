@@ -8,7 +8,7 @@ is REQUESTED for de-identification (IMAGE_DEID_STATUS Ready / Available). Report
     studies = mi.find_cmr_studies(eng, study["modality"])          # CMR studies with a final report
     series  = mi.list_series(eng, study["modality"], studies)        # every series of those studies
     req, report = mi.build_request(series)                           # short-axis LGE + cine series only
-    mi.deid_request(studies, req).to_csv("/workspace/mri/deid_request.csv", index=False)   # -> send to the TSM
+    # the request file itself: python scripts/deid_request.py --modality mri --out /workspace/deid
     ... after delivery:
     cmr = mi.build_study_table(studies, "/workspace/mri/dicom")      # one row per study with its folder
     spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")
@@ -24,8 +24,6 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import pandas as pd
-
-from cardioai_mcp.deid import DEID_COLUMNS  # one definition for MRI and echo
 
 from .io import CINE_RE, LGE_RE, SAX_RE
 
@@ -49,6 +47,24 @@ def _q(v) -> str:
     return "'" + str(v).replace("'", "''") + "'"
 
 
+def patient_dk_join(c: dict, clinic_expr: str) -> Tuple[str, str, str]:
+    """(PATIENT_DK expression, count-of-DKs expression, JOIN) for the de-identification CSV.
+
+    The radiology tables carry PATIENT_CLINIC_NUMBER, not PATIENT_DK (MCP Radiology deck, 2026-11-02), so PATIENT_DK
+    is looked up in DIM_PATIENT by clinic number, keeping active rows (merged flag 'N' or empty). A clinic number
+    with more than one active PATIENT_DK is flagged (n_patient_dk > 1) for the TSM rather than guessed silently."""
+    src = c.get("patient_dk_source", "dim_patient")
+    if src != "dim_patient":
+        return src, "1", ""
+    d = c["dim_patient"]
+    flag = d.get("merged_flag")
+    where = f"WHERE COALESCE(CAST({flag} AS STRING), 'N') = 'N'" if flag else ""
+    join = (f"LEFT JOIN (SELECT CAST({d['clinic_number']} AS STRING) AS cn, MIN({d['patient_dk']}) AS dk, "
+            f"COUNT(DISTINCT {d['patient_dk']}) AS n_dk FROM {_macro(d['table'])} {where} "
+            f"GROUP BY CAST({d['clinic_number']} AS STRING)) dp ON dp.cn = CAST({clinic_expr} AS STRING)")
+    return "dp.dk", "dp.n_dk", join
+
+
 def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2100-01-01") -> str:
     c = _cfg(modality_cfg)
     cpt = ", ".join(_q(x) for x in c["cmr_cpt"])
@@ -60,10 +76,7 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
                  f"= CAST(s.PATIENT_CLINIC_NUMBER AS STRING)")
     else:
         person, pjoin = "s.PATIENT_CLINIC_NUMBER", ""
-    # PATIENT_DK: 'dim_patient' = looked up afterwards in DIM_PATIENT (cardioai_mcp.deid.attach_patient_dk);
-    # otherwise a column expression (r = FACT_RADIOLOGY, s = FACT_IMAGINGSTUDY)
-    src = c.get('patient_dk_source', 'r.PATIENT_DK')
-    dk = "CAST(NULL AS BIGINT)" if src == "dim_patient" else src
+    dk, ndk, dkjoin = patient_dk_join(c, "s.PATIENT_CLINIC_NUMBER")
     return f"""
     WITH s AS (
       SELECT * FROM {_t(c, 'study_table')} s
@@ -77,7 +90,7 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
       FROM {_t(c, 'inventory_table')} i
       WHERE i.MODALITY = 'MR'
     )
-    SELECT {person} AS person_id, s.PATIENT_CLINIC_NUMBER AS clinic_number, {dk} AS patient_dk,
+    SELECT {person} AS person_id, s.PATIENT_CLINIC_NUMBER AS clinic_number, {dk} AS patient_dk, {ndk} AS n_patient_dk,
            s.STUDY_INSTANCE_UID AS study_uid,
            s.STMO_NAME_IN_ADL AS stmo, a.MODALITY AS modality, a.DICOM_ACCESSION_NUMBER AS accession,
            r.RADIOLOGY_DTM AS study_datetime, s.STUDY_DESCRIPTION AS study_description,
@@ -88,6 +101,7 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
     JOIN acc a ON a.STMO_NAME_IN_ADL = s.STMO_NAME_IN_ADL AND a.STUDY_INSTANCE_UID = s.STUDY_INSTANCE_UID
     JOIN {_t(c, 'report_table')} r ON r.ACCESSION_NBR = a.DICOM_ACCESSION_NUMBER
     {pjoin}
+    {dkjoin}
     WHERE CAST(r.RADIOLOGY_DTM AS DATE) BETWEEN CAST('{start}' AS DATE) AND CAST('{end}' AS DATE)
       AND r.SERVICE_RESULT_STATUS RLIKE '{c['final_report_status_regex']}'
     """
@@ -150,6 +164,7 @@ def build_request(series: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
     return keep[cols].reset_index(drop=True), report
 
 
+from cardioai_mcp.deid import DEID_COLUMNS  # noqa: E402  (one definition for MRI, echo and the request script)
 
 
 def deid_request(studies: pd.DataFrame, req: pd.DataFrame) -> pd.DataFrame:
@@ -164,8 +179,8 @@ def deid_request(studies: pd.DataFrame, req: pd.DataFrame) -> pd.DataFrame:
     out = out.drop_duplicates(["STUDY_INSTANCE_UID", "STMO_NAME_IN_ADL"]).reset_index(drop=True)
     missing = out[DEID_COLUMNS].isna().any(axis=1)
     if missing.any():
-        raise ValueError(f"{int(missing.sum())} studies lack a value in {DEID_COLUMNS}: with patient_dk_source: dim_patient, "
-                         "run cardioai_mcp.deid.attach_patient_dk first (scripts/build_deid_request.py does)")
+        raise ValueError(f"{int(missing.sum())} studies lack a value in {DEID_COLUMNS} (no active DIM_PATIENT row "
+                         "for the clinic number, or check patient_dk_source)")
     return out[DEID_COLUMNS]
 
 
