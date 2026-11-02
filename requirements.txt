@@ -2,6 +2,7 @@ pyyaml>=6
 pandas>=2
 numpy>=1.24
 scipy>=1.10
+pyarrow>=14           # parquet: manifests, de-identification selection
 sqlglot>=25           # Spark SQL -> BigQuery (MCP workspace) and -> DuckDB (tests)
 # in the MCP workspace (BigQuery client; usually preinstalled there)
 # google-cloud-bigquery>=3.10

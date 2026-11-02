@@ -11,7 +11,7 @@ dropped and counted. LVEF comes from FACT_ECHO_RESULTS (lvef_rows / lvef_table),
     from echo_wm_training import mcp_echo as me
     studies = me.find_echo_studies(eng, study["modality"])                 # echo exams with a report
     req, report = me.build_request(eng, study["modality"], studies)         # studies with de-identifiable instances
-    me.deid_request(studies, req).to_csv("/workspace/echo/deid_request.csv", index=False)   # -> TSM
+    # the request file itself: python scripts/deid_request.py --modality echo --out /workspace/deid
     ... after delivery:
     table = me.build_study_table(studies, "/workspace/echo/dicom")          # one row per delivered study folder
     ref = me.reference_table(studies)                                       # report-derived wall-motion reference

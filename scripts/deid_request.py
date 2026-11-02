@@ -16,7 +16,11 @@ Selection (one row per study; MCP de-identifies whole studies):
         a de-identifiable short-axis LGE series (mri_training.mcp_imaging)
   echo  transthoracic echo studies (US, echo in the study description) linked to an echo report by clinic number
         and date, de-identifiable, with a wall-motion statement in the report (echo_wm_training.mcp_echo)
-PATIENT_DK comes from DIM_PATIENT by clinic number (the radiology tables carry PATIENT_CLINIC_NUMBER).
+  both  adults only (age >= study.yaml min_age at the study, from OMOP person; unknown age is not requested);
+        PATIENT_DK from DIM_PATIENT by clinic number, unmerged row (the radiology tables carry PATIENT_CLINIC_NUMBER);
+        a clinic number with no unmerged row, or with several, is left out and counted (ask the TSM about them)
+Checks before anything is written: exact columns in order, no empty cells, no duplicate studies, MODALITY MR / US,
+DICOM-style UIDs. If a file fails, nothing is written.
 
 Writes:
   deid_request_<modality>.csv   the four columns MCP asked for (to the TSM, the way MCP asks)
@@ -38,7 +42,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mri_training.mcp_imaging import DEID_COLUMNS  # noqa: E402
+from cardioai_mcp import deid  # noqa: E402
+from cardioai_mcp.deid import DEID_COLUMNS  # noqa: E402
 
 
 def _years(df: pd.DataFrame, col: str) -> dict:
@@ -71,11 +76,16 @@ def to_csv(rows: pd.DataFrame, default_modality: str) -> pd.DataFrame:
     out = pd.DataFrame({"STUDY_INSTANCE_UID": rows.study_uid.astype(str), "PATIENT_DK": rows.patient_dk,
                         "MODALITY": rows.get("modality", pd.Series(default_modality, index=rows.index)).fillna(default_modality),
                         "STMO_NAME_IN_ADL": rows.stmo}).drop_duplicates(["STUDY_INSTANCE_UID", "STMO_NAME_IN_ADL"])
-    missing = out[DEID_COLUMNS].isna().any(axis=1)
-    if missing.any():
-        raise ValueError(f"{int(missing.sum())} studies lack a value in {DEID_COLUMNS} (no active DIM_PATIENT row "
-                         "for the clinic number?)")
     return out[DEID_COLUMNS].reset_index(drop=True)
+
+
+def patient_key_ok(rows: pd.DataFrame):
+    """Rows with exactly one unmerged DIM_PATIENT row for their clinic number; counts of the rest."""
+    n = pd.to_numeric(rows.get("n_patient_dk", pd.Series(1, index=rows.index)), errors="coerce")
+    missing = rows.patient_dk.isna() | n.isna() | (n == 0)
+    several = ~missing & (n > 1)
+    return rows[~missing & ~several], {"studies_without_patient_dk": int(missing.sum()),
+                                       "studies_with_several_patient_dk": int(several.sum())}
 
 
 def cohort_index_studies(studies: pd.DataFrame, cohort: pd.DataFrame, date_col: str, days: int = 1):
@@ -114,7 +124,60 @@ def load_cohort(eng, m: str, name: Optional[str]):
     return None, None
 
 
-def main():
+def run(eng, study: dict, modalities, out_dir: str, start: Optional[str] = None, end: Optional[str] = None,
+        max_studies: int = 0, cohorts: Optional[dict] = None, no_cohort: bool = False, dry_run: bool = False,
+        log=print) -> dict:
+    mod = study["modality"]
+    start, end = start or str(study["index_start"]), end or str(study["data_cutoff"])
+    min_age = float(study.get("min_age", 18))
+    out = Path(out_dir)
+    summary, files, sel = {"window": [start, end], "max_training_studies": max_studies, "min_age": min_age}, {}, {}
+    for m in modalities:
+        cname, cohort = (None, None) if no_cohort else load_cohort(eng, m, (cohorts or {}).get(m))
+        if cohort is None and not no_cohort:
+            raise SystemExit(f"{m}: no Phase 2 cohort table found ({' / '.join(COHORT_TABLES[m])}). Build the cohort "
+                             f"first (run_cohorts.py --cohorts {m} --save-tables), so its index studies are in the "
+                             "request, or pass --no-cohort to request training studies only.")
+        studies, train_uids, rep = (select_mri if m == "mri" else select_echo)(eng, mod, start, end)
+        studies, ages = deid.adults_only(eng, mod[m]["mcp"], studies, min_age)
+        studies, keys = patient_key_ok(studies)
+        idx, unmatched = cohort_index_studies(studies, cohort, "study_datetime")
+        train = studies[studies.study_uid.astype(str).isin(train_uids) & ~studies.study_uid.isin(idx.study_uid)]
+        train = sample(train, max_studies, int(study.get("seed", 0)))
+        keep = pd.concat([idx.assign(purpose="phase2_index"), train.assign(purpose="training")], ignore_index=True)
+        csv = to_csv(keep, deid.EXPECTED_MODALITY[m]) if len(keep) else pd.DataFrame(columns=DEID_COLUMNS)
+        problems = deid.validate(csv, m)
+        summary[m] = {**rep, **ages, **keys, "cohort_table": cname, "candidate_studies": int(len(studies)),
+                      "phase2_index_studies": int(len(idx)), "phase2_patients_without_a_requestable_study": unmatched,
+                      "training_studies": int(len(train)), "selected_studies": int(len(csv)),
+                      "selected_patients": int(keep.clinic_number.nunique()) if len(keep) else 0,
+                      "selected_by_year": _years(keep, "study_datetime") if len(keep) else {}, "problems": problems}
+        log(f"\n{m}: cohort {cname or '(none)'}; {len(idx)} Phase 2 index + {len(train)} training = {len(csv)} studies")
+        if unmatched:
+            log(f"NOTE: {unmatched} Phase 2 {m} patients have no requestable study on their index date (not "
+                "de-identifiable, or no single PATIENT_DK): they cannot be scored on images; review before locking")
+        if keys["studies_with_several_patient_dk"] or keys["studies_without_patient_dk"]:
+            log(f"NOTE: {keys['studies_with_several_patient_dk']} studies left out for several unmerged PATIENT_DK rows, "
+                f"{keys['studies_without_patient_dk']} for none: ask the TSM which key to use")
+        files[m], sel[m] = csv, keep
+    log(json.dumps(summary, indent=1, default=str))
+    bad = {m: summary[m]["problems"] for m in modalities if summary[m]["problems"]}
+    if dry_run:
+        return summary
+    if bad:
+        raise SystemExit(f"Not written: the request fails its checks {bad}")
+    out.mkdir(parents=True, exist_ok=True)
+    for m in modalities:
+        deid.write_csv(files[m], str(out / f"deid_request_{m}.csv"))
+        sel[m].to_parquet(out / f"deid_selection_{m}.parquet", index=False)
+    deid.write_csv(pd.concat(list(files.values()), ignore_index=True), str(out / "deid_request_all.csv"))
+    (out / "deid_summary.json").write_text(json.dumps(summary, indent=1, default=str))
+    log(f"\nfiles written to {out}/: send deid_request_all.csv (or the per-modality files) to the MCP TSM the way the "
+        "TSM asks; it holds study and patient keys")
+    return summary
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--modality", nargs="+", choices=["mri", "echo"], default=["mri", "echo"])
     ap.add_argument("--start", default=None, help="first study date (default: study.yaml index_start)")
@@ -125,54 +188,14 @@ def main():
     ap.add_argument("--echo-cohort", default=None, help="Phase 2 echo cohort table (default echo_analytic_locked, else echo_analytic)")
     ap.add_argument("--no-cohort", action="store_true", help="run before the cohorts exist (training studies only)")
     ap.add_argument("--out", default="exports/deid")
-    ap.add_argument("--dry-run", action="store_true", help="counts only; no CSV")
+    ap.add_argument("--dry-run", action="store_true", help="counts only; nothing written")
     ap.add_argument("--engine", choices=["bigquery", "spark"], default="bigquery")
-    a = ap.parse_args()
-
+    a = ap.parse_args(argv)
     from cardioai_mcp.config import load_study
     from cardioai_mcp.engine import make_engine
     study = load_study()
-    eng, mod = make_engine(a.engine, study), study["modality"]
-    start, end = a.start or str(study["index_start"]), a.end or str(study["data_cutoff"])
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
-    summary, frames = {"window": [start, end], "max_training_studies": a.max_studies}, []
-    for m in a.modality:
-        cname, cohort = (None, None) if a.no_cohort else load_cohort(eng, m, getattr(a, f"{m}_cohort"))
-        if cohort is None and not a.no_cohort:
-            raise SystemExit(f"{m}: no Phase 2 cohort table found ({' / '.join(COHORT_TABLES[m])}). Build the cohort "
-                             f"first (run_cohorts.py --cohorts {m} --save-tables), so its index studies are in the "
-                             "request, or pass --no-cohort to request training studies only.")
-        studies, train_uids, rep = (select_mri if m == "mri" else select_echo)(eng, mod, start, end)
-        idx, unmatched = cohort_index_studies(studies, cohort, "study_datetime")
-        train = studies[studies.study_uid.astype(str).isin(train_uids) & ~studies.study_uid.isin(idx.study_uid)]
-        train = sample(train, a.max_studies, int(study.get("seed", 0)))
-        keep = pd.concat([idx.assign(purpose="phase2_index"), train.assign(purpose="training")], ignore_index=True)
-        csv = to_csv(keep, "MR" if m == "mri" else "US") if len(keep) else pd.DataFrame(columns=DEID_COLUMNS)
-        multi = int((pd.to_numeric(keep.get("n_patient_dk"), errors="coerce") > 1).sum()) if "n_patient_dk" in keep else 0
-        summary[m] = {**rep, "cohort_table": cname, "candidate_studies": int(len(studies)),
-                      "phase2_index_studies": int(len(idx)), "phase2_patients_without_a_deidentifiable_study": unmatched,
-                      "training_studies": int(len(train)), "selected_studies": int(len(csv)),
-                      "selected_patients": int(keep.clinic_number.nunique()) if len(keep) else 0,
-                      "clinic_numbers_with_several_patient_dk": multi,
-                      "selected_by_year": _years(keep, "study_datetime") if len(keep) else {}}
-        print(f"\n{m}: cohort {cname or '(none)'}; {len(studies)} candidate studies -> {len(idx)} Phase 2 index + "
-              f"{len(train)} training = {len(csv)} selected")
-        print(json.dumps(summary[m], indent=1, default=str))
-        if unmatched:
-            print(f"NOTE: {unmatched} Phase 2 {m} patients have no de-identifiable study on their index date: they "
-                  "cannot be scored on images; review before locking")
-        if multi:
-            print(f"NOTE: {multi} selected studies belong to a clinic number with several active PATIENT_DK values "
-                  "(the smallest is used): mention this to the TSM")
-        if not a.dry_run:
-            csv.to_csv(out / f"deid_request_{m}.csv", index=False)
-            keep.to_parquet(out / f"deid_selection_{m}.parquet", index=False)
-            frames.append(csv)
-    if not a.dry_run and frames:
-        pd.concat(frames)[DEID_COLUMNS].to_csv(out / "deid_request_all.csv", index=False)
-    (out / "deid_summary.json").write_text(json.dumps(summary, indent=1, default=str))
-    print(f"\n{'counts only' if a.dry_run else 'files'} written to {out}/")
+    run(make_engine(a.engine, study), study, a.modality, a.out, a.start, a.end, a.max_studies,
+        {"mri": a.mri_cohort, "echo": a.echo_cohort}, a.no_cohort, a.dry_run)
 
 
 if __name__ == "__main__":

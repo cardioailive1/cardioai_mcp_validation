@@ -38,14 +38,15 @@ No public dataset or outside pretrained weights are used: `use_public_datasets: 
 
 1. **Lock the Phase 2 MRI cohort first** (`config/cohorts/mri.yaml`, studies from 2021-01-01 on). Run `scripts/run_cohorts.py --cohorts mri --save-tables`, build the Python reference (`mri_training/reference.py`: `reference_table`, save as `mri_reference`, set `mri_ref.enabled: true`, re-run, `check_reference`; VALIDATION_RUNBOOK step 7), then snapshot the result as `mri_analytic_locked`. Training excludes these patients. Have the clinical lead confirm the proposed endpoint goals and the red-flag cut-offs.
 2. **Find the CMR studies and request their DICOM.** On MCP the images aren't in a table: every DICOM instance is listed in `FACT_RADIOLOGY_DICOM_INVENTORY` and is **requested for de-identification** (status Ready or Available). Reports are in `FACT_RADIOLOGY` (linked by accession number), and study headers are in `FACT_IMAGINGSTUDY`. Source: MCP "Radiology" slides and Adam Resnick, 2026-10-15.
+   After the Phase 2 MRI cohort is built (the request includes its index studies):
+   ```bash
+   python scripts/deid_request.py --modality mri --dry-run
+   python scripts/deid_request.py --modality mri --out /workspace/deid    # deid_request_mri.csv -> the MCP TSM
+   ```
    ```python
-   from mri_training import mcp_imaging as mi
-   studies = mi.find_cmr_studies(eng, study["modality"])        # MR, cardiac CPT/description, final report
-   series = mi.list_series(eng, study["modality"], studies)
-   req, report = mi.build_request(series)                        # short-axis LGE + cine series only
-   mi.deid_request(studies, req).to_csv("/workspace/mri/deid_request.csv", index=False)   # send to the MCP TSM
-   report
    # after delivery (one folder per study):
+   import pandas as pd; from mri_training import mcp_imaging as mi
+   studies = pd.read_parquet("/workspace/deid/deid_selection_mri.parquet")
    cmr = mi.build_study_table(studies, "/workspace/mri/dicom")
    eng.write_table(cmr, "cmr_study")   # = modality_tables mri.table
    ```

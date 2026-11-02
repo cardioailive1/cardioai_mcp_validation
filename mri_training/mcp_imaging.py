@@ -8,7 +8,7 @@ is REQUESTED for de-identification (IMAGE_DEID_STATUS Ready / Available). Report
     studies = mi.find_cmr_studies(eng, study["modality"])          # CMR studies with a final report
     series  = mi.list_series(eng, study["modality"], studies)        # every series of those studies
     req, report = mi.build_request(series)                           # short-axis LGE + cine series only
-    mi.deid_request(studies, req).to_csv("/workspace/mri/deid_request.csv", index=False)   # -> send to the TSM
+    # the request file itself: python scripts/deid_request.py --modality mri --out /workspace/deid
     ... after delivery:
     cmr = mi.build_study_table(studies, "/workspace/mri/dicom")      # one row per study with its folder
     spark.createDataFrame(cmr).write.saveAsTable("cardioai_work.cmr_study")
@@ -164,7 +164,7 @@ def build_request(series: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
     return keep[cols].reset_index(drop=True), report
 
 
-DEID_COLUMNS = ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
+from cardioai_mcp.deid import DEID_COLUMNS  # noqa: E402  (one definition for MRI, echo and the request script)
 
 
 def deid_request(studies: pd.DataFrame, req: pd.DataFrame) -> pd.DataFrame:
