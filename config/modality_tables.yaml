@@ -122,7 +122,10 @@ echo:
     link:
       mode: clinic_date                        # clinic_date | accession (older key-based join below)
       study_date: {table: "{modality}.FACT_IMAGINGSTUDY", column: STUDY_DTM}   # CONFIRM the study date column
-    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER}
+    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER,
+                  merged_flag_column: PATIENT_MERGED_FLAG, merged_flag_keep: "N"}
+    # De-identification CSV: PATIENT_DK = the unmerged DIM_PATIENT row of the study's clinic number, as for MRI
+    patient_dk_source: dim_patient
     inventory_link: DICOM_ACCESSION_NUMBER     # accession mode only: inventory column matching echo_test_columns.link
     person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}   # MCP 2026-10-28
     deid_ok: [Ready, Available]
@@ -222,9 +225,13 @@ mri:
     person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}
     deid_ok: [Ready, Available]
     # De-identification request (MCP TSM, 2026-10-15): a CSV of the selected studies with STUDY_INSTANCE_UID,
-    # PATIENT_DK, MODALITY, STMO_NAME_IN_ADL (mcp_imaging.deid_request). PATIENT_DK is read from this column
-    # (r = FACT_RADIOLOGY, s = FACT_IMAGINGSTUDY); CONFIRM which table carries it in the workspace.
-    patient_dk_source: r.PATIENT_DK
+    # PATIENT_DK, MODALITY, STMO_NAME_IN_ADL (scripts/build_deid_request.py). The inventory and FACT_IMAGINGSTUDY
+    # carry PATIENT_CLINIC_NUMBER, not PATIENT_DK (MCP Radiology slides), so PATIENT_DK comes from DIM_PATIENT:
+    # the unmerged row (PATIENT_MERGED_FLAG = 'N') of the study's clinic number (Adam Resnick, 2026-10-21).
+    # Set a column expression instead (e.g. r.PATIENT_DK) only if the TSM asks for a different key.
+    patient_dk_source: dim_patient
+    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER,
+                  merged_flag_column: PATIENT_MERGED_FLAG, merged_flag_keep: "N"}
   requirements:            # MRI agent input spec (mri_training/, runtime 1.0.0)
     sequences: [LGE short axis (required), cine SSFP short axis (for LVEF)]
     min_slices: 3

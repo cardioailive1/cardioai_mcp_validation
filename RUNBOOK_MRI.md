@@ -74,10 +74,15 @@ Model training does not use BigQuery: the queries build the training list and pu
    ```
    Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `report`.
 
-3. **Send `deid_request.csv` to the MCP Technical Success Manager (TSM).** It has one row per selected study, with the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
-   - MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
-   - `PATIENT_DK` is read from `FACT_RADIOLOGY` by default (`mri.mcp.patient_dk_source`). If the workspace has it in another table, change that setting.
-   - Check the file before sending: no empty cells, and the row count matches `report["studies_with_lge"]`.
+3. **Build and send the de-identification request.** MCP releases images only after this request. One command builds it for MRI and echo together:
+   ```bash
+   python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
+   ```
+   Send `/workspace/deid/deid_request.csv` to the MCP Technical Success Manager (TSM) through the workspace's approved channel. It has one row per selected study, with exactly the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
+   - **Which studies:** the ones step 2 selects, for patients aged 18 or over at the study. `deid_request_summary.json` gives the counts at each step.
+   - **`PATIENT_DK`:** the DICOM inventory and `FACT_IMAGINGSTUDY` carry `PATIENT_CLINIC_NUMBER`, not `PATIENT_DK` (MCP Radiology slides). The script looks up the person's unmerged `DIM_PATIENT` row (`PATIENT_MERGED_FLAG = 'N'`). A clinic number with two unmerged rows stops the script; one with none is dropped and counted.
+   - **Checks:** the script writes nothing if a file has an empty cell, a duplicate study, a wrong modality or a malformed UID.
+   - **What MCP returns:** MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
 
 4. **After delivery, build the study table and the manifest.**
    ```python
@@ -200,7 +205,8 @@ Model training does not use BigQuery: the queries build the training list and pu
 
 ## 6. Open items
 
-- [ ] MCP: how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id`; the de-identification request steps, turnaround and delivery folder; the final `SERVICE_RESULT_STATUS` values.
+- [x] MCP: `PATIENT_CLINIC_NUMBER` = OMOP `person.person_source_value` (2026-10-28); the request format is a CSV of `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL` sent to the TSM (`scripts/build_deid_request.py`).
+- [ ] MCP: turnaround and delivery folder for de-identified studies; confirm `PATIENT_DK` = the unmerged `DIM_PATIENT` row; the final `SERVICE_RESULT_STATUS` values (the Radiology slides describe the column but not its values).
 - [ ] Clinical lead: MRI goals, red-flag cut-offs, and the reader protocol (scar threshold, basal slice).
 - [ ] Hire up to 5 outside cardiac MRI readers; each submits the DUA form.
 - [ ] Write the scoring script that produces `mri_predictions` from the locked bundle.

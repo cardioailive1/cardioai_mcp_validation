@@ -25,6 +25,8 @@ from typing import Dict, Tuple
 
 import pandas as pd
 
+from cardioai_mcp.deid import DEID_COLUMNS  # one definition for MRI and echo
+
 from .io import CINE_RE, LGE_RE, SAX_RE
 
 LONG_AXIS_RE = re.compile(r"(?i)(2ch|3ch|4ch|lvot|long.?axis|\bla\b|\bhla\b|\bvla\b|axial|\btra\b|cor(onal)?\b|sag(ittal)?\b|loc(alizer|aliser)?\b|scout|survey|tagging|t1.?map|t2.?map|molli|shmolli|ecv|perf(usion)?|flow|phase.?contrast|\bpc\b)")
@@ -58,6 +60,10 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
                  f"= CAST(s.PATIENT_CLINIC_NUMBER AS STRING)")
     else:
         person, pjoin = "s.PATIENT_CLINIC_NUMBER", ""
+    # PATIENT_DK: 'dim_patient' = looked up afterwards in DIM_PATIENT (cardioai_mcp.deid.attach_patient_dk);
+    # otherwise a column expression (r = FACT_RADIOLOGY, s = FACT_IMAGINGSTUDY)
+    src = c.get('patient_dk_source', 'r.PATIENT_DK')
+    dk = "CAST(NULL AS BIGINT)" if src == "dim_patient" else src
     return f"""
     WITH s AS (
       SELECT * FROM {_t(c, 'study_table')} s
@@ -71,7 +77,7 @@ def cmr_studies_sql(modality_cfg: dict, start: str = "1900-01-01", end: str = "2
       FROM {_t(c, 'inventory_table')} i
       WHERE i.MODALITY = 'MR'
     )
-    SELECT {person} AS person_id, s.PATIENT_CLINIC_NUMBER AS clinic_number, {c.get('patient_dk_source', 'r.PATIENT_DK')} AS patient_dk,
+    SELECT {person} AS person_id, s.PATIENT_CLINIC_NUMBER AS clinic_number, {dk} AS patient_dk,
            s.STUDY_INSTANCE_UID AS study_uid,
            s.STMO_NAME_IN_ADL AS stmo, a.MODALITY AS modality, a.DICOM_ACCESSION_NUMBER AS accession,
            r.RADIOLOGY_DTM AS study_datetime, s.STUDY_DESCRIPTION AS study_description,
@@ -144,7 +150,6 @@ def build_request(series: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int]]:
     return keep[cols].reset_index(drop=True), report
 
 
-DEID_COLUMNS = ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
 
 
 def deid_request(studies: pd.DataFrame, req: pd.DataFrame) -> pd.DataFrame:
@@ -159,7 +164,8 @@ def deid_request(studies: pd.DataFrame, req: pd.DataFrame) -> pd.DataFrame:
     out = out.drop_duplicates(["STUDY_INSTANCE_UID", "STMO_NAME_IN_ADL"]).reset_index(drop=True)
     missing = out[DEID_COLUMNS].isna().any(axis=1)
     if missing.any():
-        raise ValueError(f"{int(missing.sum())} studies lack a value in {DEID_COLUMNS} (check patient_dk_source)")
+        raise ValueError(f"{int(missing.sum())} studies lack a value in {DEID_COLUMNS}: with patient_dk_source: dim_patient, "
+                         "run cardioai_mcp.deid.attach_patient_dk first (scripts/build_deid_request.py does)")
     return out[DEID_COLUMNS]
 
 

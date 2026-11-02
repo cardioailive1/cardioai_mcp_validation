@@ -59,7 +59,11 @@ Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md
    req, report = me.build_request(studies)                           # de-identifiable + a wall-motion statement
    me.deid_request(studies, req).to_csv("/workspace/echo/deid_request.csv", index=False); report
    ```
-   Send `deid_request.csv` (STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL) to the MCP TSM. Echo studies are requested whole; the cines are selected after delivery.
+   To write the file MCP asks for (STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL), use the one command shared with MRI:
+   ```bash
+   python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
+   ```
+   It keeps adults only, takes `PATIENT_DK` from the unmerged `DIM_PATIENT` row, and checks the file before writing it. Send `/workspace/deid/deid_request.csv` to the MCP TSM. Echo studies are requested whole; the cines are selected after delivery.
 
 3. **After delivery, build the tables.**
    ```python
