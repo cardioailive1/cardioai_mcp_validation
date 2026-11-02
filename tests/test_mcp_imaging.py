@@ -101,16 +101,24 @@ def test_series_rules():
 
 def test_deid_request_script_selection():
     """scripts/deid_request.py (MCP TSM, 2026-11-02): the four-column CSV, PATIENT_DK from active DIM_PATIENT rows,
-    and the cap that keeps Phase 2 patients first."""
+    and the Phase 2 cohort's index studies requested even when the training rules skip them."""
     import importlib.util
+
+    import pandas as pd
     spec = importlib.util.spec_from_file_location("deid_request", Path(__file__).resolve().parents[1] / "scripts" / "deid_request.py")
     dr = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dr)
     con, st, eng = _db()
-    studies, keep, csv, rep = dr.select_mri(eng, st["modality"], "1900-01-01", "2100-01-01")
+    studies, train_uids, rep = dr.select_mri(eng, st["modality"], "1900-01-01", "2100-01-01")
+    assert train_uids == {"1.1", "1.2"}                                    # LGE + de-identifiable
+    assert dict(zip(studies.study_uid, studies.deid_ok)) == {"1.1": True, "1.2": True, "1.5": False}
+    csv = dr.to_csv(studies[studies.study_uid.isin(train_uids)], "MR")
     assert list(csv.columns) == ["STUDY_INSTANCE_UID", "PATIENT_DK", "MODALITY", "STMO_NAME_IN_ADL"]
-    assert dict(zip(csv.STUDY_INSTANCE_UID, csv.PATIENT_DK)) == {"1.1": 1000, "1.2": 1001}     # 999 is a merged row
-    assert set(keep.n_patient_dk) == {1}
-    capped = dr.sample(keep, 1, 0, always={12})
-    assert capped.study_uid.tolist() == ["1.2"]                                                 # the Phase 2 patient first
-    assert dr._years(keep, "study_datetime") == {"2022": 2}
+    assert dict(zip(csv.STUDY_INSTANCE_UID, csv.PATIENT_DK)) == {"1.1": 1000, "1.2": 1001}  # 999 is a merged row
+    # Phase 2 cohort: person 12 (index on the study date) and 15 (its only study is not de-identifiable)
+    cohort = pd.DataFrame({"person_id": [12, 15], "index_date": ["2022-03-01", "2022-03-01"]})
+    idx, unmatched = dr.cohort_index_studies(studies, cohort, "study_datetime")
+    assert idx.study_uid.tolist() == ["1.2"] and unmatched == 1
+    late = pd.DataFrame({"person_id": [11], "index_date": ["2022-03-05"]})               # 4 days off: not the index study
+    assert dr.cohort_index_studies(studies, late, "study_datetime")[1] == 1
+    assert len(dr.sample(studies, 1, 0)) == 1 and dr._years(studies, "study_datetime") == {"2022": 3}

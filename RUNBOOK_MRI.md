@@ -66,7 +66,7 @@ Model training does not use BigQuery: the queries build the training list and pu
    python scripts/deid_request.py --modality mri --dry-run            # how many studies, per year; nothing written
    python scripts/deid_request.py --modality mri --out /workspace/deid   # deid_request_mri.csv + selection + summary
    ```
-   Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `deid_summary.json`. `--max-studies N --phase2-table mri_analytic_locked` caps the request and keeps the Phase 2 patients first.
+   Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `deid_summary.json`. Run this **after step 1**: the script reads the Phase 2 MRI cohort (`mri_analytic_locked`, else `mri_analytic`) and always requests each cohort patient's index study, even one the training rules would skip, because the agent is scored on those images. It stops if the cohort table is missing. `--max-studies N` caps only the training studies.
 
 3. **Send `deid_request_mri.csv` to the MCP Technical Success Manager (TSM).** MCP needs it before it gives access to the images (2026-11-02). It has one row per selected study, with the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
    - MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
