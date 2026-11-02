@@ -51,18 +51,19 @@ Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md
    Snapshot the analytic table as `cardioai_work.echo_analytic_locked`.
 
 2. **Find echo studies and build the de-identification request.**
-   ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
-   from echo_wm_training import mcp_echo as me
-   study = load_study(); eng = make_engine("bigquery", study)
-   studies = me.find_echo_studies(eng, study["modality"])           # echo reports joined to their DICOM study
-   req, report = me.build_request(studies)                           # de-identifiable + a wall-motion statement
-   me.deid_request(studies, req).to_csv("/workspace/echo/deid_request.csv", index=False); report
+   ```bash
+   python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
+   python scripts/deid_request.py --modality echo --out /workspace/deid  # deid_request_echo.csv + selection + summary
    ```
-   Send `deid_request.csv` (STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL) to the MCP TSM. Echo studies are requested whole; the cines are selected after delivery.
+   Echo reports are joined to their DICOM study (clinic number + date, transthoracic only); a study is selected when it is de-identifiable and its report has a wall-motion statement. Send `deid_request_echo.csv` (STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL) to the MCP TSM; `PATIENT_DK` comes from `DIM_PATIENT` by clinic number. Echo studies are requested whole; the cines are selected after delivery. Echo is far more common than CMR: run the dry run first and agree the number with the TSM (`--max-studies N --phase2-table echo_analytic_locked` keeps the Phase 2 patients and samples the rest).
 
 3. **After delivery, build the tables.**
    ```python
+   import pandas as pd
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+   from echo_wm_training import mcp_echo as me
+   study = load_study(); eng = make_engine("bigquery", study)
+   studies = pd.read_parquet("/workspace/deid/deid_selection_echo.parquet")   # written by scripts/deid_request.py
    t = me.build_study_table(studies, "/workspace/echo/dicom")
    eng.write_table(t, "echo_wm_study")
    ref = me.reference_table(studies)                                 # report-derived reference (Phase 2 and audit)
