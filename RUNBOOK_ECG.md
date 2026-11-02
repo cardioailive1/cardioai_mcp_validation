@@ -44,6 +44,13 @@ Model training does not use BigQuery: the queries build the training list and pu
 
 ## 2. Steps
 
+**Image de-identification: not needed for the ECG agent.** The ECG waveforms are rows in BigQuery (`FACT_ECG_WAVEFORM`), not DICOM images, so they are read directly and nothing is sent to MCP for de-identification. The MRI and echo agents do need it before their images can be accessed (MCP TSM, 2026-11-02). If you run the request for all agents at once, this is the command (details in `RUNBOOK_MRI.md` step 2 and `RUNBOOK_ECHO_WM.md` step 2):
+```bash
+python scripts/deid_request.py --modality mri echo --dry-run           # counts per step and per year; no CSV written
+python scripts/deid_request.py --modality mri echo --out /workspace/deid   # CSVs for the TSM + selection + summary
+```
+
+
 1. **Lock the Phase 2 ECG cohort first.**
    ```bash
    python scripts/run_cohorts.py --cohorts ecg --save-tables
