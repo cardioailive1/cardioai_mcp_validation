@@ -61,26 +61,25 @@ Model training does not use BigQuery: the queries build the training list and pu
    - the final-report `SERVICE_RESULT_STATUS` values;
    - `person_map` is filled in: OMOP `person.person_source_value` holds `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28).
 
-   Then run:
-   ```python
-   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
-   from mri_training import mcp_imaging as mi
-   study = load_study(); eng = make_engine("bigquery", study)
-   studies = mi.find_cmr_studies(eng, study["modality"])     # MR cardiac studies with a final report
-   series = mi.list_series(eng, study["modality"], studies)
-   req, report = mi.build_request(series)                     # short-axis LGE + cine series only
-   deid = mi.deid_request(studies, req)                       # one row per selected study
-   deid.to_csv("/workspace/mri/deid_request.csv", index=False); report
+   Then run, counts first:
+   ```bash
+   python scripts/deid_request.py --modality mri --dry-run            # how many studies, per year; nothing written
+   python scripts/deid_request.py --modality mri --out /workspace/deid   # deid_request_mri.csv + selection + summary
    ```
-   Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `report`.
+   Only de-identifiable series (status Ready or Available) are included. Studies without an LGE series are skipped and counted in `deid_summary.json`. Run this **after step 1**: the script reads the Phase 2 MRI cohort (`mri_analytic_locked`, else `mri_analytic`) and always requests each cohort patient's index study, even one the training rules would skip, because the agent is scored on those images. It stops if the cohort table is missing. `--max-studies N` caps only the training studies.
 
-3. **Send `deid_request.csv` to the MCP Technical Success Manager (TSM).** It has one row per selected study, with the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
+3. **Send `deid_request_mri.csv` to the MCP Technical Success Manager (TSM).** MCP needs it before it gives access to the images (2026-11-02). It has one row per selected study, with the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
    - MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.
-   - `PATIENT_DK` is read from `FACT_RADIOLOGY` by default (`mri.mcp.patient_dk_source`). If the workspace has it in another table, change that setting.
-   - Check the file before sending: no empty cells, and the row count matches `report["studies_with_lge"]`.
+   - The radiology tables carry `PATIENT_CLINIC_NUMBER`, not `PATIENT_DK` (MCP Radiology deck), so `PATIENT_DK` is looked up in `DIM_PATIENT` by clinic number (active rows only; `mri.mcp.patient_dk_source: dim_patient`). The summary counts any clinic number with more than one active `PATIENT_DK`; mention these to the TSM.
+   - Check the file before sending: no empty cells, and the row count matches `selected_studies` in `deid_summary.json`.
+   - The file holds study and patient keys: send it the way the TSM asks, not as an ordinary attachment.
 
 4. **After delivery, build the study table and the manifest.**
    ```python
+   import pandas as pd; from mri_training import mcp_imaging as mi
+   from cardioai_mcp.config import load_study; from cardioai_mcp.engine import make_engine
+   study = load_study(); eng = make_engine("bigquery", study)
+   studies = pd.read_parquet("/workspace/deid/deid_selection_mri.parquet")   # written by scripts/deid_request.py
    cmr = mi.build_study_table(studies, "/workspace/mri/dicom")      # one row per delivered study folder
    eng.write_table(cmr, "cmr_study")
    from mri_training.dataset import load_config, build_manifest

@@ -122,7 +122,7 @@ echo:
     link:
       mode: clinic_date                        # clinic_date | accession (older key-based join below)
       study_date: {table: "{modality}.FACT_IMAGINGSTUDY", column: STUDY_DTM}   # CONFIRM the study date column
-    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER}
+    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
     inventory_link: DICOM_ACCESSION_NUMBER     # accession mode only: inventory column matching echo_test_columns.link
     person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}   # MCP 2026-10-28
     deid_ok: [Ready, Available]
@@ -205,8 +205,8 @@ mri:
   # NOT in a table: instances are inventoried in FACT_RADIOLOGY_DICOM_INVENTORY and must be REQUESTED for
   # de-identification (IMAGE_DEID_STATUS Ready or Available). mri_training.mcp_imaging builds the request
   # (short-axis LGE + cine series only) and, once delivered, the `table` above (cmr_study) from them.
-  # Joins: FACT_RADIOLOGY.ACCESSION_NBR = INVENTORY.DICOM_ACCESSION_NUMBER;
-  #        INVENTORY <-> FACT_IMAGINGSTUDY on STMO_NAME_IN_ADL + MODALITY + STUDY_INSTANCE_UID.
+  # Joins (MCP Radiology deck): FACT_RADIOLOGY.ACCESSION_NBR = INVENTORY.DICOM_ACCESSION_NUMBER;
+  #        INVENTORY <-> FACT_IMAGINGSTUDY on STMO_NAME_IN_ADL + STUDY_INSTANCE_UID (FACT_IMAGINGSTUDY has MODALITY_1..n).
   # OMOP: CMR procedures are in procedure_occurrence (CPT), reports also in note.note_text; the inventory is not in OMOP.
   mcp:
     schema: "{modality}"                       # CONFIRM the schema holding the FACT_ tables
@@ -221,10 +221,13 @@ mri:
     # holds the same clinic number (Adam Resnick 2026-10-28):
     person_map: {table: "{cdm}.person", clinic_number_column: person_source_value, person_id_column: person_id}
     deid_ok: [Ready, Available]
-    # De-identification request (MCP TSM, 2026-10-15): a CSV of the selected studies with STUDY_INSTANCE_UID,
-    # PATIENT_DK, MODALITY, STMO_NAME_IN_ADL (mcp_imaging.deid_request). PATIENT_DK is read from this column
-    # (r = FACT_RADIOLOGY, s = FACT_IMAGINGSTUDY); CONFIRM which table carries it in the workspace.
-    patient_dk_source: r.PATIENT_DK
+    # De-identification request (MCP TSM, 2026-10-15 and 2026-11-02): a CSV of the selected studies with
+    # STUDY_INSTANCE_UID, PATIENT_DK, MODALITY, STMO_NAME_IN_ADL (scripts/deid_request.py). The radiology tables
+    # carry PATIENT_CLINIC_NUMBER, not PATIENT_DK (MCP Radiology deck), so PATIENT_DK comes from DIM_PATIENT by
+    # clinic number (active rows, PATIENT_MERGED_FLAG = 'N'). Set patient_dk_source to a column (e.g. r.PATIENT_DK)
+    # only if MCP says to take it from there instead.
+    patient_dk_source: dim_patient
+    dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
   requirements:            # MRI agent input spec (mri_training/, runtime 1.0.0)
     sequences: [LGE short axis (required), cine SSFP short axis (for LVEF)]
     min_slices: 3

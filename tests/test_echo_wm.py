@@ -359,8 +359,8 @@ def test_echo_link_by_clinic_number_and_date():
     st = load_study()
     st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
     con = duckdb.connect()
-    con.execute("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR)")
-    con.execute("INSERT INTO DIM_PATIENT VALUES (1, 'C1'), (2, 'C1'), (3, 'C2')")
+    con.execute("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_MERGED_FLAG VARCHAR)")
+    con.execute("INSERT INTO DIM_PATIENT VALUES (1, 'C1', 'Y'), (2, 'C1', 'N'), (3, 'C2', 'N')")
     con.execute("CREATE TABLE FACT_ECHO_TEST (PATIENT_DK BIGINT, ECHO_TEST_DTM TIMESTAMP, ECHO_NOTE VARCHAR, ACCESSION_NBR VARCHAR)")
     con.execute("""INSERT INTO FACT_ECHO_TEST VALUES
         (2, TIMESTAMP '2019-04-01 09:00:00', 'Inferior hypokinesis. LVEF 45%.', NULL),
@@ -369,10 +369,10 @@ def test_echo_link_by_clinic_number_and_date():
     con.execute("CREATE TABLE FACT_RADIOLOGY_DICOM_INVENTORY (STMO_NAME_IN_ADL VARCHAR, MODALITY VARCHAR, STUDY_INSTANCE_UID VARCHAR, PATIENT_CLINIC_NUMBER VARCHAR, IMAGE_DEID_STATUS VARCHAR, STUDY_DESCRIPTION VARCHAR)")
     con.execute("""INSERT INTO FACT_RADIOLOGY_DICOM_INVENTORY SELECT 'stmo', 'US', uid, cn, 'Ready', 'ECHO TTE'
         FROM (VALUES ('u1', 'C1'), ('u2', 'C2'), ('u3', 'C2'), ('u9', 'C9')) v(uid, cn), range(12)""")
-    con.execute("CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP)")
-    con.execute("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('stmo', 'US', 'u1', TIMESTAMP '2019-04-01 08:40:00'),
-        ('stmo', 'US', 'u2', TIMESTAMP '2019-06-01 07:50:00'), ('stmo', 'US', 'u3', TIMESTAMP '2019-06-01 14:55:00'),
-        ('stmo', 'US', 'u9', TIMESTAMP '2019-04-01 08:00:00')""")
+    con.execute("CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP, STUDY_DESCRIPTION VARCHAR, PROCEDURE_CODE_TEXT VARCHAR)")
+    con.execute("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('stmo', 'US', 'u1', TIMESTAMP '2019-04-01 08:40:00', NULL, NULL),
+        ('stmo', 'US', 'u2', TIMESTAMP '2019-06-01 07:50:00', NULL, NULL), ('stmo', 'US', 'u3', TIMESTAMP '2019-06-01 14:55:00', NULL, NULL),
+        ('stmo', 'US', 'u9', TIMESTAMP '2019-04-01 08:00:00', NULL, NULL)""")
     st["modality"]["echo"]["mcp"].update(test_type=None, person_map=None)   # the 10-21 layout: no test type, no person map
     logs = []
     df = me.find_echo_studies(DuckDBEngine(con, st), st["modality"], log=logs.append)
@@ -397,8 +397,8 @@ def test_echo_link_tte_filter_and_lvef_from_echo_results():
     q = con.execute
     q("CREATE TABLE person (person_id BIGINT, person_source_value VARCHAR)")
     q("INSERT INTO person VALUES (1, 'A100'), (2, 'B200')")
-    q("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR)")
-    q("INSERT INTO DIM_PATIENT VALUES (10, 'A100'), (11, 'A100'), (20, 'B200')")
+    q("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_MERGED_FLAG VARCHAR)")
+    q("INSERT INTO DIM_PATIENT VALUES (10, 'A100', 'N'), (11, 'A100', 'Y'), (20, 'B200', 'N')")
     q("CREATE TABLE DIM_ECHO_TEST (ECHO_TEST_DK BIGINT, ECHO_TEST_DESCRIPTION VARCHAR)")
     q("INSERT INTO DIM_ECHO_TEST VALUES (1, 'Echocardiogram TTE complete'), (2, 'Transesophageal echo (TEE)')")
     q("""CREATE TABLE FACT_ECHO_TEST (ECHO_TEST_FPK BIGINT, PATIENT_DK BIGINT, ECHO_TEST_DTM TIMESTAMP, ECHO_NOTE VARCHAR,
@@ -414,15 +414,19 @@ def test_echo_link_tte_filter_and_lvef_from_echo_results():
          ('s', 'US', 'a-tte', 'A100', 'Ready', 'ECHO TTE COMPLETE'), ('s', 'US', 'a-tee', 'A100', 'Ready', 'ECHO TEE'),
          ('s', 'US', 'a-abd', 'A100', 'Ready', 'US ABDOMEN COMPLETE'),
          ('s', 'US', 'b-1', 'B200', 'Ready', 'ECHO TTE COMPLETE'), ('s', 'US', 'b-2', 'B200', 'Ready', 'ECHO TTE LIMITED')""")
-    q("CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP)")
-    q("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('s', 'US', 'a-tte', TIMESTAMP '2019-04-02 09:05:00'),
-         ('s', 'US', 'a-tee', TIMESTAMP '2019-04-02 14:10:00'), ('s', 'US', 'a-abd', TIMESTAMP '2019-04-02 11:00:00'),
-         ('s', 'US', 'b-1', TIMESTAMP '2020-02-03 08:05:00'), ('s', 'US', 'b-2', TIMESTAMP '2020-02-03 16:05:00')""")
+    # FACT_IMAGINGSTUDY joins the inventory on STMO + STUDY_INSTANCE_UID only (MCP Radiology deck): a-tte is listed
+    # under MODALITY_2 and still matches; its procedure text is read with the descriptions
+    q("""CREATE TABLE FACT_IMAGINGSTUDY (STMO_NAME_IN_ADL VARCHAR, MODALITY_1 VARCHAR, STUDY_INSTANCE_UID VARCHAR, STUDY_DTM TIMESTAMP,
+         STUDY_DESCRIPTION VARCHAR, PROCEDURE_CODE_TEXT VARCHAR)""")
+    q("""INSERT INTO FACT_IMAGINGSTUDY VALUES ('s', 'SR', 'a-tte', TIMESTAMP '2019-04-02 09:05:00', NULL, 'Echocardiogram transthoracic'),
+         ('s', 'US', 'a-tee', TIMESTAMP '2019-04-02 14:10:00', NULL, NULL), ('s', 'US', 'a-abd', TIMESTAMP '2019-04-02 11:00:00', NULL, NULL),
+         ('s', 'US', 'b-1', TIMESTAMP '2020-02-03 08:05:00', NULL, NULL), ('s', 'US', 'b-2', TIMESTAMP '2020-02-03 16:05:00', NULL, NULL)""")
     eng = DuckDBEngine(con, st)
     mod = st["modality"]
     studies = me.find_echo_studies(eng, mod, log=lambda s: None)
     # A: the TEE report and the TEE / abdominal studies no longer make the day ambiguous; B: two TTEs on one day -> dropped
     assert studies.study_uid.tolist() == ["a-tte"] and int(studies.person_id[0]) == 1
+    assert int(studies.patient_dk[0]) == 10                    # active DIM_PATIENT row (11 is merged)
     assert studies.attrs["link_report"]["ambiguous_days"] == 1
 
     q("CREATE TABLE DIM_ECHO_TEST_RESULT_TYPE (ECHO_TEST_RESULT_TYPE_DK BIGINT, ECHO_TEST_RESULT_NAME VARCHAR, ECHO_TEST_RESULT_DESCRIPTION VARCHAR)")
