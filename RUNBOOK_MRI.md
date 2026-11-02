@@ -79,7 +79,8 @@ Model training does not use BigQuery: the queries build the training list and pu
    python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
    ```
    Send `/workspace/deid/deid_request.csv` to the MCP Technical Success Manager (TSM) through the workspace's approved channel. It has one row per selected study, with exactly the columns MCP asked for: `STUDY_INSTANCE_UID`, `PATIENT_DK`, `MODALITY`, `STMO_NAME_IN_ADL`.
-   - **Which studies:** the ones step 2 selects, for patients aged 18 or over at the study. `deid_request_summary.json` gives the counts at each step.
+   - **Order:** after the Phase 2 cohort is locked (step 1), before the training pool. The script refuses to run until `mri_analytic_locked` (and `echo_analytic_locked` for echo) exists. The training pool (the manifest, step 4) is built from the delivered studies, with the locked cohort's patients excluded.
+   - **Which studies:** the ones step 2 selects, for patients aged 18 or over at the study. This covers both the training candidates and the locked cohort's index studies, because Phase 2 scores their images too. `deid_request_summary.json` gives the counts at each step, including how many locked index studies are requested and how many have no requestable images. Review any of the latter before sending.
    - **`PATIENT_DK`:** the DICOM inventory and `FACT_IMAGINGSTUDY` carry `PATIENT_CLINIC_NUMBER`, not `PATIENT_DK` (MCP Radiology slides). The script looks up the person's unmerged `DIM_PATIENT` row (`PATIENT_MERGED_FLAG = 'N'`). A clinic number with two unmerged rows stops the script; one with none is dropped and counted.
    - **Checks:** the script writes nothing if a file has an empty cell, a duplicate study, a wrong modality or a malformed UID.
    - **What MCP returns:** MCP de-identifies **whole studies**. After delivery, the pipeline itself picks the short-axis LGE and cine series.

@@ -16,6 +16,12 @@ Selection (same rules as training uses, so nothing is pulled that the models wou
            statement (mcp_echo.build_request)
     both : adults (>= study.yaml min_age at the study); PATIENT_DK from DIM_PATIENT (unmerged row).
 The script stops with an error, and writes nothing, if a file fails its checks.
+
+Order (runbooks MRI / echo, step 1 -> 3): the Phase 2 cohort is built and LOCKED first ({work}.mri_analytic_locked,
+{work}.echo_analytic_locked); the script refuses to run before that. The request then covers both the training
+candidates and the locked cohort's index studies (Phase 2 scores their images too); the summary reports how many
+locked index studies are in the request and how many have no requestable images. The training pool (manifest) is
+built AFTER delivery, from the delivered studies, with the locked cohort's patients excluded.
 """
 from __future__ import annotations
 
@@ -32,8 +38,33 @@ from cardioai_mcp import deid  # noqa: E402
 from cardioai_mcp.config import load_study  # noqa: E402
 
 
+LOCKED = {"mri": "mri_analytic_locked", "echo": "echo_analytic_locked"}
+
+
+def locked_cohort(engine, modality: str) -> pd.DataFrame:
+    try:
+        return engine.read_table(LOCKED[modality])
+    except KeyError:
+        raise SystemExit(f"Lock the Phase 2 {modality} cohort first (runbook step 1: run_cohorts.py --cohorts {modality} "
+                         f"--save-tables, then snapshot {LOCKED[modality]}). The de-identification request comes after it.")
+
+
+def cohort_coverage(locked: pd.DataFrame, sel: pd.DataFrame, window_days: int = 1) -> dict:
+    """Locked cohort index studies (person_id + index_date) that have a requested study within +/- window_days."""
+    lk = pd.DataFrame({"person_id": pd.to_numeric(locked.person_id, errors="coerce"),
+                       "index_date": pd.to_datetime(locked.index_date, errors="coerce")}).dropna().drop_duplicates()
+    when = pd.to_datetime(sel.get("study_datetime", sel.get("study_date")), errors="coerce").dt.normalize()
+    rq = pd.DataFrame({"person_id": pd.to_numeric(sel.person_id, errors="coerce"), "study_date": when}).dropna()
+    m = lk.merge(rq, on="person_id", how="left")
+    m["hit"] = (m.study_date - m.index_date).abs().dt.days <= window_days
+    hit = m.groupby(["person_id", "index_date"]).hit.any()
+    return {"phase2_locked_index_studies": int(len(lk)), "phase2_index_studies_requested": int(hit.sum()),
+            "phase2_index_studies_not_requestable": int((~hit).sum())}
+
+
 def build(engine, study: dict, modality: str, start: str, end: str, min_age: float, log=print):
     cfg = study["modality"]
+    locked = locked_cohort(engine, modality)
     if modality == "mri":
         from mri_training import mcp_imaging as mod
         studies = mod.find_cmr_studies(engine, cfg, start, end)
@@ -50,7 +81,12 @@ def build(engine, study: dict, modality: str, start: str, end: str, min_age: flo
     sel, p = deid.attach_patient_dk(engine, mcp, sel)
     out = mod.deid_request(sel, req[req.study_uid.isin(sel.study_uid)])
     problems = deid.validate(out, modality)
-    return out, {**rep, **a, **p, "rows": int(len(out)), "patients": int(sel.clinic_number.nunique()),
+    cov = cohort_coverage(locked, sel)
+    if cov["phase2_index_studies_not_requestable"]:
+        log(f"WARNING {modality}: {cov['phase2_index_studies_not_requestable']} of {cov['phase2_locked_index_studies']} "
+            "locked Phase 2 index studies have no requestable images (not de-identifiable, no LGE / wall-motion "
+            "statement, or no PATIENT_DK); Phase 2 cannot score them. Review before sending.")
+    return out, {**rep, **a, **p, **cov, "rows": int(len(out)), "patients": int(sel.clinic_number.nunique()),
                  "problems": problems}
 
 

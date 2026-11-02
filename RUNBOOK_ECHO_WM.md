@@ -63,7 +63,7 @@ Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md
    ```bash
    python scripts/build_deid_request.py --modality mri echo --out /workspace/deid
    ```
-   It keeps adults only, takes `PATIENT_DK` from the unmerged `DIM_PATIENT` row, and checks the file before writing it. Send `/workspace/deid/deid_request.csv` to the MCP TSM. Echo studies are requested whole; the cines are selected after delivery.
+   It runs only after the Phase 2 cohort is locked (step 1), keeps adults only, takes `PATIENT_DK` from the unmerged `DIM_PATIENT` row, and checks the file before writing it. The summary shows how many locked Phase 2 index echoes are in the request. The training pool is built after delivery (step 3 onward), with the locked cohort's patients excluded. Send `/workspace/deid/deid_request.csv` to the MCP TSM. Echo studies are requested whole; the cines are selected after delivery.
 
 3. **After delivery, build the tables.**
    ```python

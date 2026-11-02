@@ -21,8 +21,23 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import build_deid_request as bdr  # noqa: E402
 
 
+def _locked(con):
+    # Phase 2 MRI cohort, locked before the request: person 11 (study 1.1 requested), person 13 (study 1.3 has no
+    # final report, so it cannot be requested)
+    con.execute("CREATE TABLE mri_analytic_locked AS SELECT * FROM (VALUES (11, DATE '2022-03-01'), "
+                "(13, DATE '2022-03-01')) v(person_id, index_date)")
+
+
+def test_refuses_before_the_cohort_is_locked(tmp_path):
+    con, st, eng = _db()
+    with pytest.raises(SystemExit, match="Lock the Phase 2 mri cohort first"):
+        bdr.run(eng, st, ["mri"], str(tmp_path))
+    assert not (tmp_path / "deid_request.csv").exists()
+
+
 def test_script_writes_the_mri_request(tmp_path):
     con, st, eng = _db()
+    _locked(con)
     # C2 (study 1.2, 2022-03-01) is 17 at the study: not requested
     con.execute("UPDATE person SET year_of_birth = 2004, month_of_birth = 6, day_of_birth = 1 "
                 "WHERE person_source_value = 'C2'")
@@ -35,10 +50,13 @@ def test_script_writes_the_mri_request(tmp_path):
     m = json.loads((tmp_path / "deid_request_summary.json").read_text())["mri"]
     assert m["found"] == 3 and m["studies_with_lge"] == 2 and m["studies_under_min_age"] == 1 and m["rows"] == 1
     assert m["patient_dk_from"] == "DIM_PATIENT" and summary["total_rows"] == 1
+    assert (m["phase2_locked_index_studies"], m["phase2_index_studies_requested"],
+            m["phase2_index_studies_not_requestable"]) == (2, 1, 1)
 
 
 def test_ambiguous_patient_key_stops_the_request(tmp_path):
     con, st, eng = _db()
+    _locked(con)
     con.execute("UPDATE DIM_PATIENT SET PATIENT_MERGED_FLAG = 'N' WHERE PATIENT_DK = 502")   # C1 now has two
     with pytest.raises(ValueError, match="more than one unmerged"):
         bdr.run(eng, st, ["mri"], str(tmp_path))
@@ -47,6 +65,7 @@ def test_ambiguous_patient_key_stops_the_request(tmp_path):
 
 def test_missing_patient_key_is_dropped_and_counted(tmp_path):
     con, st, eng = _db()
+    _locked(con)
     con.execute("DELETE FROM DIM_PATIENT WHERE PATIENT_CLINIC_NUMBER = 'C2'")
     summary = bdr.run(eng, st, ["mri"], str(tmp_path))
     assert summary["mri"]["studies_without_patient_dk"] == 1 and summary["mri"]["rows"] == 1
