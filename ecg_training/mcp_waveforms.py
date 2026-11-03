@@ -4,6 +4,8 @@ MCP (Adam Resnick and Tommy Stretch, 2026-10-21):
   * FACT_ECG_WAVEFORM has one row per PATIENT_DK, ACQUISITION_TS, LEAD_ID and WAVEFORM_TYPE. Use
     WAVEFORM_TYPE = 'Rhythm' (the full 10 s recording); 'Median' is a synthesized representative beat.
   * Eight leads are stored: I, II, V1-V6 (III, aVR, aVL, aVF are derived by runtime.preprocess).
+  * MCP ECG deck (2026-11-03): FACT_ECG_WAVEFORM carries PATIENT_CLINIC_NUMBER; resting ECGs only (EKG_TYPE =
+    'resting'); WAVEFORM_TYPE 'rhythm' (compared case-insensitively). FACT_ECG has one row per interpretation snippet.
   * Each WAVEFORM value is URL-encoded Base64 that decodes on its own: signed 16-bit little-endian counts;
     counts x 4.88 = microvolts. Records are NOT ordered pieces of one recording (STRING_AGG order is not
     chronological), so each lead must come from exactly one row: an acquisition with several Rhythm rows
@@ -93,6 +95,16 @@ def assemble(rows: pd.DataFrame, cfg: dict) -> Record:
     return np.stack(sigs), fs, want, raw_cfg.get("units", "uV")
 
 
+def _type_filter(e: dict, alias: str = "w") -> str:
+    """WAVEFORM_TYPE (case-insensitive: 'rhythm' in the MCP deck, 'Rhythm' in the 2026-10-21 email) and EKG_TYPE."""
+    w = e["waveform_columns"]
+    out = f"LOWER(CAST({alias}.{w['waveform_type']} AS STRING)) = {_q(str(e.get('waveform_type', 'rhythm')).lower())}"
+    f = e.get("waveform_filter") or {}
+    if f.get("column"):
+        out += f" AND LOWER(CAST({alias}.{f['column']} AS STRING)) = {_q(str(f['value']).lower())}"
+    return out
+
+
 def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
     """Rhythm rows (with clinic number and sample rate) for a batch of patients; matched to ECGs in pandas."""
     e = modality_cfg["ecg"]
@@ -103,12 +115,11 @@ def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
         clinic, djoin = f"w.{wk}", ""
     else:
         clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = w.{wk}"
-    if sr.get("table"):
-        sk = sr.get(kind) or sr.get("patient_dk")
+    if sr.get("table") and sr.get(kind):              # same patient key on both sides
         rate, rjoin = (f"r.{sr['column']}",
-                       f"LEFT JOIN {_t(sr['table'])} r ON r.{sk} = w.{wk} "
+                       f"LEFT JOIN {_t(sr['table'])} r ON r.{sr[kind]} = w.{wk} "
                        f"AND r.{sr['acquisition_ts']} = w.{w['acquisition_ts']}")
-    else:
+    else:                                             # no matching key: the rate is inferred from the sample count
         rate, rjoin = "CAST(NULL AS DOUBLE)", ""
     return f"""
     SELECT CAST({clinic} AS STRING) AS clinic_number,
@@ -118,7 +129,7 @@ def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
     FROM {_t(e['waveform_table'])} w
     {djoin}
     {rjoin}
-    WHERE w.{w['waveform_type']} = {_q(e.get('waveform_type', 'Rhythm'))}
+    WHERE {_type_filter(e)}
       AND CAST({clinic} AS STRING) IN ({ids})
     """
 
@@ -146,12 +157,12 @@ def probe(engine, modality_cfg: dict, n: int = 20) -> pd.DataFrame:
     _, wk = _key(w)
     keys = engine.query(engine.render(
         f"SELECT DISTINCT w.{wk} AS dk, w.{w['acquisition_ts']} AS ts FROM {_t(e['waveform_table'])} w "
-        f"WHERE w.{w['waveform_type']} = {_q(e.get('waveform_type', 'Rhythm'))} LIMIT {int(n)}", {}))
+        f"WHERE {_type_filter(e)} LIMIT {int(n)}", {}))
     out = []
     for _, k in keys.iterrows():
         sql = (f"SELECT CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform FROM {_t(e['waveform_table'])} w "
                f"WHERE w.{wk} = {_q(k.dk)} AND w.{w['acquisition_ts']} = CAST({_q(k.ts)} AS TIMESTAMP) "
-               f"AND w.{w['waveform_type']} = {_q(e.get('waveform_type', 'Rhythm'))}")
+               f"AND {_type_filter(e)}")
         rows = engine.query(engine.render(sql, {}))
         r = {"rows": len(rows), "max_rows_per_lead": int(rows.lead_id.value_counts().max()) if len(rows) else 0,
              "leads": ",".join(sorted(rows.lead_id.astype(str).unique()))}
@@ -171,10 +182,17 @@ INDEX_COLUMNS = ["read_statement", "is_confirmed", "vent_rate", "pr_interval", "
                  "qtc_interval", "qrs_axis"]
 
 
+CONFIRMED_VALUES = ("1", "Y", "YES", "TRUE", "CONFIRMED", "SIGNED", "FINAL")
+
+
 def ecg_index_sql(modality_cfg: dict) -> str:
-    """One row per FACT_ECG record with the standard ecg_index columns (config ecg.columns names):
-    OMOP person_id (person_map: OMOP person, person_source_value = clinic number), clinic number, ecg_id, acquisition time, read, measurements.
-    FACT_ECG columns not yet confirmed (null in ecg.fact_ecg.columns) come through as NULL."""
+    """One row per ECG with the standard ecg_index columns (config ecg.columns names): OMOP person_id (person_map:
+    OMOP person, person_source_value = clinic number), clinic number, ecg_id, acquisition time, read, measurements.
+
+    MCP ECG deck: FACT_ECG has one row per interpretation snippet (ECG_INTERPRET_SEQ_NBR), so its rows are grouped
+    by patient and ECG_DTM: one ECG, ecg_id = the smallest ECG_FPK, the study-level read and measurements once.
+    The read is ECG_INTERPRET_FULL_TEXT (final, cardiologist-signed narrative) plus ECG_INTERPRET_EXTENSION_TEXT
+    (the cardiologist's free-text comments). Columns not available (null in ecg.fact_ecg.columns) come through as NULL."""
     e = modality_cfg["ecg"]
     f, d, pm, out = e["fact_ecg"], e["dim_patient"], e.get("person_map") or {}, e["columns"]
     fc = f["columns"]
@@ -183,19 +201,37 @@ def ecg_index_sql(modality_cfg: dict) -> str:
                          "= PATIENT_CLINIC_NUMBER (config/modality_tables.yaml)")
     kind, fk = _key(fc)
     if kind == "clinic_number":                       # FACT_ECG carries the clinic number itself
-        clinic, djoin = f"f.{fk}", ""
+        clinic, djoin = "g.pk", ""
     else:
-        clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = f.{fk}"
-    sel = [f"CAST(pm.{pm['person_id_column']} AS BIGINT) AS {out['person_id']}",
-           f"CAST({clinic} AS STRING) AS {out['clinic_number']}",
-           f"CAST(f.{fc['ecg_id']} AS STRING) AS {out['ecg_id']}",
-           f"CAST(f.{fc['acquisition_datetime']} AS TIMESTAMP) AS {out['acquisition_datetime']}"]
+        clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = g.pk"
+    parts = [f"MAX(CAST(f.{fc[c]} AS STRING))" for c in ("read_statement", "read_extension") if fc.get(c)]
+    read = f"CONCAT_WS(' ', {', '.join(parts)})" if parts else "CAST(NULL AS STRING)"
+    if fc.get("is_confirmed"):
+        vals = ", ".join(_q(v) for v in CONFIRMED_VALUES)
+        conf = f"MAX(CASE WHEN UPPER(TRIM(CAST(f.{fc['is_confirmed']} AS STRING))) IN ({vals}) THEN 1 ELSE 0 END)"
+    elif fc.get("assume_confirmed"):
+        conf = "1"                                     # only signed reads reach the platform (MCP ECG deck)
+    else:
+        conf = "CAST(NULL AS INT)"
+    agg = {"read_statement": read, "is_confirmed": conf}
+    inner = [f"f.{fk} AS pk", f"CAST(f.{fc['acquisition_datetime']} AS TIMESTAMP) AS dtm",
+             f"CAST(MIN(f.{fc['ecg_id']}) AS STRING) AS ecg_id"]
+    outer = [f"CAST(pm.{pm['person_id_column']} AS BIGINT) AS {out['person_id']}",
+             f"CAST({clinic} AS STRING) AS {out['clinic_number']}", f"g.ecg_id AS {out['ecg_id']}",
+             f"g.dtm AS {out['acquisition_datetime']}"]
     for k in INDEX_COLUMNS:
         if k in out:
-            sel.append((f"f.{fc[k]}" if fc.get(k) else "CAST(NULL AS STRING)") + f" AS {out[k]}")
+            expr = agg.get(k) or (f"MAX(f.{fc[k]})" if fc.get(k) else "CAST(NULL AS STRING)")
+            inner.append(f"{expr} AS {k}")
+            outer.append(f"g.{k} AS {out[k]}")
     return f"""
-    SELECT {', '.join(sel)}
-    FROM {_t(f['table'])} f
+    WITH g AS (
+      SELECT {', '.join(inner)}
+      FROM {_t(f['table'])} f
+      GROUP BY f.{fk}, CAST(f.{fc['acquisition_datetime']} AS TIMESTAMP)
+    )
+    SELECT {', '.join(outer)}
+    FROM g
     {djoin}
     LEFT JOIN {_t(pm['table'])} pm ON CAST(pm.{pm['clinic_number_column']} AS STRING) = CAST({clinic} AS STRING)
     """

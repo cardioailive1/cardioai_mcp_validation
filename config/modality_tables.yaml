@@ -37,18 +37,25 @@ ecg:
   # 'Rhythm' = full 10 s; leads I, II, V1-V6; each value URL-encoded Base64 -> signed 16-bit little-endian
   # counts x 4.88 = microvolts; sample rate = ECGSAMPLEBASE in FACT_ECG_WAVEFORM_RESTING_MEASUREMENT; link to
   # FACT_ECG via PATIENT_DK -> DIM_PATIENT -> PATIENT_CLINIC_NUMBER and ACQUISITION_TS = ECG_DTM.
+  # MCP "ECG" data-topic deck (2026-11-03): FACT_ECG_WAVEFORM carries PATIENT_CLINIC_NUMBER itself (its sample query:
+  # SELECT ECG_WAVEFORM_FPK, PATIENT_CLINIC_NUMBER, ACQUISITION_TS, LEAD_ID, WAVEFORM_TYPE, WAVEFORM FROM
+  # FACT_ECG_WAVEFORM WHERE WAVEFORM_TYPE = 'rhythm' AND EKG_TYPE = 'resting'); FACT_ECG carries PATIENT_DK. Each
+  # WAVEFORM row decodes on its own; %0A in the URL-encoded text is a line break (dropped before Base64 decoding).
   waveform_storage: base64_per_lead      # base64 (one string per ECG) | base64_per_lead (MCP) | file
   waveform_table: "{modality}.FACT_ECG_WAVEFORM"
-  waveform_columns: {patient_dk: PATIENT_DK, acquisition_ts: ACQUISITION_TS, lead_id: LEAD_ID, waveform_type: WAVEFORM_TYPE, waveform: WAVEFORM}
-  waveform_type: Rhythm
+  waveform_columns: {clinic_number: PATIENT_CLINIC_NUMBER, acquisition_ts: ACQUISITION_TS, lead_id: LEAD_ID,
+                     waveform_type: WAVEFORM_TYPE, waveform: WAVEFORM}
+  waveform_type: rhythm                  # compared case-insensitively ('rhythm' in the deck, 'Rhythm' in the 10-21 email)
+  waveform_filter: {column: EKG_TYPE, value: resting}   # resting diagnostic ECGs (deck); compared case-insensitively
   leads: [I, II, V1, V2, V3, V4, V5, V6]
   seconds: 10
   timestamp_tolerance_s: 0               # ACQUISITION_TS = ECG_DTM exactly
-  sample_rate:                           # CONFIRM the join keys of the resting-measurement table
+  sample_rate:                           # CONFIRM the join keys of the resting-measurement table (scripts/discover_schema.py)
     table: "{modality}.FACT_ECG_WAVEFORM_RESTING_MEASUREMENT"
     column: ECGSAMPLEBASE
-    patient_dk: PATIENT_DK
+    clinic_number: PATIENT_CLINIC_NUMBER  # assumed like FACT_ECG_WAVEFORM; if it has PATIENT_DK instead, name it here
     acquisition_ts: ACQUISITION_TS
+    # without a matching key the rate is inferred from the sample count (2,500 -> 250 Hz, 5,000 -> 500 Hz; deck)
   dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
   # OMOP person_id: person.person_source_value = DIM_PATIENT.PATIENT_CLINIC_NUMBER (Adam Resnick 2026-10-28; MCP
   # OMOP ETL guide, lk_person / cdm_person). PATIENT_DK is deprecated in some MCP tables (15 Oct 2026 release): if a
@@ -57,11 +64,21 @@ ecg:
   fact_ecg:
     table: "{modality}.FACT_ECG"
     columns:                             # FACT_ECG column for each ecg_index column; null = not available
+      # MCP ECG deck: one FACT_ECG row per interpretation snippet (ECG_INTERPRET_SEQ_NBR), so one ECG = one
+      # PATIENT_DK + ECG_DTM; ecg_index groups the rows (ecg_id = the smallest ECG_FPK)
       ecg_id: ECG_FPK
       acquisition_datetime: ECG_DTM
-      patient_dk: PATIENT_DK             # CONFIRM
-      read_statement: null               # CONFIRM with MCP (F3): confirmed over-read text
-      is_confirmed: null                 # CONFIRM with MCP (F3): confirmed vs machine-only flag
+      patient_dk: PATIENT_DK
+      # F3 (deck): ECG_INTERPRET_FULL_TEXT is the final narrative after the cardiologist reviewed and signed it in
+      # MUSE (signed by a cardiologist, not a fellow); ECG_INTERPRET_EXTENSION_TEXT holds the cardiologist's
+      # free-text comments. Both are read for the AF label.
+      read_statement: ECG_INTERPRET_FULL_TEXT
+      read_extension: ECG_INTERPRET_EXTENSION_TEXT
+      # No confirmed / machine-only flag is described: only signed, validated results flow from MUSE to the
+      # platform (deck, slide 6), so every FACT_ECG read counts as confirmed. CONFIRM with Tommy; if a status column
+      # exists, name it here (1 / 'Y' / 'confirmed' = confirmed) and set assume_confirmed: false.
+      is_confirmed: null
+      assume_confirmed: true
       vent_rate: null
       pr_interval: null
       qrs_duration: null

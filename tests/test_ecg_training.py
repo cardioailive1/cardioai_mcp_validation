@@ -285,8 +285,10 @@ if os.environ.get("CARDIOAI_APP_REPO"):  # cross-repo: the app must pin exactly 
 
 
 def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
-    """MCP layout (2026-10-21): FACT_ECG + DIM_PATIENT + person map -> ecg_index; FACT_ECG_WAVEFORM one row per lead,
-    URL-encoded Base64 int16 x 4.88 uV, WAVEFORM_TYPE 'Rhythm', ECGSAMPLEBASE; matched on clinic number + time."""
+    """MCP layout (2026-10-21 email, 2026-11-03 ECG deck): FACT_ECG (one row per interpretation snippet) + DIM_PATIENT
+    + person map -> ecg_index, one row per ECG; FACT_ECG_WAVEFORM one row per lead with PATIENT_CLINIC_NUMBER,
+    URL-encoded Base64 int16 x 4.88 uV, WAVEFORM_TYPE 'rhythm', EKG_TYPE 'resting', ECGSAMPLEBASE; matched on clinic
+    number + time."""
     import copy
     import urllib.parse
     import duckdb
@@ -305,35 +307,50 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
     con.execute("INSERT INTO DIM_PATIENT VALUES (10, 'C1', 'N'), (11, 'C1', 'Y'), (20, 'C2', 'N')")
     con.execute("CREATE TABLE person (person_id BIGINT, person_source_value VARCHAR)")
     con.execute("INSERT INTO person VALUES (1, 'C1'), (2, 'C2')")
-    con.execute("CREATE TABLE FACT_ECG (ECG_FPK BIGINT, PATIENT_DK BIGINT, ECG_DTM TIMESTAMP)")
-    con.execute("""INSERT INTO FACT_ECG VALUES (100, 10, TIMESTAMP '2019-03-01 08:00:00'), (101, 11, TIMESTAMP '2019-05-01 09:30:00'),
-                   (200, 20, TIMESTAMP '2020-01-02 10:00:00'), (201, 20, TIMESTAMP '2020-02-02 10:00:00')""")
-    con.execute("CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK BIGINT, PATIENT_DK BIGINT, ACQUISITION_TS TIMESTAMP, LEAD_ID VARCHAR, WAVEFORM_TYPE VARCHAR, WAVEFORM VARCHAR)")
-    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_DK BIGINT, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
+    con.execute("""CREATE TABLE FACT_ECG (ECG_FPK BIGINT, PATIENT_DK BIGINT, ECG_DTM TIMESTAMP, ECG_INTERPRET_SEQ_NBR INT,
+                   ECG_INTERPRET_TEXT VARCHAR, ECG_INTERPRET_FULL_TEXT VARCHAR, ECG_INTERPRET_EXTENSION_TEXT VARCHAR)""")
+    # ECG 100 has three snippet rows (one ECG); 101's extension text carries the cardiologist's comment
+    full = "Atrial fibrillation with rapid ventricular response. Abnormal ECG."
+    con.execute(f"""INSERT INTO FACT_ECG VALUES
+                   (100, 10, TIMESTAMP '2019-03-01 08:00:00', 1, 'Atrial fibrillation', '{full}', NULL),
+                   (102, 10, TIMESTAMP '2019-03-01 08:00:00', 2, 'with rapid ventricular response', '{full}', NULL),
+                   (103, 10, TIMESTAMP '2019-03-01 08:00:00', 3, 'Abnormal ECG', '{full}', NULL),
+                   (101, 11, TIMESTAMP '2019-05-01 09:30:00', 1, 'Sinus rhythm', 'Sinus rhythm. Normal ECG.', 'Compared with prior: atrial flutter resolved.'),
+                   (200, 20, TIMESTAMP '2020-01-02 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL),
+                   (201, 20, TIMESTAMP '2020-02-02 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL)""")
+    con.execute("""CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, ACQUISITION_TS TIMESTAMP,
+                   LEAD_ID VARCHAR, WAVEFORM_TYPE VARCHAR, WAVEFORM VARCHAR, EKG_TYPE VARCHAR)""")
+    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_CLINIC_NUMBER VARCHAR, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
     leads = ["I", "II", "V1", "V2", "V3", "V4", "V5", "V6"]
 
     def enc(x):
         return urllib.parse.quote(base64.b64encode(np.round(x / 4.88).astype("<i2").tobytes()).decode())
     rows, k = [], 0
-    for dk, ts, fs, extra in ((11, "2019-03-01 08:00:00", 500, None), (10, "2019-05-01 09:30:00", 250, None),
-                              (20, "2020-01-02 10:00:00", 500, "V1")):
+    for cn, ts, fs, extra in (("C1", "2019-03-01 08:00:00", 500, None), ("C1", "2019-05-01 09:30:00", 250, None),
+                              ("C2", "2020-01-02 10:00:00", 500, "V1")):
         t = np.arange(fs * 10) / fs
         for j, ld in enumerate(leads):
             for _ in range(2 if ld == extra else 1):
                 k += 1
-                rows.append((k, dk, ts, ld, "Rhythm", enc(800 * np.sin(2 * np.pi * 1.1 * t + j))))
+                # %0A (an encoded line break) inside the Base64 text, as in MCP's storage
+                rows.append((k, cn, ts, ld, "rhythm", enc(800 * np.sin(2 * np.pi * 1.1 * t + j)).replace("AA", "A%0AA", 1), "resting"))
             k += 1
-            rows.append((k, dk, ts, ld, "Median", enc(np.zeros(600))))
-        con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ({dk}, TIMESTAMP '{ts}', {fs})")
-    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, CAST(? AS TIMESTAMP), ?, ?, ?)", rows)
+            rows.append((k, cn, ts, ld, "median", enc(np.zeros(600)), "resting"))
+            k += 1
+            rows.append((k, cn, ts, ld, "rhythm", enc(np.zeros(fs * 10)), "exercise"))      # not a resting ECG: ignored
+        con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ('{cn}', TIMESTAMP '{ts}', {fs})")
+    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, CAST(? AS TIMESTAMP), ?, ?, ?, ?)", rows)
     eng = DuckDBEngine(con, st)
     idx = build_ecg_index(eng, mod)
-    assert set(idx.ecg_id) == {"100", "101", "200", "201"} and dict(zip(idx.ecg_id, idx.person_id))["101"] == 1
+    assert sorted(idx.ecg_id) == ["100", "101", "200", "201"] and dict(zip(idx.ecg_id, idx.person_id))["101"] == 1
+    reads = dict(zip(idx.ecg_id, idx.diagnosis_statement))
+    assert reads["100"].startswith("Atrial fibrillation") and "atrial flutter resolved" in reads["101"]
+    assert set(idx.confirmed_flag.astype(int)) == {1}                # only signed reads reach the platform (deck)
     m = idx.rename(columns={"acquisition_datetime": "ecg_dtm"})
     out = extract_waveforms(eng, m, mod, str(tmp_path), batch_size=1)
     got = dict(zip(out.ecg_id, out.waveform_uri))
     err = dict(zip(out.ecg_id, out.waveform_error))
-    # ECG 100 sits under DK 10 but its waveform under DK 11: linked through the clinic number
+    # ECGs and waveforms are linked through the clinic number (FACT_ECG has PATIENT_DK, the waveforms the clinic number)
     sig, fs, names, units = read_any(got["100"])
     assert fs == 500 and names == leads and sig.shape == (8, 5000) and units == "uV" and abs(sig.max() - 800) < 10
     assert read_any(got["101"])[1] == 250
