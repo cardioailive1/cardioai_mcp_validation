@@ -58,7 +58,12 @@ python scripts/deid_request.py --modality mri echo --out /workspace/deid   # CSV
    Snapshot the analytic table as `cardioai_work.ecg_analytic_locked`. Its window starts on 2021-01-01 (`splits.test_start`), and training excludes its patients.
 
 2. **Map and probe the MCP ECG tables.** MCP (2026-10-21): `FACT_ECG_WAVEFORM` holds one row per lead; use `WAVEFORM_TYPE = 'Rhythm'` (full 10 s), leads I, II, V1–V6; each value is URL-encoded Base64 → signed 16-bit little-endian counts × 4.88 = µV; the sample rate is `ECGSAMPLEBASE` in `FACT_ECG_WAVEFORM_RESTING_MEASUREMENT`; waveforms link to `FACT_ECG` through `DIM_PATIENT` (clinic number) and `ACQUISITION_TS = ECG_DTM`. This is `waveform_storage: base64_per_lead` in `config/modality_tables.yaml` → `ecg`, already filled in.
-   - `person_map` is filled in: OMOP `person.person_source_value` holds `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28). Still to fill once MCP answers: the over-read columns in `fact_ecg.columns` (F3). Confirm the resting-measurement join keys. If `FACT_ECG` or `FACT_ECG_WAVEFORM` carries `PATIENT_CLINIC_NUMBER` (MCP is retiring `PATIENT_DK` in some tables), add it as `clinic_number` in that table's column map: it is then used directly.
+   - `person_map` is filled in: OMOP `person.person_source_value` holds `PATIENT_CLINIC_NUMBER` (MCP 2026-10-28).
+   - From the MCP "ECG" data-topic deck (2026-11-03), already in the config:
+     - `FACT_ECG_WAVEFORM` carries `PATIENT_CLINIC_NUMBER` (used directly); only resting ECGs (`EKG_TYPE = 'resting'`) and `WAVEFORM_TYPE = 'rhythm'` are read (case-insensitive).
+     - `FACT_ECG` has one row per interpretation snippet (`ECG_INTERPRET_SEQ_NBR`): the ECG index groups them into one row per ECG (patient + `ECG_DTM`).
+     - The read for the AF label (F3) is `ECG_INTERPRET_FULL_TEXT` (the final narrative the cardiologist signed in MUSE) plus `ECG_INTERPRET_EXTENSION_TEXT` (the cardiologist's free-text comments). No confirmed / machine-only flag is described, because only signed reads reach the platform, so every read counts as confirmed (`assume_confirmed: true`; confirm with Tommy).
+   - Still to confirm in the workspace (`scripts/discover_schema.py`): the key columns of `FACT_ECG_WAVEFORM_RESTING_MEASUREMENT` (assumed `PATIENT_CLINIC_NUMBER` + `ACQUISITION_TS`; without a match the rate is inferred from the sample count, 2,500 → 250 Hz, 5,000 → 500 Hz).
    - Build the ECG index once and save it as `ecg.table`, then set `enabled: true`:
      ```python
      from ecg_training.mcp_waveforms import build_ecg_index
@@ -66,7 +71,7 @@ python scripts/deid_request.py --modality mri echo --out /workspace/deid   # CSV
      idx = build_ecg_index(eng, study["modality"])
      eng.write_table(idx, "ecg_index")
      ```
-   - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Acquisitions with more than one Rhythm row for a lead are skipped with a reason until MCP says how such rows relate (F2).
+   - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Acquisitions with more than one rhythm row for a lead are skipped with a reason. The MCP deck says each row decodes on its own but not whether a lead can have several rows (F2): the probe's `max_rows_per_lead` answers it on real data.
 
 3. **Check troponin.** Mayo's test is **Troponin T, 5th generation** (TRPS, "Troponin T, 5th gen, P", LOINC 67151-1), reported in ng/L.
    - A row is raised if it is above its own `range_high`. Rows without one use Mayo's sex-specific limits: **males > 15 ng/L, females > 10 ng/L**.
