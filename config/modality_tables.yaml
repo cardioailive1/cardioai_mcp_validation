@@ -43,17 +43,22 @@ ecg:
   # WAVEFORM row decodes on its own; %0A in the URL-encoded text is a line break (dropped before Base64 decoding).
   waveform_storage: base64_per_lead      # base64 (one string per ECG) | base64_per_lead (MCP) | file
   waveform_table: "{modality}.FACT_ECG_WAVEFORM"
-  waveform_columns: {clinic_number: PATIENT_CLINIC_NUMBER, acquisition_ts: ACQUISITION_TS, lead_id: LEAD_ID,
-                     waveform_type: WAVEFORM_TYPE, waveform: WAVEFORM}
+  # Tommy Stretch (2026-11-05): the table also has PATIENT_DK (the resting-measurement join key)
+  waveform_columns: {clinic_number: PATIENT_CLINIC_NUMBER, patient_dk: PATIENT_DK, acquisition_ts: ACQUISITION_TS,
+                     lead_id: LEAD_ID, waveform_type: WAVEFORM_TYPE, waveform: WAVEFORM, row_id: ECG_WAVEFORM_FPK}
+  # Several rhythm rows for one lead (Tommy, 2026-11-05: occasional). Rows that each hold the full 2,500 / 5,000
+  # samples are complete waveforms: the first (smallest ECG_WAVEFORM_FPK) is used. Partial rows: skip (default) or
+  # concat (joined in ECG_WAVEFORM_FPK order when they add up to a full recording). Look at the probe first.
+  partial_rows: skip
   waveform_type: rhythm                  # compared case-insensitively ('rhythm' in the deck, 'Rhythm' in the 10-21 email)
   waveform_filter: {column: EKG_TYPE, value: resting}   # resting diagnostic ECGs (deck); compared case-insensitively
   leads: [I, II, V1, V2, V3, V4, V5, V6]
   seconds: 10
   timestamp_tolerance_s: 0               # ACQUISITION_TS = ECG_DTM exactly
-  sample_rate:                           # CONFIRM the join keys of the resting-measurement table (scripts/discover_schema.py)
+  sample_rate:                           # Tommy Stretch (2026-11-05): joins on PATIENT_DK + ACQUISITION_TS
     table: "{modality}.FACT_ECG_WAVEFORM_RESTING_MEASUREMENT"
     column: ECGSAMPLEBASE
-    clinic_number: PATIENT_CLINIC_NUMBER  # assumed like FACT_ECG_WAVEFORM; if it has PATIENT_DK instead, name it here
+    patient_dk: PATIENT_DK
     acquisition_ts: ACQUISITION_TS
     # without a matching key the rate is inferred from the sample count (2,500 -> 250 Hz, 5,000 -> 500 Hz; deck)
   dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
@@ -74,12 +79,11 @@ ecg:
       # free-text comments. Both are read for the AF label.
       read_statement: ECG_INTERPRET_FULL_TEXT
       read_extension: ECG_INTERPRET_EXTENSION_TEXT
-      # No confirmed / machine-only flag is described: only signed, validated results flow from MUSE to the
-      # platform (deck, slide 6), so every FACT_ECG read counts as confirmed. CONFIRM with Tommy; if a status column
-      # exists, name it here (1 / 'Y' / 'confirmed' = confirmed) and set assume_confirmed: false.
+      # Tommy Stretch (2026-11-05): the ECG data from MUSE has been reviewed and signed off by a cardiologist before
+      # it reaches the platform; there is no separate flag, so every FACT_ECG read counts as confirmed.
       is_confirmed: null
       assume_confirmed: true
-      vent_rate: null
+      vent_rate: HEART_RATE              # Tommy Stretch (2026-11-05): the final clinician-validated heart rate
       pr_interval: null
       qrs_duration: null
       qt_interval: null

@@ -4,6 +4,9 @@ MCP (Adam Resnick and Tommy Stretch, 2026-10-21):
   * FACT_ECG_WAVEFORM has one row per PATIENT_DK, ACQUISITION_TS, LEAD_ID and WAVEFORM_TYPE. Use
     WAVEFORM_TYPE = 'Rhythm' (the full 10 s recording); 'Median' is a synthesized representative beat.
   * Eight leads are stored: I, II, V1-V6 (III, aVR, aVL, aVF are derived by runtime.preprocess).
+  * Tommy Stretch (2026-11-05): usually one rhythm row per lead; several rows that each hold a full recording are
+    complete waveforms (the first is used), partial rows may be joined (partial_rows); ECGSAMPLEBASE joins on
+    PATIENT_DK + ACQUISITION_TS; reads are cardiologist-signed before they reach the platform; heart rate = HEART_RATE.
   * MCP ECG deck (2026-11-03): FACT_ECG_WAVEFORM carries PATIENT_CLINIC_NUMBER; resting ECGs only (EKG_TYPE =
     'resting'); WAVEFORM_TYPE 'rhythm' (compared case-insensitively). FACT_ECG has one row per interpretation snippet.
   * Each WAVEFORM value is URL-encoded Base64 that decodes on its own: signed 16-bit little-endian counts;
@@ -72,26 +75,57 @@ def sample_rate(n_samples: int, stated: Optional[float], seconds: float = 10.0, 
     return fs
 
 
-def assemble(rows: pd.DataFrame, cfg: dict) -> Record:
-    """Rows of ONE acquisition (lead_id, waveform, sample_rate) -> (signal uV (8, N), fs, leads, 'uV')."""
+def _lead_signal(lead: str, rows: pd.DataFrame, expected: set, raw_cfg: dict, policy: str) -> Tuple[np.ndarray, str]:
+    """One lead's signal from its rhythm row(s) and a note ('' = one row).
+
+    Tommy Stretch (MCP, 2026-11-05): usually one rhythm row per lead; occasionally several for the same lead and
+    acquisition. Rows that each hold the full 2,500 / 5,000 samples are complete waveforms, not pieces to combine:
+    the first (smallest ECG_WAVEFORM_FPK) is used. Partial rows "may" be aggregated: with partial_rows: concat they
+    are joined in ECG_WAVEFORM_FPK order when their total is a full recording; by default (skip) the ECG is skipped
+    with a reason, so the order is checked on real rows before it is trusted."""
+    dt, upb = raw_cfg.get("dtype", "<i2"), raw_cfg.get("units_per_bit", 4.88)
+    ordered = "row_id" in rows and rows.row_id.notna().all()
+    if ordered:
+        rows = rows.sort_values("row_id", kind="mergesort")
+    sigs = [decode_lead(v, dt, upb) for v in rows.waveform]
+    if len(sigs) == 1:
+        return sigs[0], ""
+    lens = [len(x) for x in sigs]
+    if all(n in expected for n in lens):
+        same = all(len(x) == lens[0] and np.array_equal(x, sigs[0]) for x in sigs[1:])
+        return sigs[0], f"{lead}: {len(sigs)} complete rhythm rows ({'identical' if same else 'different'}), first used"
+    total = sum(lens)
+    if policy == "concat" and total in expected and ordered:
+        return np.concatenate(sigs), f"{lead}: {len(sigs)} partial rhythm rows joined in ECG_WAVEFORM_FPK order"
+    raise ValueError(f"{len(sigs)} partial rhythm rows for lead {lead} ({'+'.join(map(str, lens))} samples; "
+                     f"partial_rows: {policy})")
+
+
+def assemble(rows: pd.DataFrame, cfg: dict, notes: Optional[List[str]] = None) -> Record:
+    """Rows of ONE acquisition (lead_id, waveform, sample_rate[, row_id]) -> (signal uV (8, N), fs, leads, 'uV').
+    Several rows for a lead follow _lead_signal; what was done is appended to `notes`."""
     raw_cfg = cfg.get("waveform_raw", {})
     want = list(cfg.get("leads", LEADS_8))
-    lead = rows.lead_id.astype(str).str.strip()
-    dup = sorted(set(lead[lead.duplicated()]))
-    if dup:
-        raise ValueError(f"several Rhythm rows for lead(s) {', '.join(dup)} (MCP open item F2)")
-    missing = [x for x in want if x not in set(lead)]
+    rows = rows.assign(lead_id=rows.lead_id.astype(str).str.strip())
+    missing = [x for x in want if x not in set(rows.lead_id)]
     if missing:
         raise ValueError(f"missing lead(s) {', '.join(missing)}")
-    by = dict(zip(lead, rows.waveform))
-    sigs = [decode_lead(by[x], raw_cfg.get("dtype", "<i2"), raw_cfg.get("units_per_bit", 4.88)) for x in want]
-    n = {len(s) for s in sigs}
-    if len(n) != 1:
-        raise ValueError(f"leads have different lengths {sorted(n)}")
     stated = pd.to_numeric(rows.get("sample_rate", pd.Series(dtype=float)), errors="coerce").dropna().unique()
     if len(stated) > 1:
         raise ValueError(f"conflicting ECGSAMPLEBASE values {sorted(stated)}")
-    fs = sample_rate(n.pop(), float(stated[0]) if len(stated) else None, float(cfg.get("seconds", 10)))
+    secs = float(cfg.get("seconds", 10))
+    expected = {int(round(float(stated[0]) * secs))} if len(stated) else {int(250 * secs), int(500 * secs)}
+    policy = str(cfg.get("partial_rows", "skip"))
+    sigs = []
+    for x in want:
+        sig, note = _lead_signal(x, rows[rows.lead_id == x], expected, raw_cfg, policy)
+        sigs.append(sig)
+        if note and notes is not None:
+            notes.append(note)
+    n = {len(s) for s in sigs}
+    if len(n) != 1:
+        raise ValueError(f"leads have different lengths {sorted(n)}")
+    fs = sample_rate(n.pop(), float(stated[0]) if len(stated) else None, secs)
     return np.stack(sigs), fs, want, raw_cfg.get("units", "uV")
 
 
@@ -115,17 +149,22 @@ def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
         clinic, djoin = f"w.{wk}", ""
     else:
         clinic, djoin = f"d.{d['clinic_number']}", f"JOIN {_t(d['table'])} d ON d.{d['patient_dk']} = w.{wk}"
-    if sr.get("table") and sr.get(kind):              # same patient key on both sides
-        rate, rjoin = (f"r.{sr['column']}",
-                       f"LEFT JOIN {_t(sr['table'])} r ON r.{sr[kind]} = w.{wk} "
-                       f"AND r.{sr['acquisition_ts']} = w.{w['acquisition_ts']}")
-    else:                                             # no matching key: the rate is inferred from the sample count
+    # Tommy Stretch (2026-11-05): the resting-measurement table joins the waveform rows on PATIENT_DK +
+    # ACQUISITION_TS. Rates are reduced to one row per acquisition first, so the join can't duplicate lead rows.
+    skind = next((k for k in ("clinic_number", "patient_dk") if sr.get(k) and w.get(k)), None)
+    if sr.get("table") and skind:
+        rate = "r.rate"
+        rjoin = (f"LEFT JOIN (SELECT {sr[skind]} AS k, {sr['acquisition_ts']} AS ts, MAX({sr['column']}) AS rate "
+                 f"FROM {_t(sr['table'])} GROUP BY {sr[skind]}, {sr['acquisition_ts']}) r "
+                 f"ON r.k = w.{w[skind]} AND r.ts = w.{w['acquisition_ts']}")
+    else:                                             # no shared key: the rate is inferred from the sample count
         rate, rjoin = "CAST(NULL AS DOUBLE)", ""
+    rid = f"w.{w['row_id']}" if w.get("row_id") else "CAST(NULL AS BIGINT)"
     return f"""
     SELECT CAST({clinic} AS STRING) AS clinic_number,
            CAST(w.{w['acquisition_ts']} AS TIMESTAMP) AS acquisition_ts,
            CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform,
-           CAST({rate} AS DOUBLE) AS sample_rate
+           CAST({rate} AS DOUBLE) AS sample_rate, {rid} AS row_id
     FROM {_t(e['waveform_table'])} w
     {djoin}
     {rjoin}
@@ -151,26 +190,32 @@ def match(ecgs: pd.DataFrame, rows: pd.DataFrame, tol_s: float = 0.0) -> Dict[st
 
 
 def probe(engine, modality_cfg: dict, n: int = 20) -> pd.DataFrame:
-    """Numbers only, for n acquisitions: Rhythm rows per lead, samples, stated rate, seconds, amplitude."""
+    """Numbers only, for n acquisitions: rhythm rows per lead, samples per row, stated rate, seconds, amplitude, and
+    what assemble() did with several rows for a lead (Tommy Stretch 2026-11-05: complete vs partial rows)."""
     e = modality_cfg["ecg"]
     w = e["waveform_columns"]
     _, wk = _key(w)
+    rid = f", w.{w['row_id']} AS row_id" if w.get("row_id") else ""
     keys = engine.query(engine.render(
         f"SELECT DISTINCT w.{wk} AS dk, w.{w['acquisition_ts']} AS ts FROM {_t(e['waveform_table'])} w "
         f"WHERE {_type_filter(e)} LIMIT {int(n)}", {}))
     out = []
     for _, k in keys.iterrows():
-        sql = (f"SELECT CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform FROM {_t(e['waveform_table'])} w "
+        sql = (f"SELECT CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform{rid} "
+               f"FROM {_t(e['waveform_table'])} w "
                f"WHERE w.{wk} = {_q(k.dk)} AND w.{w['acquisition_ts']} = CAST({_q(k.ts)} AS TIMESTAMP) "
                f"AND {_type_filter(e)}")
         rows = engine.query(engine.render(sql, {}))
-        r = {"rows": len(rows), "max_rows_per_lead": int(rows.lead_id.value_counts().max()) if len(rows) else 0,
-             "leads": ",".join(sorted(rows.lead_id.astype(str).unique()))}
+        per = rows.lead_id.value_counts() if len(rows) else pd.Series(dtype=int)
+        r = {"rows": len(rows), "max_rows_per_lead": int(per.max()) if len(per) else 0,
+             "leads_with_several_rows": int((per > 1).sum()), "leads": ",".join(sorted(rows.lead_id.astype(str).unique()))}
         try:
-            sig, fs, _, _ = assemble(rows.assign(sample_rate=np.nan), e)
+            r["samples_per_row"] = ",".join(sorted({str(len(decode_lead(v))) for v in rows.waveform}))
+            notes: List[str] = []
+            sig, fs, _, _ = assemble(rows.assign(sample_rate=np.nan), e, notes)
             mv = sig / 1000.0
             r.update(samples=sig.shape[1], fs=fs, seconds=round(sig.shape[1] / fs, 2),
-                     p99_abs_mv=round(float(np.percentile(np.abs(mv), 99)), 2))
+                     p99_abs_mv=round(float(np.percentile(np.abs(mv), 99)), 2), note="; ".join(notes)[:160])
         except Exception as ex:  # noqa: BLE001
             r["error"] = str(ex)[:160]
         out.append(r)

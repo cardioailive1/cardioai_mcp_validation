@@ -11,7 +11,8 @@ seed: 20261012
 # accepts catalog.schema.table; leave catalog empty if not used.
 # MCP provisions the data in BigQuery and the workspace queries it with the BigQuery client (MCP, 2026-10-28), so
 # each schema is a BigQuery dataset: "`<project>`.<dataset>" (backticks because MCP project ids contain hyphens).
-# CONFIRM the project and dataset names in the workspace (scripts/discover_schema.py lists them). The MCP OMOP ETL
+# CONFIRM the project and dataset names in the workspace: they are in the My First Query notebook
+# (/data/intro/Introduction_Notebooks/Accelerate; Adam Resnick 2026-11-04), and scripts/discover_schema.py lists them. The MCP OMOP ETL
 # guide names the warehouse dataset `mcp` (FACT_*, DIM_*) and the OMOP delivery dataset OMOP_v6_1.
 bq_project: null       # project the BigQuery client bills queries to (null = the workspace default)
 schemas:
