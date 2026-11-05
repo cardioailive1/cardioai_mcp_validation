@@ -100,6 +100,7 @@ def _extract_per_lead(engine, manifest: pd.DataFrame, modality_cfg: dict, out: P
             raise ValueError(f"manifest lacks {col}: rebuild it with waveform_storage base64_per_lead")
     m["waveform_uri"] = m.get("waveform_uri", pd.Series(index=m.index, dtype=object)).astype(object)
     m["waveform_error"] = None
+    m["waveform_note"] = None
     patients = sorted(m.clinic_number.dropna().astype(str).unique())
     tol = float(e.get("timestamp_tolerance_s", 0))
     done = 0
@@ -119,7 +120,10 @@ def _extract_per_lead(engine, manifest: pd.DataFrame, modality_cfg: dict, out: P
                 m.at[idx, "waveform_error"] = "no Rhythm rows at this ECG_DTM"
                 continue
             try:
-                sig, fs, leads, units = assemble(hits[i], e)
+                notes = []
+                sig, fs, leads, units = assemble(hits[i], e, notes)
+                if notes:
+                    m.at[idx, "waveform_note"] = "; ".join(notes)[:200]
                 np.savez_compressed(path, signal=sig.astype(np.float32), fs=fs, leads=np.asarray(leads), units=units)
                 m.at[idx, "waveform_uri"] = str(path)
             except Exception as ex:  # noqa: BLE001  (one bad acquisition must not stop the extraction)

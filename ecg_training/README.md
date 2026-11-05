@@ -18,8 +18,9 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
    - From the MCP "ECG" data-topic deck (2026-11-03), already in the config:
      - `FACT_ECG_WAVEFORM` carries `PATIENT_CLINIC_NUMBER` (used directly); only resting ECGs (`EKG_TYPE = 'resting'`) and `WAVEFORM_TYPE = 'rhythm'` are read (case-insensitive).
      - `FACT_ECG` has one row per interpretation snippet (`ECG_INTERPRET_SEQ_NBR`): the ECG index groups them into one row per ECG (patient + `ECG_DTM`).
-     - The read for the AF label (F3) is `ECG_INTERPRET_FULL_TEXT` (the final narrative the cardiologist signed in MUSE) plus `ECG_INTERPRET_EXTENSION_TEXT` (the cardiologist's free-text comments). No confirmed / machine-only flag is described, because only signed reads reach the platform, so every read counts as confirmed (`assume_confirmed: true`; confirm with Tommy).
-   - Still to confirm in the workspace (`scripts/discover_schema.py`): the key columns of `FACT_ECG_WAVEFORM_RESTING_MEASUREMENT` (assumed `PATIENT_CLINIC_NUMBER` + `ACQUISITION_TS`; without a match the rate is inferred from the sample count, 2,500 → 250 Hz, 5,000 → 500 Hz).
+     - The read for the AF label (F3) is `ECG_INTERPRET_FULL_TEXT` (the final narrative the cardiologist signed in MUSE) plus `ECG_INTERPRET_EXTENSION_TEXT` (the cardiologist's free-text comments). Tommy Stretch (2026-11-05) confirmed that ECG data reaches the platform only after a cardiologist has reviewed and signed it, so every read counts as confirmed (`assume_confirmed: true`).
+     - Heart rate: `FACT_ECG.HEART_RATE`, the final clinician-validated value (Tommy).
+   - `ECGSAMPLEBASE` joins the waveform rows on `PATIENT_DK` + `ACQUISITION_TS` (Tommy). Without a match the rate is inferred from the sample count (2,500 → 250 Hz, 5,000 → 500 Hz).
    - Build the ECG index once and save it as `ecg.table`, then set `enabled: true`:
      ```python
      from ecg_training.mcp_waveforms import build_ecg_index
@@ -27,7 +28,7 @@ A 12-lead ECG model trained on Mayo ECGs inside the Mayo Clinic Platform workspa
      idx = build_ecg_index(eng, study["modality"])
      eng.write_table(idx, "ecg_index")
      ```
-   - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Acquisitions with more than one rhythm row for a lead are skipped with a reason. The MCP deck says each row decodes on its own but not whether a lead can have several rows (F2): the probe's `max_rows_per_lead` answers it on real data.
+   - Run `python -m ecg_training.probe_waveforms --n 20`. Per acquisition it reports the Rhythm rows per lead, samples, the implied rate, seconds and the amplitude in mV. Expect 8 leads, one row each, about 10 s and R waves of about 0.5–2 mV. Several rhythm rows for one lead are occasional (Tommy Stretch, 2026-11-05). Rows that each hold the full 2,500 / 5,000 samples are complete waveforms: the first (smallest `ECG_WAVEFORM_FPK`) is used and noted in `waveform_note`. Partial rows are skipped with a reason (`partial_rows: skip`); if the probe shows partial rows that add up to a full recording and look right when joined in `ECG_WAVEFORM_FPK` order, set `partial_rows: concat`. The probe reports `leads_with_several_rows`, `samples_per_row` and what was done.
 3. **Troponin.** Mayo's troponin is **Troponin T, 5th generation**: [TRPS](https://www.testcatalog.org/show/TRPS), reporting name "Troponin T, 5th gen, P", LOINC 67151-1, in ng/L.
    - Rows above the row's own `range_high` count as raised. Rows without one fall back to the sex-specific Mayo reference values: **males ≤ 15 ng/L, females ≤ 10 ng/L** (`labels.troponin_url_fallback`).
    - For older troponin rows in other units, look up the assay by its reporting name on [mayocliniclabs.com](https://www.mayocliniclabs.com/search#q=troponin), under the "Clinical and Interpretive" and "Fees & Codes" tabs. Then confirm `ng_per_ml`.

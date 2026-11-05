@@ -317,32 +317,46 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
                    (103, 10, TIMESTAMP '2019-03-01 08:00:00', 3, 'Abnormal ECG', '{full}', NULL),
                    (101, 11, TIMESTAMP '2019-05-01 09:30:00', 1, 'Sinus rhythm', 'Sinus rhythm. Normal ECG.', 'Compared with prior: atrial flutter resolved.'),
                    (200, 20, TIMESTAMP '2020-01-02 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL),
-                   (201, 20, TIMESTAMP '2020-02-02 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL)""")
-    con.execute("""CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, ACQUISITION_TS TIMESTAMP,
-                   LEAD_ID VARCHAR, WAVEFORM_TYPE VARCHAR, WAVEFORM VARCHAR, EKG_TYPE VARCHAR)""")
-    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_CLINIC_NUMBER VARCHAR, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
+                   (201, 20, TIMESTAMP '2020-02-02 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL),
+                   (202, 20, TIMESTAMP '2020-03-03 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL),
+                   (203, 20, TIMESTAMP '2020-04-04 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL)""")
+    con.execute("ALTER TABLE FACT_ECG ADD COLUMN HEART_RATE INTEGER")
+    con.execute("UPDATE FACT_ECG SET HEART_RATE = 72")
+    con.execute("""CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_DK BIGINT,
+                   ACQUISITION_TS TIMESTAMP, LEAD_ID VARCHAR, WAVEFORM_TYPE VARCHAR, WAVEFORM VARCHAR, EKG_TYPE VARCHAR)""")
+    # Tommy Stretch (2026-11-05): the resting-measurement table joins on PATIENT_DK + ACQUISITION_TS; two rows for one
+    # acquisition must not duplicate the lead rows
+    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_DK BIGINT, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
     leads = ["I", "II", "V1", "V2", "V3", "V4", "V5", "V6"]
 
     def enc(x):
         return urllib.parse.quote(base64.b64encode(np.round(x / 4.88).astype("<i2").tobytes()).decode())
     rows, k = [], 0
-    for cn, ts, fs, extra in (("C1", "2019-03-01 08:00:00", 500, None), ("C1", "2019-05-01 09:30:00", 250, None),
-                              ("C2", "2020-01-02 10:00:00", 500, "V1")):
+    # extra: 'dup' = V1 twice, both full recordings (complete waveforms: the first is used);
+    #        'split' = V1 in two halves (partial rows: skipped by default, joined in ECG_WAVEFORM_FPK order with concat)
+    for cn, dk, ts, fs, extra in (("C1", 11, "2019-03-01 08:00:00", 500, None), ("C1", 10, "2019-05-01 09:30:00", 250, None),
+                                  ("C2", 20, "2020-01-02 10:00:00", 500, "dup"), ("C2", 20, "2020-04-04 10:00:00", 500, "split")):
         t = np.arange(fs * 10) / fs
         for j, ld in enumerate(leads):
-            for _ in range(2 if ld == extra else 1):
+            x = 800 * np.sin(2 * np.pi * 1.1 * t + j)
+            pieces = [x, x * 0.5] if (extra == "dup" and ld == "V1") else (
+                [x[: fs * 4], x[fs * 4:]] if (extra == "split" and ld == "V1") else [x])
+            for piece in (pieces[::-1] if extra == "split" else pieces):    # stored out of order: FPK gives the order
                 k += 1
+                fpk = k if extra != "split" else (1000 - k if ld == "V1" else k)
                 # %0A (an encoded line break) inside the Base64 text, as in MCP's storage
-                rows.append((k, cn, ts, ld, "rhythm", enc(800 * np.sin(2 * np.pi * 1.1 * t + j)).replace("AA", "A%0AA", 1), "resting"))
+                rows.append((fpk, cn, dk, ts, ld, "rhythm", enc(piece).replace("AA", "A%0AA", 1), "resting"))
             k += 1
-            rows.append((k, cn, ts, ld, "median", enc(np.zeros(600)), "resting"))
+            rows.append((k, cn, dk, ts, ld, "median", enc(np.zeros(600)), "resting"))
             k += 1
-            rows.append((k, cn, ts, ld, "rhythm", enc(np.zeros(fs * 10)), "exercise"))      # not a resting ECG: ignored
-        con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ('{cn}', TIMESTAMP '{ts}', {fs})")
-    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, CAST(? AS TIMESTAMP), ?, ?, ?, ?)", rows)
+            rows.append((k, cn, dk, ts, ld, "rhythm", enc(np.zeros(fs * 10)), "exercise"))      # not a resting ECG: ignored
+        for _ in range(2):
+            con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ({dk}, TIMESTAMP '{ts}', {fs})")
+    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, ?, CAST(? AS TIMESTAMP), ?, ?, ?, ?)", rows)
     eng = DuckDBEngine(con, st)
     idx = build_ecg_index(eng, mod)
-    assert sorted(idx.ecg_id) == ["100", "101", "200", "201"] and dict(zip(idx.ecg_id, idx.person_id))["101"] == 1
+    assert sorted(idx.ecg_id) == ["100", "101", "200", "201", "202", "203"] and dict(zip(idx.ecg_id, idx.person_id))["101"] == 1
+    assert set(idx[mod["ecg"]["columns"]["vent_rate"]].astype(int)) == {72}   # FACT_ECG.HEART_RATE (Tommy, 2026-11-05)
     reads = dict(zip(idx.ecg_id, idx.diagnosis_statement))
     assert reads["100"].startswith("Atrial fibrillation") and "atrial flutter resolved" in reads["101"]
     assert set(idx.confirmed_flag.astype(int)) == {1}                # only signed reads reach the platform (deck)
@@ -354,7 +368,16 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
     sig, fs, names, units = read_any(got["100"])
     assert fs == 500 and names == leads and sig.shape == (8, 5000) and units == "uV" and abs(sig.max() - 800) < 10
     assert read_any(got["101"])[1] == 250
-    assert "several Rhythm rows" in err["200"] and "no Rhythm rows" in err["201"]
+    notes = dict(zip(out.ecg_id, out.waveform_note))
+    assert err["200"] is None and "V1: 2 complete rhythm rows (different), first used" in notes["200"]
+    assert abs(read_any(got["200"])[0][2].max() - 800) < 10           # the first V1 row, not the half-amplitude one
+    assert "no Rhythm rows" in err["201"] and "2 partial rhythm rows for lead V1" in err["203"]
+    mod["ecg"]["partial_rows"] = "concat"
+    out2 = extract_waveforms(eng, m[m.ecg_id == "203"], mod, str(tmp_path / "concat"), batch_size=1)
+    sig203, fs203, _, _ = read_any(out2.waveform_uri.iloc[0])
+    ref = 800 * np.sin(2 * np.pi * 1.1 * np.arange(5000) / 500 + 2)
+    assert fs203 == 500 and np.abs(sig203[2] - ref).max() < 10         # V1 rebuilt in FPK order
+    assert "joined in ECG_WAVEFORM_FPK order" in out2.waveform_note.iloc[0]
     assert abs(decode_lead("AQA%3D")[0] - 4.88) < 1e-9              # URL-encoded '=' padding
 
 
@@ -370,4 +393,6 @@ def test_clinic_number_used_directly_when_tables_carry_it():
     mod["ecg"]["sample_rate"]["clinic_number"] = "PATIENT_CLINIC_NUMBER"
     for sql in (ecg_index_sql(mod), waveform_rows_sql(mod, ["C1"])):
         assert "DIM_PATIENT" not in sql and "PATIENT_CLINIC_NUMBER" in sql
-    assert "r.PATIENT_CLINIC_NUMBER = w.PATIENT_CLINIC_NUMBER" in waveform_rows_sql(mod, ["C1"])
+    assert "r.k = w.PATIENT_CLINIC_NUMBER AND r.ts = w.ACQUISITION_TS" in waveform_rows_sql(mod, ["C1"])
+    del mod["ecg"]["sample_rate"]["clinic_number"]                    # as configured: PATIENT_DK + time (Tommy)
+    assert "r.k = w.PATIENT_DK AND r.ts = w.ACQUISITION_TS" in waveform_rows_sql(mod, ["C1"])
