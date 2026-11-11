@@ -162,7 +162,8 @@ echo:
     # Not in OMOP (the ETL loads no echo tables): mcp_echo.build_lvef_table -> {work}.echo_lvef, read by the echo cohort.
     results:
       table: "{modality}.FACT_ECHO_RESULTS"
-      # ECHO_TEST_FPK seen in FACT_ECHO_RESULTS; CONFIRM its result-type key and value column names (cut off on screen)
+      # seen in FACT_ECHO_RESULTS (2026-11-11): ECHO_TEST_FPK, PATIENT_DK, ECHO_RESULT_DTM DATETIME,
+      # ECHO_TEST_RESULT_TYPE_DK; CONFIRM the value column (ECHO_RESULT_VALUE per Adam; cut off on screen)
       columns: {test_key: ECHO_TEST_FPK, result_type_key: ECHO_TEST_RESULT_TYPE_DK, value: ECHO_RESULT_VALUE}
       result_type: {table: "{modality}.DIM_ECHO_TEST_RESULT_TYPE", key: ECHO_TEST_RESULT_TYPE_DK,                # seen in the view
                     name: ECHO_TEST_RESULT_NAME, description: ECHO_TEST_RESULT_DESCRIPTION}
