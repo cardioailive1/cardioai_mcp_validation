@@ -211,6 +211,18 @@ def spark_to_bigquery(sql: str) -> str:
     return ";\n".join(out)
 
 
+def _plain_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """BigQuery TIMESTAMP columns arrive tz-aware (UTC) and DATE columns as db-dtypes 'dbdate'; the pipeline, like
+    Spark and DuckDB, works with tz-naive datetime64 (comparing tz-aware and naive times raises in pandas)."""
+    for c in df.columns:
+        s = df[c]
+        if isinstance(s.dtype, pd.DatetimeTZDtype):
+            df[c] = s.dt.tz_convert("UTC").dt.tz_localize(None)
+        elif str(s.dtype) in ("dbdate", "dbtime"):
+            df[c] = pd.to_datetime(s.astype(str), errors="coerce") if str(s.dtype) == "dbdate" else s.astype(str)
+    return df
+
+
 class BigQueryEngine(Engine):
     """MCP workspace: Spark SQL -> GoogleSQL (sqlglot), run with the BigQuery client in one session.
 
@@ -255,7 +267,7 @@ class BigQueryEngine(Engine):
     def query(self, sql: str) -> pd.DataFrame:
         sql = self.transpile(sql)
         self.log.append(("<query>", sql))
-        return self._run(sql).to_dataframe()
+        return _plain_dates(self._run(sql).to_dataframe())
 
     @staticmethod
     def _api_name(full: str) -> str:

@@ -2,8 +2,9 @@
 
 MCP provisions the data in BigQuery (2026-10-28). Run once at onboarding, then fill config/study.yaml (schemas,
 site_map) and config/modality_tables.yaml (the CONFIRM column names):
-    python scripts/discover_schema.py --out exports/schema_inventory
-    python scripts/discover_schema.py --project <project id> --out exports/schema_inventory
+    python scripts/discover_schema.py --project mcp-ss-data-p-5o6i --out exports/schema_inventory
+--project is the project that HOLDS the data; queries run (and are billed) in your own default project, because
+the data project does not let workspace users create query jobs.
 
 Writes names, types and counts only (no patient rows), so the files can be shared to fill in the config.
 Column types matter: BigQuery does not compare DATETIME with TIMESTAMP, or STRING with INT64, without a cast.
@@ -30,18 +31,19 @@ def main():
     from google.cloud import bigquery
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--project", default=None, help="BigQuery project holding the MCP datasets (default: the client's)")
+    ap.add_argument("--project", default=None, help="BigQuery project holding the MCP datasets (default: your own)")
     ap.add_argument("--out", default="exports/schema_inventory")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    client = bigquery.Client(project=a.project) if a.project else bigquery.Client()
+    client = bigquery.Client()                       # jobs run in your own project (the data project refuses them)
     project = a.project or client.project
     rows = []
     for ds in client.list_datasets(project):
         for t in client.list_tables(ds.reference):
             tab = client.get_table(t.reference)
             cols = [f"{f.name} {f.field_type}" for f in tab.schema]
-            rows.append(dict(project=project, dataset=ds.dataset_id, table=t.table_id, n_rows=tab.num_rows,
+            rows.append(dict(project=project, dataset=ds.dataset_id, table=t.table_id, kind=tab.table_type,
+                             n_rows=tab.num_rows,
                              omop=t.table_id.lower() in OMOP,
                              modality_candidate=bool(MODALITY.search(t.table_id)),
                              n_columns=len(cols), columns=", ".join(cols)))
@@ -49,8 +51,11 @@ def main():
     inv.to_csv(f"{a.out}/tables.csv", index=False)
     print(f"{len(inv)} tables in {inv.dataset.nunique() if len(inv) else 0} datasets of project {project}")
     watch = inv[inv.table.str.upper().isin(WATCH)]
-    for _, r in watch.iterrows():
-        print(f"\n{r.dataset}.{r.table} ({r.n_rows} rows)\n  {r.columns}")
+    for _, r in watch.sort_values("table").iterrows():
+        size = "view" if r.kind == "VIEW" else f"{r.n_rows} rows"
+        print(f"\n{r.dataset}.{r.table} ({size})")
+        for col in r.columns.split(", "):
+            print(f"    {col}")
     missing = sorted(set(WATCH) - set(inv.table.str.upper()))
     if missing:
         print(f"\nnot found: {', '.join(missing)}")

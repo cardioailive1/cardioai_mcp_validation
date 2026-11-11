@@ -149,3 +149,13 @@ def test_training_and_mcp_queries_translate():
         assert out and "{{" not in out
         names = set(re.findall(r"\b([A-Z_][A-Z0-9_]*)\s*\(", re.sub(r"'(?:[^'\\]|\\.)*'", "''", out)))
         assert not names & {"YEAR", "GREATEST", "LEAST", "CONCAT_WS", "APPROX_QUANTILE", "PERCENTILE_APPROX", "XXHASH64"}, names
+
+
+def test_bigquery_results_get_plain_dates():
+    """BigQuery TIMESTAMP columns arrive tz-aware and DATE columns as 'dbdate'; the pipeline compares them with
+    tz-naive times, so the engine returns plain datetime64."""
+    from cardioai_mcp.engine import _plain_dates
+    df = pd.DataFrame({"ts": pd.to_datetime(["2020-01-01 10:00"]).tz_localize("UTC"), "n": [1]})
+    out = _plain_dates(df)
+    assert out.ts.dt.tz is None and out.ts[0] == pd.Timestamp("2020-01-01 10:00")
+    assert (out.ts < pd.Timestamp("2021-01-01")).all()
