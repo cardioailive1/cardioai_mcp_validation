@@ -85,8 +85,10 @@ def _lead_signal(lead: str, rows: pd.DataFrame, expected: set, raw_cfg: dict, po
     with a reason, so the order is checked on real rows before it is trusted."""
     dt, upb = raw_cfg.get("dtype", "<i2"), raw_cfg.get("units_per_bit", 4.88)
     ordered = "row_id" in rows and rows.row_id.notna().all()
-    if ordered:
-        rows = rows.sort_values("row_id", kind="mergesort")
+    if ordered:                                       # ECG_WAVEFORM_FPK is a STRING in the workspace: '10' < '9'
+        num = pd.to_numeric(rows.row_id, errors="coerce")
+        key = num if num.notna().all() else rows.row_id.astype(str)
+        rows = rows.assign(_k=key).sort_values("_k", kind="mergesort").drop(columns="_k")
     sigs = [decode_lead(v, dt, upb) for v in rows.waveform]
     if len(sigs) == 1:
         return sigs[0], ""
@@ -154,8 +156,9 @@ def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
     skind = next((k for k in ("clinic_number", "patient_dk") if sr.get(k) and w.get(k)), None)
     if sr.get("table") and skind:
         rate = "r.rate"
-        rjoin = (f"LEFT JOIN (SELECT {sr[skind]} AS k, {sr['acquisition_ts']} AS ts, MAX({sr['column']}) AS rate "
-                 f"FROM {_t(sr['table'])} GROUP BY {sr[skind]}, {sr['acquisition_ts']}) r "
+        # columns qualified with m.: an unqualified name missing from this table would bind to the outer w (DuckDB)
+        rjoin = (f"LEFT JOIN (SELECT m.{sr[skind]} AS k, m.{sr['acquisition_ts']} AS ts, MAX(m.{sr['column']}) AS rate "
+                 f"FROM {_t(sr['table'])} m GROUP BY m.{sr[skind]}, m.{sr['acquisition_ts']}) r "
                  f"ON r.k = w.{w[skind]} AND r.ts = w.{w['acquisition_ts']}")
     else:                                             # no shared key: the rate is inferred from the sample count
         rate, rjoin = "CAST(NULL AS DOUBLE)", ""
@@ -173,16 +176,21 @@ def waveform_rows_sql(modality_cfg: dict, clinic_numbers: Iterable) -> str:
     """
 
 
+def _naive(s: pd.Series) -> pd.Series:
+    s = pd.to_datetime(s)
+    return s.dt.tz_convert("UTC").dt.tz_localize(None) if isinstance(s.dtype, pd.DatetimeTZDtype) else s
+
+
 def match(ecgs: pd.DataFrame, rows: pd.DataFrame, tol_s: float = 0.0) -> Dict[str, pd.DataFrame]:
     """{ecg_id: its waveform rows}: same clinic number and ACQUISITION_TS = ECG_DTM (within tol_s seconds)."""
     out: Dict[str, pd.DataFrame] = {}
     if rows.empty:
         return out
-    rows = rows.assign(acquisition_ts=pd.to_datetime(rows.acquisition_ts), clinic_number=rows.clinic_number.astype(str))
+    rows = rows.assign(acquisition_ts=_naive(rows.acquisition_ts), clinic_number=rows.clinic_number.astype(str))
     for cn, g in rows.groupby("clinic_number"):
         mine = ecgs[ecgs.clinic_number.astype(str) == cn]
         for _, e in mine.iterrows():
-            t = pd.Timestamp(e.ecg_dtm)
+            t = _naive(pd.Series([e.ecg_dtm])).iloc[0]
             hit = g[(g.acquisition_ts - t).abs() <= pd.Timedelta(seconds=tol_s)]
             if len(hit):
                 out[str(e.ecg_id)] = hit
@@ -203,7 +211,7 @@ def probe(engine, modality_cfg: dict, n: int = 20) -> pd.DataFrame:
     for _, k in keys.iterrows():
         sql = (f"SELECT CAST(w.{w['lead_id']} AS STRING) AS lead_id, w.{w['waveform']} AS waveform{rid} "
                f"FROM {_t(e['waveform_table'])} w "
-               f"WHERE w.{wk} = {_q(k.dk)} AND w.{w['acquisition_ts']} = CAST({_q(k.ts)} AS TIMESTAMP) "
+               f"WHERE w.{wk} = {_q(k.dk)} AND CAST(w.{w['acquisition_ts']} AS TIMESTAMP) = CAST({_q(k.ts)} AS TIMESTAMP) "
                f"AND {_type_filter(e)}")
         rows = engine.query(engine.render(sql, {}))
         per = rows.lead_id.value_counts() if len(rows) else pd.Series(dtype=int)

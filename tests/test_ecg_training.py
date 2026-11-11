@@ -322,11 +322,11 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
                    (203, 20, TIMESTAMP '2020-04-04 10:00:00', 1, 'Sinus rhythm', 'Sinus rhythm.', NULL)""")
     con.execute("ALTER TABLE FACT_ECG ADD COLUMN HEART_RATE INTEGER")
     con.execute("UPDATE FACT_ECG SET HEART_RATE = 72")
-    con.execute("""CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_DK BIGINT,
+    # as in the workspace views (2026-11-11): string ids, PATIENT_CLINIC_NUMBER on both tables, no PATIENT_DK
+    con.execute("""CREATE TABLE FACT_ECG_WAVEFORM (ECG_WAVEFORM_FPK VARCHAR, PATIENT_CLINIC_NUMBER VARCHAR,
                    ACQUISITION_TS TIMESTAMP, LEAD_ID VARCHAR, WAVEFORM_TYPE VARCHAR, WAVEFORM VARCHAR, EKG_TYPE VARCHAR)""")
-    # Tommy Stretch (2026-11-05): the resting-measurement table joins on PATIENT_DK + ACQUISITION_TS; two rows for one
-    # acquisition must not duplicate the lead rows
-    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_DK BIGINT, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
+    # two resting-measurement rows for one acquisition must not duplicate the lead rows
+    con.execute("CREATE TABLE FACT_ECG_WAVEFORM_RESTING_MEASUREMENT (PATIENT_CLINIC_NUMBER VARCHAR, ACQUISITION_TS TIMESTAMP, ECGSAMPLEBASE INTEGER)")
     leads = ["I", "II", "V1", "V2", "V3", "V4", "V5", "V6"]
 
     def enc(x):
@@ -351,8 +351,9 @@ def test_mcp_per_lead_waveforms_end_to_end(tmp_path):
             k += 1
             rows.append((k, cn, dk, ts, ld, "rhythm", enc(np.zeros(fs * 10)), "exercise"))      # not a resting ECG: ignored
         for _ in range(2):
-            con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ({dk}, TIMESTAMP '{ts}', {fs})")
-    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, ?, CAST(? AS TIMESTAMP), ?, ?, ?, ?)", rows)
+            con.execute(f"INSERT INTO FACT_ECG_WAVEFORM_RESTING_MEASUREMENT VALUES ('{cn}', TIMESTAMP '{ts}', {fs})")
+    rows = [(str(r[0]), r[1]) + r[3:] for r in rows]                 # drop the DK; ids as strings
+    con.executemany("INSERT INTO FACT_ECG_WAVEFORM VALUES (?, ?, CAST(? AS TIMESTAMP), ?, ?, ?, ?)", rows)
     eng = DuckDBEngine(con, st)
     idx = build_ecg_index(eng, mod)
     assert sorted(idx.ecg_id) == ["100", "101", "200", "201", "202", "203"] and dict(zip(idx.ecg_id, idx.person_id))["101"] == 1
@@ -394,5 +395,19 @@ def test_clinic_number_used_directly_when_tables_carry_it():
     for sql in (ecg_index_sql(mod), waveform_rows_sql(mod, ["C1"])):
         assert "DIM_PATIENT" not in sql and "PATIENT_CLINIC_NUMBER" in sql
     assert "r.k = w.PATIENT_CLINIC_NUMBER AND r.ts = w.ACQUISITION_TS" in waveform_rows_sql(mod, ["C1"])
-    del mod["ecg"]["sample_rate"]["clinic_number"]                    # as configured: PATIENT_DK + time (Tommy)
+    # with only PATIENT_DK on both sides (Tommy's description) the join uses it
+    del mod["ecg"]["sample_rate"]["clinic_number"]
+    mod["ecg"]["sample_rate"]["patient_dk"] = mod["ecg"]["waveform_columns"]["patient_dk"] = "PATIENT_DK"
     assert "r.k = w.PATIENT_DK AND r.ts = w.ACQUISITION_TS" in waveform_rows_sql(mod, ["C1"])
+    del mod["ecg"]["sample_rate"]["patient_dk"]                       # no shared key: rate inferred from the samples
+    assert "LEFT JOIN" not in waveform_rows_sql(mod, ["C1"])
+
+
+def test_string_row_ids_order_numerically():
+    """ECG_WAVEFORM_FPK is a STRING in the workspace views: partial rows '9' and '10' join as 9 then 10, not '10' < '9'."""
+    import base64
+    from ecg_training.mcp_waveforms import _lead_signal
+    enc = lambda x: base64.b64encode(np.asarray(x, dtype="<i2").tobytes()).decode()  # noqa: E731
+    rows = pd.DataFrame({"waveform": [enc(np.full(2000, 2)), enc(np.full(500, 1))], "row_id": ["10", "9"]})
+    sig, note = _lead_signal("V1", rows, {2500}, {"units_per_bit": 1.0}, "concat")
+    assert sig[0] == 1 and sig[-1] == 2 and "joined" in note

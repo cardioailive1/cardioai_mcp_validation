@@ -43,8 +43,9 @@ ecg:
   # WAVEFORM row decodes on its own; %0A in the URL-encoded text is a line break (dropped before Base64 decoding).
   waveform_storage: base64_per_lead      # base64 (one string per ECG) | base64_per_lead (MCP) | file
   waveform_table: "{modality}.FACT_ECG_WAVEFORM"
-  # Tommy Stretch (2026-11-05): the table also has PATIENT_DK (the resting-measurement join key)
-  waveform_columns: {clinic_number: PATIENT_CLINIC_NUMBER, patient_dk: PATIENT_DK, acquisition_ts: ACQUISITION_TS,
+  # Workspace views (vw_accelerate2605_core_v1, 2026-11-11): ECG_WAVEFORM_FPK STRING, PATIENT_CLINIC_NUMBER STRING,
+  # ACQUISITION_TS DATETIME, WAVEFORM_TYPE, LEAD_ID, EKG_TYPE, WAVEFORM; no PATIENT_DK column
+  waveform_columns: {clinic_number: PATIENT_CLINIC_NUMBER, acquisition_ts: ACQUISITION_TS,
                      lead_id: LEAD_ID, waveform_type: WAVEFORM_TYPE, waveform: WAVEFORM, row_id: ECG_WAVEFORM_FPK}
   # Several rhythm rows for one lead (Tommy, 2026-11-05: occasional). Rows that each hold the full 2,500 / 5,000
   # samples are complete waveforms: the first (smallest ECG_WAVEFORM_FPK) is used. Partial rows: skip (default) or
@@ -55,10 +56,12 @@ ecg:
   leads: [I, II, V1, V2, V3, V4, V5, V6]
   seconds: 10
   timestamp_tolerance_s: 0               # ACQUISITION_TS = ECG_DTM exactly
-  sample_rate:                           # Tommy Stretch (2026-11-05): joins on PATIENT_DK + ACQUISITION_TS
+  # Tommy Stretch (2026-11-05) said PATIENT_DK + ACQUISITION_TS; in the workspace views both tables carry
+  # PATIENT_CLINIC_NUMBER (and no PATIENT_DK), so they join on PATIENT_CLINIC_NUMBER + ACQUISITION_TS
+  sample_rate:
     table: "{modality}.FACT_ECG_WAVEFORM_RESTING_MEASUREMENT"
     column: ECGSAMPLEBASE
-    patient_dk: PATIENT_DK
+    clinic_number: PATIENT_CLINIC_NUMBER
     acquisition_ts: ACQUISITION_TS
     # without a matching key the rate is inferred from the sample count (2,500 -> 250 Hz, 5,000 -> 500 Hz; deck)
   dim_patient: {table: "{modality}.DIM_PATIENT", patient_dk: PATIENT_DK, clinic_number: PATIENT_CLINIC_NUMBER, merged_flag: PATIENT_MERGED_FLAG}
@@ -135,7 +138,7 @@ echo:
       link: ACCESSION_NBR                      # key shared with the inventory (accession number or study UID)
       patient_dk: PATIENT_DK                   # add clinic_number: PATIENT_CLINIC_NUMBER if the table carries it
       performed_test_dk: ECHO_PERFORMED_TEST_DK   # -> DIM_ECHO_TEST (MCP 2026-10-28)
-      test_key: ECHO_TEST_FPK                  # FACT_ECHO_RESULTS rows -> their echo test (CONFIRM)
+      test_key: ECHO_TEST_FPK                  # FACT_ECHO_RESULTS rows -> their echo test (in both views, 2026-11-11)
     inventory_table: FACT_RADIOLOGY_DICOM_INVENTORY
     # MCP (Adam Resnick, 2026-10-21): no shared key between FACT_ECHO_TEST and the DICOM studies; link by
     # PATIENT_CLINIC_NUMBER and date (dates are shifted equally across a patient's record). Patient-days with
@@ -150,7 +153,7 @@ echo:
     # Same-day studies (MCP 2026-10-28): FACT_ECHO_TEST.ECHO_PERFORMED_TEST_DK -> DIM_ECHO_TEST names the exact
     # ordered test; the inventory STUDY_DESCRIPTION names the imaged study. Both sides are kept to transthoracic
     # echo before the date link, so a same-day TEE, stress echo or non-cardiac ultrasound no longer drops the day.
-    test_type: {table: "{modality}.DIM_ECHO_TEST", key: ECHO_TEST_DK, description: ECHO_TEST_DESCRIPTION}   # CONFIRM key / description names
+    test_type: {table: "{modality}.DIM_ECHO_TEST", key: ECHO_TEST_DK, description: ECHO_TEST_DESCRIPTION}   # seen in the workspace view
     filters:                                   # PROPOSED: check against the real descriptions (counts in the workspace)
       test_keep_regex: '(?i)(transthoracic|\btte\b|echocardiogra|\becho\b)'
       study_keep_regex: '(?i)(echo|transthoracic|\btte\b)'
@@ -159,8 +162,9 @@ echo:
     # Not in OMOP (the ETL loads no echo tables): mcp_echo.build_lvef_table -> {work}.echo_lvef, read by the echo cohort.
     results:
       table: "{modality}.FACT_ECHO_RESULTS"
-      columns: {test_key: ECHO_TEST_FPK, result_type_key: ECHO_TEST_RESULT_TYPE_DK, value: ECHO_RESULT_VALUE}   # CONFIRM key names
-      result_type: {table: "{modality}.DIM_ECHO_TEST_RESULT_TYPE", key: ECHO_TEST_RESULT_TYPE_DK,                # CONFIRM key name
+      # ECHO_TEST_FPK seen in FACT_ECHO_RESULTS; CONFIRM its result-type key and value column names (cut off on screen)
+      columns: {test_key: ECHO_TEST_FPK, result_type_key: ECHO_TEST_RESULT_TYPE_DK, value: ECHO_RESULT_VALUE}
+      result_type: {table: "{modality}.DIM_ECHO_TEST_RESULT_TYPE", key: ECHO_TEST_RESULT_TYPE_DK,                # seen in the view
                     name: ECHO_TEST_RESULT_NAME, description: ECHO_TEST_RESULT_DESCRIPTION}
       lvef_regex: '(?i)(\blvef\b|\blv ef\b|left ventric\w* ejection fraction|\bejection fraction\b|\bef\b)'
       exclude_regex: '(?i)(\brv\b|right ventric|\bla\b|left atri|fractional (shortening|area)|strain|\bgls\b|stress|peak|post|exercise)'
