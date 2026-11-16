@@ -14,12 +14,14 @@ seed: 20261012
 # CONFIRM the project and dataset names in the workspace: they are in the My First Query notebook
 # (/data/intro/Introduction_Notebooks/Accelerate; Adam Resnick 2026-11-04), and scripts/discover_schema.py lists them. The MCP OMOP ETL
 # guide names the warehouse dataset `mcp` (FACT_*, DIM_*) and the OMOP delivery dataset OMOP_v6_1.
-bq_project: null       # project the BigQuery client bills queries to (null = the workspace default)
+# MCP workspace, cohort Accelerate 2605 (checked in the workspace 2026-11-11): the data is a set of views in the shared
+# project; queries run, and are billed, in our own project, whose dataset temp_tables is writable and never expires.
+bq_project: mcp-acc-074-dbg-p-f028
 schemas:
-  cdm: omop            # OMOP CDM clinical tables (person, measurement, ...)          e.g. "`<project>`.OMOP_v6_1"
-  vocab: omop          # OMOP vocabulary tables (concept, concept_ancestor, ...)     usually the same dataset as cdm
-  work: cardioai_work  # project dataset with write access (MCP confirmed 2026-10-28) e.g. "`<project>`.cardioai_work"
-  modality: modality   # MCP FACT_ / DIM_ tables (ECG waveforms, echo, radiology)     e.g. "`<project>`.mcp"
+  cdm: "`mcp-ss-data-p-5o6i`.vw_accelerate2605_core_v1"        # OMOP CDM tables (person, measurement, note, ...)
+  vocab: "`mcp-ss-data-p-5o6i`.vw_accelerate2605_core_v1"      # OMOP vocabulary (concept, concept_ancestor, ...)
+  work: "`mcp-acc-074-dbg-p-f028`.temp_tables"                 # our writable dataset (locked cohorts, ecg_index, ...)
+  modality: "`mcp-ss-data-p-5o6i`.vw_accelerate2605_core_v1"   # MCP FACT_ / DIM_ tables (ECG, echo, radiology)
 
 # --- Study calendar --------------------------------------------------------
 # Retrospective window. Index events must fall inside; follow-up uses data
