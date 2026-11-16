@@ -132,8 +132,11 @@ class AutoAuditor:
             return 0.0 if "negated" in own else NM
 
         r: Dict[str, object] = {"infarct": pattern(isch, non), "nonischemic_lge": pattern(non, isch)}
+        # rule sheet (signed 2026-11-16): not mentioned = absent, but only when the study had LGE imaging
+        nd = self.m.get("lge_not_done")
+        lge_done = bool(lge + isch + non) and not (nd and re.search(nd, text, re.I))
         for lab in ("lv_thrombus", "lv_aneurysm", "report_mvo"):
-            r[lab] = self._simple(self.mentions(text, lab), 0.0)      # rule sheet: not mentioned = absent
+            r[lab] = self._simple(self.mentions(text, lab), 0.0 if lge_done else NM)
         r["report_lvef"] = self._value(text, "report_lvef", lo=5, hi=90)
         r["report_infarct_size"] = self._value(text, "report_infarct_size", lo=0, hi=100)
         return r

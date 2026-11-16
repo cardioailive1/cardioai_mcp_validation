@@ -12,7 +12,7 @@ The model is trained **only on Mayo data** inside the MCP workspace. No public d
 | Periods | Studies before 2020-01-01 train it, 2020 tunes it, and 2021 onward (plus held-out sites) tests it. The Phase 2 cohort comes from 2021 onward, and its patients are excluded from training |
 | Mayo data | **Reports:** `FACT_RADIOLOGY` (`RADIOLOGY_REPORT`, `RADIOLOGY_IMPRESSION`). **Images:** DICOM requested for de-identification from `FACT_RADIOLOGY_DICOM_INVENTORY`, linked by accession number. **Studies:** `FACT_IMAGINGSTUDY` |
 | Labels | Report labels for every study, plus about 300 studies outlined by CardioAI readers |
-| Phase 2 goals (proposed; clinical lead to confirm) | Infarct sensitivity ≥ 90%, infarct specificity ≥ 85%, LVEF mean absolute error against the report ≤ 5 EF points |
+| Phase 2 goals (signed by the clinical lead, Tamanna Nahar, 2026-11-16) | Primary: infarct sensitivity ≥ 90%, infarct specificity ≥ 85%, LVEF mean absolute error against the report ≤ 5 EF points. Secondary: MVO and non-ischaemic LGE AUROC ≥ 0.85, LVEF r ≥ 0.85, infarct size MAE ≤ 5% LV |
 | Exported | `weights.pt`, `thresholds.json`, `model_card.json` only |
 
 ## 1. Before you start
@@ -50,7 +50,7 @@ Model training does not use BigQuery: the queries build the training list and pu
 
 ## 2. Steps
 
-1. **Lock the Phase 2 MRI cohort first.** The clinical lead confirms the proposed goals and the red-flag cut-offs (`mri_training/config.yaml` → `red_flags`) beforehand.
+1. **Lock the Phase 2 MRI cohort first.** The goals, red-flag cut-offs and report rules were signed on 2026-11-16, with the cohort as built (196 STEMI accepted; reports with no infarct answer left out of the infarct endpoints). The signed MRI 1 rule changes the reference (thrombus, aneurysm and MVO are unknown, not absent, when the report describes no LGE), so **rebuild the Python reference (both passes) before locking**, even if it was built before.
    ```bash
    python scripts/run_cohorts.py --cohorts mri --save-tables
    ```
@@ -200,7 +200,8 @@ Model training does not use BigQuery: the queries build the training list and pu
 ## 6. Open items
 
 - [ ] MCP: how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id`; the de-identification request steps, turnaround and delivery folder; the final `SERVICE_RESULT_STATUS` values.
-- [ ] Clinical lead: MRI goals, red-flag cut-offs, and the reader protocol (scar threshold, basal slice).
+- [x] Clinical lead: MRI goals, red-flag cut-offs, report rules and the reader protocol (6 SD scar threshold, MVO in infarct size, basal slice): signed by Tamanna Nahar, 2026-11-16.
+- [ ] Whether MCP's 1,300 imaging-study approval covers MRI only (1,000 Phase 2 + 300 training) or echo as well.
 - [ ] Hire up to 5 outside cardiac MRI readers; each submits the DUA form.
 - [ ] Write the scoring script that produces `mri_predictions` from the locked bundle.
 

@@ -113,8 +113,10 @@ def test_troponin_uses_sex_specific_mayo_limits():
     from cardioai_mcp.concepts import resolve_concept_sets
     from ecg_training.dataset import evidence_sql, load_config
     con, st, eng = _omop_with_ecgs("'x'")
-    resolve_concept_sets(eng, st["concept_sets"], only={"mi_acute", "mi_any", "stemi", "nstemi", "troponin"})
-    trop = con.execute("SELECT concept_id FROM cs_members WHERE set_name = 'troponin' LIMIT 1").fetchone()[0]
+    resolve_concept_sets(eng, st["concept_sets"], only={"mi_acute", "mi_any", "mi_type2", "stemi", "nstemi", "troponin",
+                                                        "troponin_t"})
+    # the Mayo limits are troponin T limits (signed 2026-11-16): use a TnT code
+    trop = con.execute("SELECT concept_id FROM cs_members WHERE set_name = 'troponin_t' LIMIT 1").fetchone()[0]
     rows = con.execute("""SELECT e.ecg_id, e.person_id, CAST(e.acquisition_datetime AS DATE), p.gender_concept_id
                           FROM ecg_index e JOIN person p USING (person_id)""").fetchall()
     pick = {}

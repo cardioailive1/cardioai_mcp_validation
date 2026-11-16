@@ -15,7 +15,8 @@ labels:
   # acute_mi = 0 : no MI diagnosis of any kind (mi_any) within +/- clear_days
   # otherwise NULL (ambiguous: diagnosis without troponin, or the reverse) -> masked in the loss
   clear_days: 30
-  # Used only when the lab row has no range_high (shown in the model card); matched on measurement.unit_source_value.
+  # Used only when the lab row has no range_high and the row is troponin T (shown in the model card); matched on
+  # measurement.unit_source_value.
   # Mayo's troponin is Troponin T, 5th generation (test TRPS, reporting name "Troponin T, 5th gen, P",
   # LOINC 67151-1), in ng/L with sex-specific reference values: males <= 15, females <= 10
   # (mayocliniclabs.com, confirmed by MCP 2026-10-14). ng_per_l = sex not recorded (assay-wide 99th pct, 14).
@@ -24,6 +25,13 @@ labels:
   troponin_url_fallback: {ng_per_l_male: 15, ng_per_l_female: 10, ng_per_l: 14, ng_per_ml: 0.04}
   # stemi = 1 : acute_mi = 1 AND a STEMI diagnosis (concept set stemi) within window_days
   # stemi = 0 : acute_mi = 0, or acute_mi = 1 with NSTEMI and no STEMI diagnosis; else NULL
+  #             (unspecified acute MI, I21.9 / I21.A, is NULL: masked for STEMI, counted for acute_mi)
+  # Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet ECG 1 and ECG 2):
+  #   - one troponin above the URL plus an acute MI code is enough (no rise/fall requirement); window -1 to +3 days
+  #   - type 2 MI (I21.A1) and I21.A9 do not count for acute_mi (concept set mi_type2); they stay in mi_any -> masked
+  #   - the fallback limits below apply to troponin T codes only (concept set troponin_t); TnI needs its own range_high
+  #   - before the ICD-10 switch, an acute MI ECG is masked for STEMI (ICD-9 410.x has no STEMI code)
+  stemi_icd10_from: '2015-10-01'
   # af    = 1 : confirmed (over-read) statement says atrial fibrillation or flutter on THIS tracing
   #       = 0 : not mentioned, or negated ("no evidence of", "not seen"), historical ("history of", "on the prior
   #             tracing") or resolved ("no longer present", "has resolved")
@@ -58,6 +66,7 @@ train:
   augment: {amplitude: [0.9, 1.1], shift_s: 0.2, noise_mv: 0.02, lead_dropout_p: 0.05}
 
 thresholds:
+  # Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (ECG 3).
   # Fitted on the TUNING split only: highest threshold whose tuning sensitivity >= target.
   # Targets carry headroom above the Phase 2 goals (STEMI 0.92, AF 0.94, acute MI 0.92): success
   # needs the LOWER 95% CI bound to clear the goal, so a threshold tuned to land exactly on the

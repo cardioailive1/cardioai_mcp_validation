@@ -78,8 +78,10 @@ The request is `{"instances": [{"signal": n_leads x N, "fs": Hz, "leads": [...],
 
 | Head | Positive | Negative | Not used (masked) |
 |---|---|---|---|
-| acute_mi | Acute MI diagnosis **and** troponin above the upper reference limit (the row's own limit, else Mayo's: males > 15, females > 10 ng/L), both within −1 to +3 days of the ECG | No MI diagnosis of any kind within ±30 days | Diagnosis without troponin, or the reverse |
-| stemi | acute_mi = 1 **and** a STEMI diagnosis within −1 to +3 days | acute_mi = 0, or NSTEMI without a STEMI diagnosis | Otherwise |
+| acute_mi | Acute MI diagnosis (not type 2, I21.A1 / I21.A9) **and** troponin above the upper reference limit (the row's own limit; for troponin T without one, Mayo's: males > 15, females > 10 ng/L), both within −1 to +3 days of the ECG. One high value is enough (no rise/fall requirement) | No MI diagnosis of any kind within ±30 days | Diagnosis without troponin, or the reverse; type 2 MI only; troponin I without its own limit |
+| stemi | acute_mi = 1 **and** a STEMI diagnosis within −1 to +3 days | acute_mi = 0, or NSTEMI without a STEMI diagnosis | Unspecified acute MI (I21.9, I21.A); any acute MI before 2015-10-01 (ICD-9 has no STEMI code) |
+
+The label rules and concept sets were signed by the clinical lead, Tamanna Nahar, on 2026-11-16 (sign-off sheet ECG 1–3).
 | af | Confirmed read says atrial fibrillation or flutter on this tracing | Confirmed read without it, or negated, historical ("history of", "on the prior tracing") or resolved ("no longer present") | No confirmed read; only hedged mentions ("possible", "consider", "versus") |
 
 ## Tests

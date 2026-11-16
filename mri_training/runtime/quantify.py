@@ -158,7 +158,7 @@ def red_flags(findings: Dict[str, object], probs: Dict[str, float], rules: Dict[
             hit = v is not None and v >= r["min"]
         else:
             v = findings.get(r["value"])
-            hit = v is not None and ((v >= r["min"]) if "min" in r else (v < r["max"]))
+            hit = v is not None and ((v >= r["min"]) if "min" in r else (v <= r["max"]))   # both inclusive (signed MRI 3)
         if hit:
             out.append({"flag": name, "value": v, "rule": r.get("text", "")})
     return out

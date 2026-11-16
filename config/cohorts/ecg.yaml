@@ -167,6 +167,8 @@ predictions:
     - "Phase 1 values come from the model card's test_time metrics once trained; until then phase1 is null and the deck goals apply."
 
 endpoints:
+  # Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet ECG 3): goals below, the tuning targets in
+  # ecg_training/config.yaml (0.96 / 0.96 / 0.97: a missed STEMI costs more than a false alert), flutter counted as AF.
   primary:
     - {id: stemi_sensitivity, label: "STEMI sensitivity", metric: sensitivity, pred: agent_stemi, ref: ref_stemi, positive: 1, goal: 0.92, direction: ge, phase1: null}
     - {id: af_sensitivity, label: "Atrial fibrillation / flutter sensitivity", metric: sensitivity, pred: agent_af, ref: ref_af_any, positive: 1, goal: 0.94, direction: ge, phase1: null}

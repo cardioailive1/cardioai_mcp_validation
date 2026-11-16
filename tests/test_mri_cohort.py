@@ -116,6 +116,7 @@ def test_mri_cohort_builds_and_evaluates(tmp_path):
     p["agent_lvef"] = a.lvef_report.astype(float) + rng.normal(0, 3, len(a))
     p["agent_infarct_size_pct"] = a.infarct_size_report.astype(float).fillna(0) + rng.normal(0, 2, len(a)).clip(-2, None)
     p["agent_mvo"] = a.ref_mvo.fillna(0).astype(int)
+    p["agent_mvo_pct"] = p.agent_mvo * rng.uniform(0.5, 4, len(a)) + rng.uniform(0, 0.6, len(a))
     p["runtime_s"] = rng.gamma(4, 5, len(a))
     ep = evaluate(c, a, p, n_boot=100)
     assert ep[ep.note.astype(str).str.startswith("ERROR")].empty, ep.to_string()

@@ -58,6 +58,13 @@ def test_report_labels():
     assert r["myocarditis"]["nonischemic_lge"] == 1 and r["myocarditis"]["infarct"] == 0 and r["myocarditis"]["report_mvo"] == 0
     assert r["normal"]["infarct"] == 0 and r["normal"]["nonischemic_lge"] == 0 and r["normal"]["report_lvef"] == 63.5
     assert r["thrombus"]["lv_thrombus"] == 1 and r["thrombus"]["lv_aneurysm"] == 1 and r["thrombus"]["report_lvef"] == 30
+    # silence = absent only in a study with LGE imaging (signed 2026-11-16, MRI 1)
+    cine = report_labels("Cine imaging only; contrast was not given for this study. LVEF 58 %.", CFG)
+    assert np.isnan(cine["lv_thrombus"]) and np.isnan(cine["report_mvo"]) and np.isnan(cine["lv_aneurysm"])
+    noted = report_labels("Normal LV size and systolic function. LVEF 60 %.", CFG)      # LGE never described
+    assert np.isnan(noted["lv_thrombus"]) and noted["report_lvef"] == 60
+    lge = report_labels("Delayed enhancement images are normal. LVEF 55 %.", CFG)
+    assert lge["lv_thrombus"] == 0 and lge["report_mvo"] == 0 and lge["lv_aneurysm"] == 0
     short = report_labels("limited", CFG)
     assert all(np.isnan(v) for v in short.values())
     m = make_labels(pd.DataFrame({"report_text": list(REPORTS.values())}), CFG)
@@ -163,7 +170,10 @@ def test_red_flag_rules():
     rules = CFG["red_flags"]
     hits = {r["flag"] for r in red_flags({"infarct_size_pct_lv": 18.0, "mvo_pct_lv": 1.2, "lvef_pct": 31.0},
                                          {"lv_thrombus": 0.8, "lv_aneurysm": 0.1, "nonischemic_lge": 0.2}, rules)}
-    assert hits == {"large_infarct", "mvo_present", "lvef_below_35", "lvef_below_50", "lv_thrombus"}
+    assert hits == {"large_infarct", "mvo_present", "lvef_le_35", "lvef_le_40", "lv_thrombus"}
+    # signed cut-offs (2026-11-16, MRI 3): inclusive at 40 and 35; 41-49% raises no LVEF flag
+    lv = lambda ef: {r["flag"] for r in red_flags({"lvef_pct": ef}, {}, rules)}  # noqa: E731
+    assert lv(40.0) == {"lvef_le_40"} and lv(35.0) == {"lvef_le_35", "lvef_le_40"} and lv(45.0) == set()
     none = red_flags({"infarct_size_pct_lv": 3.0, "mvo_pct_lv": 0.0, "lvef_pct": None},
                      {"lv_thrombus": 0.1, "lv_aneurysm": 0.1, "nonischemic_lge": 0.1}, rules)
     assert none == []                                                     # unmeasured LVEF never raises a flag

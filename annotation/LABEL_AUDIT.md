@@ -74,15 +74,15 @@ For numbers, type the value as stated, without the % sign. Leave the cell blank 
 
 These must match what the code is meant to do. **The cardiologist signs them off before the audit starts.** Where the cardiologist disagrees with a rule, the code is changed first.
 
-**CMR report (MRI):**
+**CMR report (MRI):** signed by the clinical lead, Tamanna Nahar, on 2026-11-16 (sign-off sheet MRI 1).
 
 | Label | 1 | 0 | NM / U |
 |---|---|---|---|
 | `infarct` | LGE or scar in an ischaemic pattern (subendocardial or transmural, coronary territory), or "consistent with infarct" (prior, old, recent or acute all count) | No LGE; or LGE only in a non-ischaemic pattern | NM: LGE not assessed or not described |
 | `nonischemic_lge` | Mid-wall, subepicardial, patchy or insertion-point LGE, or a named cause (myocarditis, sarcoid, amyloid, HCM) | No LGE; or ischaemic LGE only | NM: LGE not assessed or not described |
-| `lv_thrombus` | LV (apical or mural) thrombus present now | Stated absent, **or not mentioned**; resolved thrombus | U: "possible", "cannot exclude" |
-| `lv_aneurysm` | True LV aneurysm or pseudoaneurysm | Stated absent, or not mentioned | U: "aneurysmal segment" or dyskinesis without the word aneurysm |
-| `report_mvo` | Microvascular obstruction or no-reflow present | Stated absent, or not mentioned | U: "possible", "may represent" |
+| `lv_thrombus` | LV (apical or mural) thrombus present now | Stated absent, **or not mentioned in a study with LGE imaging**; resolved thrombus | U: "possible", "cannot exclude". NM: not mentioned and LGE not described or not done |
+| `lv_aneurysm` | True LV aneurysm or pseudoaneurysm | Stated absent, or not mentioned in a study with LGE imaging | U: "aneurysmal segment" or dyskinesis without the word aneurysm. NM: as thrombus |
+| `report_mvo` | Microvascular obstruction or no-reflow present | Stated absent, or not mentioned in a study with LGE imaging | U: "possible", "may represent". NM: as thrombus |
 | `report_lvef` | LVEF % measured on **this** CMR | — | Blank: not stated. U: a range, or echo or prior-study values only |
 | `report_infarct_size` | Infarct size or scar burden as % of LV mass | — | Blank: grams only or segment counts |
 
