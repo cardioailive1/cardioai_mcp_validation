@@ -11,7 +11,7 @@ The model is trained **only on Mayo data** inside the MCP workspace. No public d
 | Model | MobileNetV3 encoder + U-Net decoder (`mri_training/`); export approved |
 | Periods | Studies before 2020-01-01 train it, 2020 tunes it, and 2021 onward (plus held-out sites) tests it. The Phase 2 cohort comes from 2021 onward, and its patients are excluded from training |
 | Mayo data | **Reports:** `FACT_RADIOLOGY` (`RADIOLOGY_REPORT`, `RADIOLOGY_IMPRESSION`). **Images:** DICOM requested for de-identification from `FACT_RADIOLOGY_DICOM_INVENTORY`, linked by accession number. **Studies:** `FACT_IMAGINGSTUDY` |
-| Labels | Report labels for every study, plus about 300 studies outlined by CardioAI readers |
+| Labels | Report labels for every study, plus about 300 studies outlined by the CardioAI cardiologist (automatic outlines approved or corrected; MRI 9, approved 2026-11-16) |
 | Phase 2 goals (signed by the clinical lead, Tamanna Nahar, 2026-11-16) | Primary: infarct sensitivity ≥ 90%, infarct specificity ≥ 85%, LVEF mean absolute error against the report ≤ 5 EF points. Secondary: MVO and non-ischaemic LGE AUROC ≥ 0.85, LVEF r ≥ 0.85, infarct size MAE ≤ 5% LV |
 | Exported | `weights.pt`, `thresholds.json`, `model_card.json` only |
 
@@ -55,6 +55,14 @@ Model training does not use BigQuery: the queries build the training list and pu
    python scripts/run_cohorts.py --cohorts mri --save-tables
    ```
    Snapshot the analytic table as `cardioai_work.mri_analytic_locked`.
+
+   **Then review the reference on 100 reports** (MRI 8, approved 2026-11-16; this replaces the two blinded cardiologists of VALIDATION_RUNBOOK 7c for MRI). The automatic auditor proposes every label; the cardiologist approves or corrects in the workspace; 20 reports are blinded to measure anchoring:
+   ```bash
+   python -m annotation.reference_review sheet --out ~/cardioai_exports/ref_review   # review_sheet.xlsx + key.csv
+   #   the cardiologist fills review_sheet.xlsx (decision approve / correct; blinded rows: every final_ column)
+   python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review   # review_results.csv
+   ```
+   Every label must PASS (kappa >= 0.80 against the reference, stated LVEF within 1 point in >= 98%). "RE-READ BLIND" means the blinded 20 agreed more than 0.10 kappa less than the rest: re-read all 100 with no proposals. On a FAIL, fix the rule in `mri_training/config.yaml`, rebuild the reference, re-lock and review a fresh sample (`--seed`).
 
 2. **Find the CMR studies and build the DICOM request.** First fill in `config/modality_tables.yaml` → `mri.mcp`:
    - the schema of the FACT tables;
@@ -114,14 +122,15 @@ Model training does not use BigQuery: the queries build the training list and pu
 
 7. **Outline about 300 studies in rounds.** Readers use 3D Slicer; the protocol and checks are in `annotation/README.md`.
    ```bash
-   python -m annotation.select mri --manifest /workspace/mri/manifest.parquet --readers r01,r02,r03 --out worklist.csv
-   # round 1: the first ~40 studies, outlined from scratch
+   python -m annotation.select mri --manifest /workspace/mri/manifest.parquet --readers c01,c02 --out worklist.csv
+   #   c01 = the cardiologist (every study), c02 = the second cardiologist (the 10% double reads); column round
+   # round 1: the 40 studies with round = 1, outlined from scratch by the cardiologist
    python -m annotation.export mri --worklist worklist_round1.csv --out /workspace/annotation
    python -m annotation.collect mri --root /workspace/annotation --out /workspace/mri/contours
    #   join contours/label_uri.csv into the manifest (label_uri column), then train the pre-drawing model:
    python -m mri_training.train --manifest /workspace/mri/manifest_labels.parquet --init /workspace/mri/runs/ssl_v1 \
           --stage-a-only --out /workspace/mri/runs/prelabel_r1 --device cuda
-   # round 2 onward: readers correct pre-drawn outlines; retrain about every 100 studies
+   # round 2 onward: the cardiologist approves or corrects pre-drawn outlines (scar by the 6 SD rule); retrain about every 100 studies
    python -m annotation.export mri --worklist worklist_round2.csv --out /workspace/annotation --bundle /workspace/mri/runs/prelabel_r1
    ```
    - `collect` refuses unreviewed or invalid files.
@@ -202,7 +211,7 @@ Model training does not use BigQuery: the queries build the training list and pu
 - [ ] MCP: how `PATIENT_CLINIC_NUMBER` maps to the OMOP `person_id`; the de-identification request steps, turnaround and delivery folder; the final `SERVICE_RESULT_STATUS` values.
 - [x] Clinical lead: MRI goals, red-flag cut-offs, report rules and the reader protocol (6 SD scar threshold, MVO in infarct size, basal slice): signed by Tamanna Nahar, 2026-11-16.
 - [ ] Whether MCP's 1,300 imaging-study approval covers MRI only (1,000 Phase 2 + 300 training) or echo as well.
-- [ ] Hire up to 5 outside cardiac MRI readers; each submits the DUA form.
+- [x] Readers: none hired (MRI 9, approved 2026-11-16). The two cardiologists submit the DUA form.
 - [ ] Write the scoring script that produces `mri_predictions` from the locked bundle.
 
 See also: `mri_training/README.md` (model details), `annotation/README.md` (reader protocol and tools), `VALIDATION_RUNBOOK.md` (the full Phase 2 study), and `RUNBOOK_ECG.md`.

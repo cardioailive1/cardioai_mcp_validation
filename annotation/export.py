@@ -7,9 +7,10 @@ One folder per reader and study: <out>/<reader>/<study_id>/
   MRI : lge.nii.gz + lge_label.nii.gz, cine_ed / cine_es (.nii.gz + _label.nii.gz), meta.json
   Echo: cine.nii.gz (frames along z) + cine_label.nii.gz, meta.json
 Images keep their native pixels and orientation, so 3D Slicer, ITK-SNAP, MONAI Label and OHIF (after
-conversion) show them the way the scanner wrote them. With --bundle (weights.pt + model_card.json of a
-model trained on the public sets), the label files start with the model's outlines for readers to
-correct; otherwise they start empty.
+conversion) show them the way the scanner wrote them. With --bundle (weights.pt + model_card.json of the
+pre-drawing model trained on the previous round's Mayo outlines), the label files start with the model's outlines,
+scar re-drawn by the signed 6 SD rule (tasks.yaml prelabel_scar_sd), for the cardiologist to approve or correct
+(MRI 9, approved 2026-11-16); otherwise (round 1) they start empty.
 """
 from __future__ import annotations
 
@@ -50,6 +51,25 @@ def load_prelabel_model(bundle: Optional[str], device: str = "cpu"):
                    "weights_sha256": hashlib.sha256((b / "weights.pt").read_bytes()).hexdigest()}
 
 
+def scar_by_sd(images: np.ndarray, labels: np.ndarray, n_sd: float = 6.0, min_remote: int = 50) -> np.ndarray:
+    """Pre-drawn scar by the signed rule (MRI 2): inside the myocardium (myocardium + scar), signal above n_sd SD of
+    remote myocardium is scar, the rest viable myocardium; MVO and every other class are kept. Remote myocardium
+    is estimated from the myocardium the model drew as viable, with robust statistics (median, 1.4826 x MAD), so
+    scar the model missed does not inflate the spread. The cardiologist corrects it visually (MRI 9)."""
+    img, lab = np.asarray(images, float), np.asarray(labels).copy()
+    remote = img[lab == MYO]
+    if remote.size < min_remote:
+        return lab                                         # too little viable myocardium drawn: keep the model's scar
+    med = float(np.median(remote))
+    sd = 1.4826 * float(np.median(np.abs(remote - med)))
+    if sd <= 0:
+        return lab
+    myo = np.isin(lab, (MYO, SCAR))
+    lab[myo & (img > med + n_sd * sd)] = SCAR
+    lab[myo & (img <= med + n_sd * sd)] = MYO
+    return lab
+
+
 def _model_labels(model, stack: Stack, kind: str, device: str) -> np.ndarray:
     """Model outlines on the native grid, slices in SORTED order: (S, H, W) or (P, S, H, W) for cine."""
     from mri_training.runtime.pipeline import segment
@@ -62,7 +82,7 @@ def _model_labels(model, stack: Stack, kind: str, device: str) -> np.ndarray:
 
 
 def export_mri_study(study_id: str, lge: Stack, cine: Optional[Stack], folder: Path, model=None,
-                     provenance: Optional[dict] = None, device: str = "cpu", readers=()) -> Dict:
+                     provenance: Optional[dict] = None, device: str = "cpu", readers=(), scar_sd: Optional[float] = None) -> Dict:
     folder.mkdir(parents=True, exist_ok=True)
     aff, order = stack_affine(lge)
     meta: Dict = {"task": "mri_contours", "study_id": study_id, "readers": list(readers),
@@ -72,6 +92,9 @@ def export_mri_study(study_id: str, lge: Stack, cine: Optional[Stack], folder: P
     _save(to_nifti_array(lge.images, order), aff, folder / "lge.nii.gz", np.float32)
     if model is not None:
         lab = _model_labels(model, lge, "lge", device)                      # sorted order already
+        if scar_sd:
+            lab = scar_by_sd(np.asarray(lge.images)[order], lab, float(scar_sd))
+            meta["prelabel_scar"] = f"{scar_sd:g} SD above remote myocardium (median + {scar_sd:g} x 1.4826 MAD), then corrected"
         lab_nii = np.transpose(lab, (2, 1, 0))
     else:
         lab_nii = np.zeros(to_nifti_array(lge.images, order).shape, np.uint8)
@@ -153,6 +176,8 @@ def export_worklist(task: str, worklist: pd.DataFrame, out: str, bundle: Optiona
     """Every (study, reader) pair of the worklist -> <out>/<reader>/<study_id>/. Returns a status table."""
     from mri_training.io import read_study
     model, prov = load_prelabel_model(bundle, device) if task == "mri" else (None, None)
+    from .select import load_tasks
+    scar_sd = load_tasks()["mri_contours"].get("prelabel_scar_sd") if task == "mri" else None
     rows = []
     for _, w in worklist.iterrows():
         readers = [r for r in (w.get("reader_1"), w.get("reader_2")) if isinstance(r, str) and r]
@@ -163,7 +188,7 @@ def export_worklist(task: str, worklist: pd.DataFrame, out: str, bundle: Optiona
             for rd in readers:
                 f = Path(out) / rd / str(w["study_id"])
                 if task == "mri":
-                    export_mri_study(str(w["study_id"]), lge, cine, f, model, prov, device, readers)
+                    export_mri_study(str(w["study_id"]), lge, cine, f, model, prov, device, readers, scar_sd)
                 else:
                     export_echo_study(str(w["study_id"]), data, f, readers)
             rows.append({"study_id": w["study_id"], "status": "exported", "error": None})
