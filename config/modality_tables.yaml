@@ -269,4 +269,7 @@ notes:
   stress_report_title: '(?i)(stress|treadmill|exercise test|nuclear)'
   hf_note_title: '(?i)(cardio|heart failure|progress|discharge)'
   hp_note_title: '(?i)(history and physical|h&p|admission|consult|cardiology|progress)'
-  cmr_report_title: '(?i)(cardiac mri|cardiac mr[^a-z]|cmr|cardiac magnetic|mri heart|mr heart)'
+  # Mayo radiology report titles in OMOP note (note_title = radiology test description; seen 2026-11-16). Kept: MR
+  # CARDIAC [WITHOUT AND WITH IV CONTRAST | AND STRESS ... | MORPHOLOGY | FUNCTION ...], MR CARD FUNCT AND/OR MORPH...
+  # Left out: MR CARDIAC WITHOUT IV CONTRAST and VELOCITY FLOW (no LGE), outside-study interpretations / e-consults.
+  cmr_report_title: '(?i)^mr card(iac)?($| (and|morp|funct|without and with))'

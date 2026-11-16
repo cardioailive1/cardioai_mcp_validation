@@ -122,3 +122,20 @@ def test_deid_request_script_selection():
     late = pd.DataFrame({"person_id": [11], "index_date": ["2022-03-05"]})               # 4 days off: not the index study
     assert dr.cohort_index_studies(studies, late, "study_datetime")[1] == 1
     assert len(dr.sample(studies, 1, 0)) == 1 and dr._years(studies, "study_datetime") == {"2022": 3}
+
+
+def test_cmr_report_title_matches_mayo_titles():
+    """Mayo radiology report titles in OMOP note (2026-11-16): the LGE-capable cardiac MR reports, not non-contrast,
+    flow-only or outside-study reads; the cohort exclusion uses the same pattern."""
+    import re
+    import yaml
+    root = Path(__file__).resolve().parents[1]
+    pat = yaml.safe_load((root / "config" / "modality_tables.yaml").read_text())["notes"]["cmr_report_title"]
+    assert pat in (root / "config" / "cohorts" / "mri.yaml").read_text()
+    rx = re.compile(pat)
+    keep = ["MR CARDIAC WITHOUT AND WITH IV CONTRAST", "MR CARDIAC AND STRESS WITHOUT AND WITH IV CONT", "MR CARDIAC",
+            "MR CARD FUNCT AND/OR MORPHOLOGY", "MR CARDIAC MORPHOLOGY", "MR CARDIAC MORP WITH", "MR CARDIAC FUNCTION LIMITED"]
+    drop = ["MR CARDIAC WITHOUT IV CONTRAST", "MR CARDIAC VELOCITY FLOW", "INTERPRETATION OF OUTSIDE MR CARDIAC",
+            "ECONSULT OF OUTSIDE MR CARDIAC", "NM CARDIAC PERFUSION REST AND STRESS SPECT", "CT CARDIAC ANGIOGRAM WITH IV CONTRAST",
+            "ECHOCARDIOLOGY IMAGE EXAM"]
+    assert all(rx.search(t) for t in keep) and not any(rx.search(t) for t in drop)
