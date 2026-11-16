@@ -9,8 +9,8 @@
 #   from training (mri_training/config.yaml: exclude_persons_table). Lock this cohort BEFORE training.
 #   A public external test set (e.g. EMIDEC) may be reported alongside if its licence allows; it is never used in training.
 # Not one of the deck's five Phase 1 agents: no `expected` block, and not in cardioai_mcp.COHORTS
-#   (deck cohorts); listed in cardioai_mcp.EXTRA_COHORTS. Goals below are PROPOSED for the clinical
-#   lead to confirm before the cohort is locked.
+#   (deck cohorts); listed in cardioai_mcp.EXTRA_COHORTS. Goals below were signed by the clinical lead,
+#   Tamanna Nahar, on 2026-11-16 (sign-off sheet MRI 4), with the cohort decisions MRI 5-7 (see sampling, known_limitations).
 # Reference standard: built in Python by the training label code (mri_training/reference.py, modality
 #   mri_ref) from this cohort's report text, BEFORE locking. The SQL rules in the ref_* elements are only a fallback.
 # =============================================================================
@@ -81,6 +81,9 @@ sampling:
   strata_expr: |
     CASE WHEN e.stemi_recent = 1 THEN 'stemi' WHEN e.ami_recent = 1 THEN 'other_ami' ELSE 'other' END
   quotas: {stemi: 450, other_ami: 200, other: 350}
+  # Signed 2026-11-16 (MRI 6): the workspace build found 196 eligible STEMI patients, not 450. The clinical lead
+  # accepted 196 with the 30-day window unchanged and no other widening; the unfilled places go to the other strata
+  # (1,000 sampled). The quotas stay as written so the seeded draw, and so the locked cohort, does not change.
 
 elements:
   # ---------------- DEMOGRAPHICS (4)
@@ -178,9 +181,13 @@ predictions:
     - "The reference is the signed CMR report (reader's qualitative call); infarct size is stated in a minority of reports, so its agreement endpoint uses the subset where it is stated, plus the reader-contoured test studies in the model card."
     - "Transmurality per AHA segment is compared with reader contours in the model card (test_time), not with reports, which rarely state all 16 segments."
     - "LV thrombus and aneurysm are rare: their sensitivity estimates will have wide intervals at this N; reported, not powered."
+    - "STEMI stratum: 196 patients against a planned 450 (accepted by the clinical lead 2026-11-16), so STEMI-subgroup estimates have wider intervals than planned."
+    - "Reports that give no infarct answer (about 13%; non-ischaemic LGE about 14%) are left out of those endpoints, not counted as negative (accepted 2026-11-16, MRI 5): about 870 of 1,000 patients are evaluable for infarct."
+    - "Infarct size is stated in about 0.3% of reports in the workspace build, so the infarct-size endpoints rest on reader-contoured test studies in the model card; the report-based infarct-size MAE is reported only if enough reports state it."
 
 endpoints:
-  # PROPOSED goals (clinical lead to confirm before locking)
+  # Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet MRI 4). Classification goals pass on the
+  # lower 95% bound, error goals on the upper bound. Thrombus and aneurysm stay exploratory (no goal: too rare).
   primary:
     - {id: infarct_sensitivity, label: "Infarct (ischaemic LGE) sensitivity", metric: sensitivity, pred: agent_infarct, ref: ref_infarct, positive: 1, goal: 0.90, direction: ge, phase1: null}
     - {id: infarct_specificity, label: "Infarct (ischaemic LGE) specificity", metric: specificity, pred: agent_infarct, ref: ref_infarct, positive: 1, goal: 0.85, direction: ge, phase1: null}
@@ -192,6 +199,8 @@ endpoints:
     - {id: lvef_correlation, label: "LVEF correlation vs report (Pearson r)", metric: pearson, pred: agent_lvef, ref: lvef_report, goal: 0.85, direction: ge, phase1: null}
     - {id: mvo_sensitivity, label: "MVO sensitivity", metric: sensitivity, pred: agent_mvo, ref: ref_mvo, positive: 1, goal: null, direction: ge, phase1: null}
     - {id: mvo_specificity, label: "MVO specificity", metric: specificity, pred: agent_mvo, ref: ref_mvo, positive: 1, goal: null, direction: ge, phase1: null}
+    - {id: mvo_auc, label: "MVO detection AUROC (MVO % LV as the score)", metric: auc, pred: agent_mvo_pct, ref: ref_mvo, goal: 0.85, direction: ge, phase1: null}
+    - {id: nonischemic_auc, label: "Non-ischaemic LGE AUROC", metric: auc, pred: agent_nonischemic_prob, ref: ref_nonischemic_lge, goal: 0.85, direction: ge, phase1: null}
     - {id: nonischemic_sensitivity, label: "Non-ischaemic LGE (STEMI mimic) sensitivity", metric: sensitivity, pred: agent_nonischemic, ref: ref_nonischemic_lge, positive: 1, goal: null, direction: ge, phase1: null}
     - {id: nonischemic_specificity, label: "Non-ischaemic LGE specificity", metric: specificity, pred: agent_nonischemic, ref: ref_nonischemic_lge, positive: 1, goal: null, direction: ge, phase1: null}
     - {id: thrombus_sensitivity, label: "LV thrombus sensitivity", metric: sensitivity, pred: agent_thrombus, ref: ref_lv_thrombus, positive: 1, goal: null, direction: ge, phase1: null}

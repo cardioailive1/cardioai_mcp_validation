@@ -126,6 +126,10 @@ label_audit:
       values:
         report_lvef: '\blvef\b|left ventricular ejection fraction|\bejection fraction\b|\bef\b'
         report_infarct_size: 'infarct size|scar burden|lge burden|extent of (late )?(gadolinium )?enhancement|infarct (extent|burden)'
+      # Rule sheet (signed 2026-11-16, MRI 1): silence = absent for thrombus, aneurysm and MVO only in a study with LGE
+      # imaging. LGE counts as done when the report mentions LGE / enhancement / scar at all and none of these say
+      # it was not done.
+      lge_not_done: 'non[- ]?contrast|no (iv )?(gadolinium|contrast)|without (iv )?(gadolinium|contrast)|(gadolinium|contrast|lge|delayed enhancement|late enhancement)( imaging| images| sequences?)? (was |were )?(not|never) (given|administered|performed|obtained|acquired)'
       value_exclude:
         report_lvef: '\b(rvef|right ventric|echo(cardiogra)?|previous|prior study|tte)\b'
         report_infarct_size: '\bgrams?\b|\bg\b'

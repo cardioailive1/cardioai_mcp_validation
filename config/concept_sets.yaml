@@ -38,6 +38,15 @@ nstemi:
   include:
     - {vocab: ICD10CM, codes: ["I21.4", "I22.2"]}
   descendants: false
+mi_type2:          # type 2 MI (I21.A1) and other MI types (I21.A9): not coronary occlusion
+  # Signed by the clinical lead (Tamanna Nahar, 2026-11-16, ECG 2): a condition row whose SOURCE code is in this set
+  # does not count for the ECG acute_mi label (ecg_training/labels.sql); it stays in mi_any, so the ECG is masked,
+  # never a negative. Matched on condition_source_concept_id only, because the standard concept it maps to may be
+  # a generic acute MI concept. Other cohorts still use mi_acute as is.
+  domain: Condition
+  include:
+    - {vocab: ICD10CM, codes: ["I21.A1", "I21.A9"]}
+  descendants: false
 heart_failure:
   domain: Condition
   include:
@@ -251,6 +260,9 @@ egfr:          {domain: Measurement, include: [{vocab: LOINC, codes: ["33914-3",
 bnp:           {domain: Measurement, include: [{vocab: LOINC, codes: ["30934-4"]}]}
 ntprobnp:      {domain: Measurement, include: [{vocab: LOINC, codes: ["33762-6", "83107-3"]}]}
 troponin:      {domain: Measurement, include: [{vocab: LOINC, codes: ["6598-7", "67151-1", "10839-9", "42757-5", "89579-7"]}]}
+# Troponin T only (signed 2026-11-16, ECG 2): the sex-specific fallback limits are Mayo's 5th-gen TnT 99th percentiles,
+# so they apply to these codes only; a TnI value counts only against its own range_high.
+troponin_t:    {domain: Measurement, include: [{vocab: LOINC, codes: ["6598-7", "67151-1"]}]}
 potassium:     {domain: Measurement, include: [{vocab: LOINC, codes: ["2823-3", "6298-4"]}]}
 magnesium:     {domain: Measurement, include: [{vocab: LOINC, codes: ["19123-9", "2601-3"]}]}
 sodium:        {domain: Measurement, include: [{vocab: LOINC, codes: ["2951-2", "2947-0"]}]}

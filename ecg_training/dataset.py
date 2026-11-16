@@ -62,6 +62,11 @@ def make_labels(ev: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     d["acute_mi"] = np.where(pos_mi, 1.0, np.where(neg_mi, 0.0, np.nan))
     d["stemi"] = np.where(pos_mi & (d.stemi_dx == 1), 1.0,
                           np.where(neg_mi | (pos_mi & (d.nstemi_dx == 1) & (d.stemi_dx == 0)), 0.0, np.nan))
+    # ICD-9 410.x does not separate STEMI from NSTEMI: an acute MI before the ICD-10 switch is masked for STEMI
+    # (signed 2026-11-16, ECG 2); acute_mi is unchanged and stemi = 0 still holds when there was no MI at all.
+    icd10 = lab.get("stemi_icd10_from")
+    if icd10 and len(d) and "ecg_date" in d:
+        d.loc[pos_mi & (pd.to_datetime(d.ecg_date) < pd.Timestamp(icd10)), "stemi"] = np.nan
     from cardioai_mcp.report_context import Context
     af_re, ctx = re.compile(lab["af_regex"]), Context(lab.get("context"))
 
@@ -145,7 +150,7 @@ def check_disjoint(m: pd.DataFrame) -> dict:
 
 def build_manifest(engine, study: dict, cfg: dict, modality_cfg: dict, exclude_persons: Iterable[int] = ()) -> pd.DataFrame:
     from cardioai_mcp.concepts import resolve_concept_sets
-    resolve_concept_sets(engine, study["concept_sets"], only={"mi_acute", "mi_any", "stemi", "nstemi", "troponin"})
+    resolve_concept_sets(engine, study["concept_sets"], only={"mi_acute", "mi_any", "mi_type2", "stemi", "nstemi", "troponin", "troponin_t"})
     ev = engine.query(evidence_sql(engine, study, cfg, modality_cfg))
     m = assign_splits(make_labels(ev, cfg), cfg, exclude_persons)
     bad = {k: v for k, v in check_disjoint(m).items() if v}

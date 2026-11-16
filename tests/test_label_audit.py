@@ -36,8 +36,9 @@ T = {
     "E": ("Subendocardial late gadolinium enhancement in the LAD territory consistent with prior myocardial infarction. "
           "Possible small LV thrombus, cannot be excluded. LVEF 45 %.",
           dict(infarct=1, nonischemic_lge=0, lv_thrombus="U", lv_aneurysm=0, report_mvo=0, report_lvef=45)),
+    # no LGE imaging: silence is NOT absent (rule sheet signed 2026-11-16, MRI 1)
     "F": ("Cine imaging only; contrast was not given for this study. LVEF 58 %.",
-          dict(infarct="NM", nonischemic_lge="NM", lv_thrombus=0, lv_aneurysm=0, report_mvo=0, report_lvef=58)),
+          dict(infarct="NM", nonischemic_lge="NM", lv_thrombus="NM", lv_aneurysm="NM", report_mvo="NM", report_lvef=58)),
 }
 MIX = {"A": 0.25, "B": 0.35, "C": 0.10, "D": 0.05, "E": 0.05, "F": 0.20}
 

@@ -411,3 +411,62 @@ def test_string_row_ids_order_numerically():
     rows = pd.DataFrame({"waveform": [enc(np.full(2000, 2)), enc(np.full(500, 1))], "row_id": ["10", "9"]})
     sig, note = _lead_signal("V1", rows, {2500}, {"units_per_bit": 1.0}, "concat")
     assert sig[0] == 1 and sig[-1] == 2 and "joined" in note
+
+
+def test_signed_label_rules_type2_mi_tni_and_icd9_stemi():
+    """Clinical lead sign-off, 2026-11-16 (ECG 1 and 2): a type 2 MI code does not make acute_mi = 1 (masked, not 0);
+    the TnT fallback limits never judge a TnI row without its own range_high; an ICD-9-era acute MI is masked for STEMI."""
+    import duckdb
+    from cardioai_mcp.config import load_study
+    from cardioai_mcp.engine import DuckDBEngine
+    from ecg_training.dataset import evidence_sql
+    st = load_study()
+    st["schemas"].update(cdm="main", vocab="main", modality="main", work="main")
+    con = duckdb.connect()
+    # concept ids: 1 acute MI (ICD-10 I21.0 source / SNOMED), 2 type 2 MI source (I21.A1), 10 TnT, 20 TnI
+    con.execute("""CREATE TABLE cs_members AS SELECT * FROM (VALUES
+        ('mi_acute', 1), ('mi_acute', 2), ('mi_any', 1), ('mi_any', 2), ('mi_type2', 2), ('stemi', 1),
+        ('troponin', 10), ('troponin', 20), ('troponin_t', 10)) v(set_name, concept_id)""")
+    con.execute("CREATE TABLE person AS SELECT * FROM (VALUES (1, 8507, 1960, 5), (2, 8507, 1960, 5), (3, 8507, 1960, 5), "
+                "(4, 8507, 1960, 5)) v(person_id, gender_concept_id, year_of_birth, care_site_id)")
+    # person 1: type 2 MI + high TnT; 2: STEMI code + TnI 30 ng/L without range_high; 3: STEMI + TnT 80 in 2014;
+    # 4: STEMI + TnT 80 in 2022 (control)
+    con.execute("""CREATE TABLE condition_occurrence AS SELECT * FROM (VALUES
+        (1, 1, 2, DATE '2022-01-01'), (2, 1, 1, DATE '2022-01-01'), (3, 1, 1, DATE '2014-01-01'), (4, 1, 1, DATE '2022-01-01'))
+        v(person_id, condition_concept_id, condition_source_concept_id, condition_start_date)""")
+    con.execute("""CREATE TABLE measurement AS SELECT * FROM (VALUES
+        (1, 10, 10, DATE '2022-01-01', 80.0, 'ng/L', CAST(NULL AS DOUBLE)), (2, 20, 20, DATE '2022-01-01', 30.0, 'ng/L', NULL),
+        (3, 10, 10, DATE '2014-01-01', 80.0, 'ng/L', NULL), (4, 10, 10, DATE '2022-01-01', 80.0, 'ng/L', NULL))
+        v(person_id, measurement_concept_id, measurement_source_concept_id, measurement_date, value_as_number,
+          unit_source_value, range_high)""")
+    con.execute("""CREATE TABLE ecg_index AS SELECT * FROM (VALUES
+        (1, 1, TIMESTAMP '2022-01-01 10:00'), (2, 2, TIMESTAMP '2022-01-01 10:00'), (3, 3, TIMESTAMP '2014-01-01 10:00'),
+        (4, 4, TIMESTAMP '2022-01-01 10:00')) v(ecg_id, person_id, acquisition_datetime)""")
+    con.execute("ALTER TABLE ecg_index ADD COLUMN clinic_number VARCHAR")
+    con.execute("ALTER TABLE ecg_index ADD COLUMN diagnosis_statement VARCHAR")
+    con.execute("ALTER TABLE ecg_index ADD COLUMN confirmed_flag INTEGER")
+    st["index_start"] = "2010-01-01"
+    eng = DuckDBEngine(con, st)
+    cfg = load_config()
+    ev = eng.query(evidence_sql(eng, st, cfg, st["modality"])).sort_values("person_id").reset_index(drop=True)
+    assert ev.mi_dx.tolist() == [0, 1, 1, 1]                      # type 2 MI code does not count
+    assert ev.trop_pos.tolist() == [1, 0, 1, 1]                   # TnI with no range_high is not judged by the TnT limit
+    d = make_labels(ev, cfg)
+    assert np.isnan(d.acute_mi[0])                                # type 2 MI: masked, never a negative (mi_any)
+    assert np.isnan(d.acute_mi[1])                                # STEMI code, TnI not judged -> masked
+    assert d.acute_mi[2] == 1 and np.isnan(d.stemi[2])            # 2014 (ICD-9 era): acute MI kept, STEMI masked
+    assert d.acute_mi[3] == 1 and d.stemi[3] == 1
+
+
+def test_label_audit_recompute_follows_the_signed_troponin_rules():
+    from annotation.label_audit import recompute_troponin
+    cfg = load_config()
+    e = pd.DataFrame({"ecg_id": ["1", "2"], "ecg_date": ["2014-01-01", "2022-01-01"], "mi_dx": [1, 1], "stemi_dx": [1, 1],
+                      "nstemi_dx": [0, 0], "mi_any_near": [1, 1], "trop_pos": [1, 0], "acute_mi": [1.0, np.nan],
+                      "stemi": [np.nan, np.nan]})
+    rows = pd.DataFrame({"ecg_id": ["1", "2"], "ecg_date": ["2014-01-01", "2022-01-01"], "gender_concept_id": [8507, 8507],
+                         "measurement_date": ["2014-01-01", "2022-01-01"], "value_as_number": [80.0, 30.0],
+                         "unit_source_value": ["ng/L", "ng/L"], "range_high": [np.nan, np.nan], "is_tnt": [1, 0]})
+    r = recompute_troponin(e, rows, cfg).set_index("ecg_id")
+    assert r.trop_pos_recomputed.tolist() == [1, 0]
+    assert r[["trop_pos_match", "acute_mi_match", "stemi_match"]].all().all()

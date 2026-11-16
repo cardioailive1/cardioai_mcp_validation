@@ -239,12 +239,13 @@ def rule_text(modality: str) -> List[tuple]:
             ("nonischemic_lge", "1 = mid-wall, subepicardial, patchy or insertion-point LGE, or a named non-ischaemic "
                                 "cause (myocarditis, sarcoid, amyloid, HCM). 0 = no LGE, or ischaemic LGE only. "
                                 "NM = LGE not assessed or not described."),
-            ("lv_thrombus", "1 = LV (apical, mural) thrombus present now. 0 = stated absent OR not mentioned (silence "
-                            "= absent). 'Cannot exclude' / 'possible' -> U. Resolved thrombus -> 0."),
-            ("lv_aneurysm", "1 = true LV aneurysm or pseudoaneurysm. 0 = stated absent OR not mentioned. 'Aneurysmal "
-                            "segment' or dyskinesis without the word aneurysm -> U."),
-            ("report_mvo", "1 = microvascular obstruction / no-reflow present. 0 = stated absent OR not mentioned "
-                           "(silence = absent). 'Possible' / 'small area may represent' -> U."),
+            ("lv_thrombus", "1 = LV (apical, mural) thrombus present now. 0 = stated absent, OR not mentioned in a study "
+                            "with LGE imaging (silence = absent). Not mentioned and no LGE described or LGE not done -> "
+                            "NM. 'Cannot exclude' / 'possible' -> U. Resolved thrombus -> 0."),
+            ("lv_aneurysm", "1 = true LV aneurysm or pseudoaneurysm. 0 = stated absent, OR not mentioned in a study with "
+                            "LGE imaging (else NM). 'Aneurysmal segment' or dyskinesis without the word aneurysm -> U."),
+            ("report_mvo", "1 = microvascular obstruction / no-reflow present. 0 = stated absent, OR not mentioned in a "
+                           "study with LGE imaging (else NM). 'Possible' / 'small area may represent' -> U."),
             ("report_lvef", "LVEF in % measured on THIS CMR (not echo, not a prior study). Range (e.g. 50-55) -> U."),
             ("report_infarct_size", "Infarct size / scar burden as % of LV mass. Grams only, or segment counts -> blank."),
         ]
@@ -626,7 +627,9 @@ def troponin_rows_sql(modality_cfg: dict, ecg_ids: Iterable[str], days: int = 30
     t = e["table"].replace("{modality}", "{{modality}}")
     return (f"SELECT CAST(x.{c['ecg_id']} AS STRING) AS ecg_id, CAST(x.{c['acquisition_datetime']} AS DATE) AS ecg_date, "
             "p.gender_concept_id, m.measurement_date, m.value_as_number, m.unit_source_value, m.range_high, "
-            "m.measurement_concept_id, m.measurement_source_concept_id "
+            "m.measurement_concept_id, m.measurement_source_concept_id, "
+            "CASE WHEN m.measurement_concept_id IN {{cs:troponin_t}} OR m.measurement_source_concept_id IN {{cs:troponin_t}} "
+            "THEN 1 ELSE 0 END AS is_tnt "
             f"FROM {t} x JOIN {{{{cdm}}}}.person p ON p.person_id = CAST(x.{c['person_id']} AS BIGINT) "
             "JOIN {{cdm}}.measurement m ON m.person_id = p.person_id "
             "AND (m.measurement_concept_id IN {{cs:troponin}} OR m.measurement_source_concept_id IN {{cs:troponin}}) "
@@ -657,7 +660,10 @@ def recompute_troponin(ecgs: pd.DataFrame, lab_rows: pd.DataFrame, ecg_cfg: dict
                   np.select([r.gender_concept_id == 8507, r.gender_concept_id == 8532],
                             [t.get("ng_per_l_male", t["ng_per_l"]), t.get("ng_per_l_female", t["ng_per_l"])], t["ng_per_l"]),
                   np.where(unit.isin(["ng/ml", "ug/l"]), t["ng_per_ml"], np.nan))
-    limit = r.range_high.where(r.range_high.notna(), fb)
+    # the fallback limits are Mayo 5th-gen TnT: troponin T rows only; TnI counts only against its own range_high
+    # (signed 2026-11-16, ECG 2). Rows without the is_tnt column (older exports) are treated as TnT.
+    tnt = r["is_tnt"].fillna(0).astype(int) == 1 if "is_tnt" in r else pd.Series(True, index=r.index)
+    limit = r.range_high.where(r.range_high.notna(), pd.Series(fb, index=r.index).where(tnt))
     r["above"] = (r.value_as_number > limit) & r.days.between(lo, hi)
     pos = r.groupby("ecg_id").above.any()
     e = ecgs.copy()
@@ -667,6 +673,8 @@ def recompute_troponin(ecgs: pd.DataFrame, lab_rows: pd.DataFrame, ecg_cfg: dict
     e["acute_mi_recomputed"] = np.where(mi, 1.0, np.where(e.mi_any_near == 0, 0.0, np.nan))
     e["stemi_recomputed"] = np.where(mi & (e.stemi_dx == 1), 1.0,
                                      np.where((e.mi_any_near == 0) | (mi & (e.nstemi_dx == 1) & (e.stemi_dx == 0)), 0.0, np.nan))
+    if lab.get("stemi_icd10_from") and "ecg_date" in e:          # ICD-9 era acute MI: masked for STEMI (ECG 2)
+        e.loc[mi & (pd.to_datetime(e.ecg_date) < pd.Timestamp(lab["stemi_icd10_from"])), "stemi_recomputed"] = np.nan
     for a, b in (("trop_pos", "trop_pos_recomputed"), ("acute_mi", "acute_mi_recomputed"), ("stemi", "stemi_recomputed")):
         e[f"{a}_match"] = [same(_auto(x), _auto(y)) for x, y in zip(e[a], e[b])]
     units = r.assign(unit=unit).groupby("unit").size().rename("rows").reset_index()
@@ -956,7 +964,9 @@ def main(argv=None):
         from cardioai_mcp.engine import make_engine
         from ecg_training.dataset import load_config
         study = load_study()
+        from cardioai_mcp.concepts import resolve_concept_sets
         eng = make_engine("bigquery", study)
+        resolve_concept_sets(eng, study["concept_sets"], only={"troponin", "troponin_t"})   # {{cs:...}} in a new session
         m = _read_table(a.manifest)
         smp = troponin_sample(m, cfg, a.n)
         rows = eng.query(eng.render(troponin_rows_sql(study["modality"], smp.ecg_id.astype(str)), {}))

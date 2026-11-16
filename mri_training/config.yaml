@@ -30,6 +30,7 @@ mayo_contours:
 
 labels:
   # CMR report rules (confirmed final reports). NULL = not stated -> masked in the loss.
+  # Rules signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet MRI 1).
   # Mentions are judged in their sentence (cardioai_mcp/report_context.py): negated, hedged, historical and
   # resolved mentions don't count as present; hedged-only -> masked. `context` overrides its trigger words.
   infarct_regex: '(?i)(ischa?emic (pattern|scar|lge|enhancement|infarct)|(subendocardial|transmural)\s+(?:[\w,()<>%-]+\s+){0,4}?(?:late\s+)?(?:gadolinium\s+)?(?:enhancement|lge|infarct|scar)|(consistent|compatible|in keeping) with (?:[\w-]+ ){0,4}?infarct|infarct(ion)? (scar|size|mass)|(scar|lge|enhancement)\s+(?:[\w-]+\s+){0,5}?(lad|rca|lcx|circumflex|coronary)( artery)? (territory|distribution))'
@@ -48,6 +49,13 @@ labels:
   lvef_regex: '(?i)(?:lvef|ejection fraction)[^0-9]{0,25}(?P<val>[1-8][0-9](?:\.[0-9])?) ?%'
   infarct_size_regex: '(?i)(?:infarct size|scar burden|lge burden|extent of (?:late )?enhancement)[^0-9]{0,25}(?P<val>[0-9]{1,2}(?:\.[0-9])?) ?%'
   thrombus_aneurysm_default_negative: true   # not mentioned in a full LGE report = absent (assumption, in model card)
+  # Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet MRI 1): silence means absent for thrombus,
+  # aneurysm and MVO ONLY when the study had LGE imaging; a report that never describes LGE / delayed enhancement, or
+  # says it was not done (non-contrast study), leaves them unknown (masked). Hedged mentions -> unknown;
+  # "aneurysmal segment" / dyskinesis without an aneurysm named -> unknown.
+  silence_absent_requires_lge: true
+  lge_assessed_regex: '(?i)(late gadolinium|\blge\b|(delayed|late) (myocardial )?(gadolinium )?(hyper)?enhancement|hyperenhancement)'
+  lge_not_done_regex: '(?i)(non[- ]?contrast|without (gadolinium|contrast)|(gadolinium|contrast) (was |were )?not (given|administered)|no (gadolinium|contrast) (was )?(given|administered)|(lge|late gadolinium enhancement|delayed enhancement|delayed|post[- ]?contrast)( imaging| images| sequences?)? (was |were )?not (performed|obtained|acquired|done))'
 
 splits:
   tune_start: '2020-01-01'
@@ -89,13 +97,14 @@ thresholds:
   lv_thrombus: {target_sensitivity: 0.90}
   lv_aneurysm: {target_sensitivity: 0.90}
 
-# Findings that need further investigation. Clinical policy, NOT learned: values below are
-# placeholders for the CardioAI clinical lead to set before training; they are locked in the model card.
+# Findings that need further investigation. Clinical policy, NOT learned; locked in the model card.
+# Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet MRI 3). `min` = at or above, `max` = at or
+# below (inclusive, as in the echo agent). A mildly reduced LVEF (41-49%) raises no flag; LVEF is shown as a number.
 red_flags:
-  large_infarct: {value: infarct_size_pct_lv, min: 10.0, text: "infarct >= 10% of LV mass (clinical lead to confirm cut-off)"}
-  mvo_present: {value: mvo_pct_lv, min: 0.5, text: "microvascular obstruction present"}
-  lvef_below_35: {value: lvef_pct, max: 35.0, text: "LVEF < 35%"}
-  lvef_below_50: {value: lvef_pct, max: 50.0, text: "LVEF < 50%"}
+  large_infarct: {value: infarct_size_pct_lv, min: 10.0, text: "infarct >= 10% of LV mass"}
+  mvo_present: {value: mvo_pct_lv, min: 0.5, text: "microvascular obstruction present (>= 0.5% of LV): independent predictor of death after STEMI"}
+  lvef_le_40: {value: lvef_pct, max: 40.0, text: "LVEF <= 40%: heart failure with reduced EF range (2022 AHA/ACC/HFSA)"}
+  lvef_le_35: {value: lvef_pct, max: 35.0, text: "LVEF <= 35%: severe LV systolic dysfunction (ICD threshold, 2017 AHA/ACC/HRS)"}
   lv_thrombus: {prob: lv_thrombus, min: 0.5, text: "possible LV thrombus"}
   lv_aneurysm: {prob: lv_aneurysm, min: 0.5, text: "possible LV aneurysm"}
   nonischemic_pattern: {prob: nonischemic_lge, min: 0.5, text: "non-ischaemic LGE pattern: consider myocarditis, cardiomyopathy or infiltrative disease (STEMI mimic)"}

@@ -88,7 +88,7 @@ Send these together with `workspace_check.json`.
 
 ## Reader protocol: cardiac MRI
 
-Readers should be cardiologists or radiologists who report cardiac MRI. **The clinical lead signs off these rules before the pilot**; the scar threshold and the basal-slice rule especially vary between centres. Run a pilot of 10 studies with every reader, review it together, then start.
+Readers should be cardiologists or radiologists who report cardiac MRI. **These rules were signed by the clinical lead, Tamanna Nahar, on 2026-11-16 (sign-off sheet MRI 2)**; the scar threshold and the basal-slice rule especially vary between centres, so every reader applies them exactly as written. Run a pilot of 10 studies with every reader, review it together, then start.
 
 **LGE (short axis), every slice that shows LV myocardium, from base to apex:**
 
@@ -96,8 +96,8 @@ Readers should be cardiologists or radiologists who report cardiac MRI. **The cl
 |---|---|---|
 | 1 | LV blood pool | Endocardial border; papillary muscles and trabeculations count as **blood pool** |
 | 2 | Myocardium (viable) | Between the endocardial and epicardial borders, excluding scar. Don't include RV insertion-point enhancement as LV scar unless it extends into the LV wall |
-| 3 | Scar (hyperenhanced) | Visually hyperenhanced myocardium, judged against remote myocardium. Borderline cases follow one pre-agreed rule, for example signal above 5 SD of remote myocardium, applied the same way on every slice. Ischaemic scar starts at the endocardium |
-| 4 | MVO | The dark core **inside** an infarct (no-reflow). Always surrounded by scar; never blood-pool thrombus |
+| 3 | Scar (hyperenhanced) | Myocardium with signal **above 6 SD of remote (normal) myocardium**, then corrected visually; the same rule on every slice. Ischaemic scar starts at the endocardium. (6 SD came closest to manual planimetry in reperfused STEMI; 5 SD overestimates) |
+| 4 | MVO | The dark core **inside** an infarct (no-reflow). Always surrounded by scar; never blood-pool thrombus. **MVO counts in infarct size** (infarct = scar + MVO) and is also reported on its own as % of LV |
 | 5 | RV blood pool | Endocardial RV border on the same slices; needed to place the AHA segments |
 
 - **LV thrombus:** a dark mass in the cavity, outside the myocardium. Leave it as background (0) and record it in the study's notes; don't label it as MVO.

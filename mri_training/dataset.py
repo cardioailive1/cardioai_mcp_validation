@@ -35,7 +35,8 @@ def report_labels(text: Optional[str], cfg: dict) -> dict:
       infarct / nonischemic_lge: affirmed -> 1; uncertain -> NaN; "no LGE" or (the other pattern affirmed) -> 0;
         otherwise NaN (LGE not assessed). "Prior infarct" counts (old scar is still there); an infarct-pattern
         mention in a sentence about diffuse / amyloid enhancement with no coronary wording is ignored.
-      lv_thrombus, report_mvo: affirmed -> 1; uncertain -> NaN; otherwise 0 (silence = absent, model card).
+      lv_thrombus, report_mvo: affirmed -> 1; uncertain -> NaN; otherwise 0 (silence = absent), but only when the
+        study had LGE imaging (silence_absent_requires_lge, signed 2026-11-16); without LGE, silence -> NaN.
       lv_aneurysm: as thrombus, and "aneurysmal" or dyskinesis without an aneurysm named -> NaN (rule sheet).
     """
     from cardioai_mcp.report_context import Context
@@ -63,9 +64,17 @@ def report_labels(text: Optional[str], cfg: dict) -> dict:
         return nan
     infarct, nonisch = resolve(inf, non), resolve(non, inf)
 
+    lge_done = True
+    if lab.get("silence_absent_requires_lge"):
+        assessed = (no_lge or inf_st or non_st or (lab.get("lge_assessed_regex") and re.search(lab["lge_assessed_regex"], text)))
+        not_done = bool(lab.get("lge_not_done_regex") and re.search(lab["lge_not_done_regex"], text))
+        lge_done = bool(assessed) and not not_done
+
     def present(pattern) -> float:
         v = ctx.label(text, pattern)
-        return 0.0 if v is None else v                     # silence = absent (thrombus_aneurysm_default_negative)
+        if v is None:                                      # not mentioned
+            return 0.0 if lge_done else nan                # silence = absent only in an LGE study (MRI 1, signed)
+        return v
 
     default_neg = lab.get("thrombus_aneurysm_default_negative", True)
     thr = present(lab["thrombus_regex"])

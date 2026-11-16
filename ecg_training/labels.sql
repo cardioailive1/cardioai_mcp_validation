@@ -19,7 +19,8 @@ SELECT e.*,
        p.gender_concept_id,
        CASE WHEN EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence co WHERE co.person_id = e.person_id
               AND DATEDIFF(co.condition_start_date, e.ecg_date) BETWEEN {{win_lo}} AND {{win_hi}}
-              AND (co.condition_concept_id IN {{cs:mi_acute}} OR co.condition_source_concept_id IN {{cs:mi_acute}}))
+              AND (co.condition_concept_id IN {{cs:mi_acute}} OR co.condition_source_concept_id IN {{cs:mi_acute}})
+              AND (co.condition_source_concept_id IS NULL OR co.condition_source_concept_id NOT IN {{cs:mi_type2}}))  -- type 2 MI: masked (ECG 2)
             THEN 1 ELSE 0 END                              AS mi_dx,
        CASE WHEN EXISTS (SELECT 1 FROM {{cdm}}.condition_occurrence co WHERE co.person_id = e.person_id
               AND DATEDIFF(co.condition_start_date, e.ecg_date) BETWEEN {{win_lo}} AND {{win_hi}}
@@ -37,7 +38,10 @@ SELECT e.*,
               AND DATEDIFF(m.measurement_date, e.ecg_date) BETWEEN {{win_lo}} AND {{win_hi}}
               AND (m.measurement_concept_id IN {{cs:troponin}} OR m.measurement_source_concept_id IN {{cs:troponin}})
               AND m.value_as_number > COALESCE(m.range_high,
-                    CASE WHEN LOWER(TRIM(m.unit_source_value)) IN ('ng/l', 'pg/ml') THEN
+                    -- fallback limits are Mayo 5th-gen TnT: troponin T rows only; TnI needs its own range_high (ECG 2)
+                    CASE WHEN NOT (m.measurement_concept_id IN {{cs:troponin_t}} OR m.measurement_source_concept_id IN {{cs:troponin_t}})
+                              THEN NULL
+                         WHEN LOWER(TRIM(m.unit_source_value)) IN ('ng/l', 'pg/ml') THEN
                               CASE p.gender_concept_id WHEN 8507 THEN {{trop_ng_per_l_male}}
                                                        WHEN 8532 THEN {{trop_ng_per_l_female}}
                                                        ELSE {{trop_ng_per_l}} END
