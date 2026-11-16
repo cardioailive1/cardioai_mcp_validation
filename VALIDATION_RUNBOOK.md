@@ -163,6 +163,7 @@ Several references come from report text: CAD stenosis %, echo wall motion / RV 
 | Longitudinal | HF exacerbation dates; review a sample of events |
 | ECG | ~200 ECG reads: superclass, rhythm, STEMI |
 | Echo | ~150 echo reports: wall motion, RV, valves (LVEF is a structured value) |
+| MRI | 100 CMR reports, one cardiologist approving automatic proposals, 20 blinded (MRI 8, approved 2026-11-16): `python -m annotation.reference_review` (RUNBOOK_MRI.md step 1) |
 
 ### 7d. Run the agent
 The agent reads the locked analytic table and writes a predictions table that follows the cohort's contract (the `predictions:` block in `config/cohorts/<cohort>.yaml`):

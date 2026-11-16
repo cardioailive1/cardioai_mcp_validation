@@ -13,6 +13,11 @@ mri_contours:
   target_studies: 300
   double_read_fraction: 0.10          # second, independent reader: agreement reported in the model card
   max_readers: 5                      # MCP annotator seats
+  # Approved 2026-11-16 (sign-off sheet MRI 9): no hired readers. The first code in --readers (the cardiologist)
+  # approves or corrects every study; the second code (a second cardiologist) re-reads the 10% double reads.
+  single_primary_reader: true
+  first_round_studies: 40             # outlined from scratch: no model yet, and public data are excluded
+  prelabel_scar_sd: 6                 # pre-drawn scar = myocardium above 6 SD of remote myocardium (signed MRI 2)
   # where the contoured studies go (patient-disjoint splits from mri_training.dataset.build_manifest)
   split_share: {train: 0.70, tune: 0.15, test_time: 0.15}
   enrich: {recent_stemi: 0.50, nonischemic_lge: 0.15}   # share of studies drawn from these strata (rest at random)
@@ -23,7 +28,7 @@ mri_contours:
     cine:
       file: cine_ed / cine_es         # end-diastole and end-systole phases only
       labels: {0: background, 1: lv_pool, 2: myocardium, 5: rv_pool}   # no scar on cine
-  min_minutes_per_study: 20           # planning figure for correcting pre-drawn outlines (confirm in the pilot)
+  min_minutes_per_study: 10           # planning figure to approve or correct pre-drawn outlines (confirm in round 2)
 
 echo_lv_traces:
   required: false

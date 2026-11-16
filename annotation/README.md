@@ -19,10 +19,10 @@ The **automatic labels** (report rules, troponin logic, pre-drawn outlines) are 
 | pip install (`monailabel`, `highdicom`) | Allowed | Option A2 (Slicer + MONAI Label on localhost) is open once the pre-drawing model is good |
 | Local web apps | Run on localhost in the environment | OHIF / MONAI Label server possible |
 | Docker | Runs, but `docker pull` doesn't fetch dependencies: images must be self-contained | Only needed for CVAT; build the image outside and import it as a tar, or skip CVAT |
-| Readers | Up to **5 annotator seats**, each with a **cardioailive.com** email and a signed **DUA**; **Mayo readers can't annotate** in our environment | CardioAI hires outside cardiac MRI readers, and each submits the DUA form before access; `select` refuses more than 5 readers |
+| Readers | Up to **5 annotator seats**, each with a **cardioailive.com** email and a signed **DUA**; **Mayo readers can't annotate** in our environment | **No hired readers (MRI 9, approved 2026-11-16):** the CardioAI cardiologist approves or corrects every study, and a second cardiologist re-reads 10%; each submits the DUA form. `select` refuses more than 5 codes |
 | GPU | Shared reservation of **A100 40 GB** machines; other types on request | Training and pre-drawing run on an A100 (`--device cuda`) |
 | Reports | Radiology (incl. cardiac MRI) in **FACT_RADIOLOGY**; echo notes in **FACT_ECHO_TEST.ECHO_NOTE** | Report labels come from these (`config/modality_tables.yaml`; columns to confirm) |
-| Existing annotations | None: labels are what reports and echo notes say | As planned: report labels for every study, reader outlines for the 300 |
+| Existing annotations | None: labels are what reports and echo notes say | As planned: report labels for every study, cardiologist-approved outlines for the 300 |
 | Public datasets | **Keep them outside the environment** if possible | **Not used** (2026-10-15): the MRI model is trained on Mayo data only. Outlines are pre-drawn by a Mayo model trained on the first reader outlines |
 
 Answered on 2026-10-15:
@@ -87,6 +87,8 @@ Send these together with `workspace_check.json`.
 7. How many workspace seats and **GPU hours** are included? A GPU makes the pre-drawing and the MONAI Label option much faster.
 
 ## Reader protocol: cardiac MRI
+
+**Who reads (MRI 9, approved by Tamanna Nahar and Sampson Kontomah, 2026-11-16):** no outside readers. The cardiologist outlines round 1 (40 studies) from scratch. From round 2 the Mayo pre-drawing model draws LV pool, myocardium, MVO and RV, scar is re-drawn by the 6 SD rule (`tasks.yaml` → `prelabel_scar_sd`), and the cardiologist approves or corrects each study in 3D Slicer (about 10 minutes a study, to confirm in round 2). A second cardiologist re-reads 30 studies (10%); Dice and LVEF agreement go in the model card. `collect` refuses a study that fails the automatic checks (MVO without scar, missing RV, ES cavity not smaller than ED) until it is redrawn.
 
 Readers should be cardiologists or radiologists who report cardiac MRI. **These rules were signed by the clinical lead, Tamanna Nahar, on 2026-11-16 (sign-off sheet MRI 2)**; the scar threshold and the basal-slice rule especially vary between centres, so every reader applies them exactly as written. Run a pilot of 10 studies with every reader, review it together, then start.
 

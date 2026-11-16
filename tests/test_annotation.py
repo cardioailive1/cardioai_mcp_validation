@@ -130,13 +130,19 @@ def test_worklist_selection():
                       "split": rng.choice(["train", "tune", "test_time", "test_site"], n, p=[.6, .15, .15, .1]),
                       "recent_stemi": (rng.random(n) < .2).astype(int), "nonischemic_lge": (rng.random(n) < .1).astype(float),
                       "dicom_uri": [f"gs://b/{i}.zip" for i in range(n)]})
-    w = select_mri(m, ["r1", "r2", "r3"], TASKS["mri_contours"])
+    balanced = {**TASKS["mri_contours"], "single_primary_reader": False}
+    w = select_mri(m, ["r1", "r2", "r3"], balanced)
     assert len(w) == 300 and w.person_id.is_unique and set(w.split) == {"train", "tune", "test_time"}
     assert abs((w.split == "train").mean() - 0.70) < 0.02 and abs((w.stratum == "recent_stemi").mean() - 0.5) < 0.03
     d = w[w.reader_2 != ""]
     assert len(d) == 30 and (d.reader_1 != d.reader_2).all()
     assert w.reader_1.value_counts().max() - w.reader_1.value_counts().min() <= 1
-    assert select_mri(m, ["r1", "r2", "r3"], TASKS["mri_contours"]).equals(w)                 # deterministic
+    assert select_mri(m, ["r1", "r2", "r3"], balanced).equals(w)                               # deterministic
+    # MRI 9 (approved 2026-11-16): the cardiologist reads every study, a second cardiologist the 10% double reads;
+    # the first 40 are round 1 (outlined from scratch)
+    c = select_mri(m, ["c01", "c02"], TASKS["mri_contours"])
+    assert set(c.reader_1) == {"c01"} and set(c.loc[c.reader_2 != "", "reader_2"]) == {"c02"} and (c.reader_2 != "").sum() == 30
+    assert (c["round"] == 1).sum() == 40 and c.person_id.tolist() == w.person_id.tolist()
     with pytest.raises(ValueError, match="annotator seats"):                                    # MCP: 5 seats
         select_mri(m, [f"r{i}" for i in range(6)], TASKS["mri_contours"])
 
@@ -249,3 +255,20 @@ def test_mayo_stage_a_model_pre_draws_for_readers(tmp_path):
     assert card["initialised_from"]["scope"] == "encoder" and card["initialised_from"]["uses_outside_data"] is False
     model, prov = load_prelabel_model(str(tmp_path / "pre"))
     assert model is not None and len(prov["weights_sha256"]) == 64
+
+
+def test_prelabel_scar_follows_the_6_sd_rule():
+    from annotation.export import scar_by_sd
+    from mri_training.runtime.quantify import LV, MVO, MYO, SCAR
+    rng = np.random.default_rng(0)
+    img = rng.normal(100, 10, (2, 40, 40))
+    lab = np.zeros((2, 40, 40), np.int64)
+    lab[:, 5:35, 5:35] = MYO
+    lab[:, 15:25, 15:25] = LV
+    img[:, 5:10, 5:35] = 400                       # bright: scar the model drew as myocardium
+    img[:, 30:35, 5:35] = 150                      # 5 SD above remote: not scar under the 6 SD rule
+    lab[:, 30:35, 5:35] = SCAR                     # ... though the model called it scar
+    lab[:, 6, 6] = MVO
+    out = scar_by_sd(img, lab, 6.0)
+    assert (out[:, 5:10, 7:35] == SCAR).all() and out[0, 6, 6] == MVO
+    assert (out[:, 30:35, 5:35] == MYO).all() and (out[:, 15:25, 15:25] == LV).all()

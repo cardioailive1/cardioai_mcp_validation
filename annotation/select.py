@@ -24,15 +24,24 @@ def load_tasks(path: Optional[str] = None) -> dict:
     return yaml.safe_load(Path(path or HERE / "tasks.yaml").read_text())
 
 
-def _assign(w: pd.DataFrame, readers: List[str], double: float, rng: np.random.Generator, max_readers: int = 5) -> pd.DataFrame:
+def _assign(w: pd.DataFrame, readers: List[str], double: float, rng: np.random.Generator, max_readers: int = 5,
+            single_primary: bool = False) -> pd.DataFrame:
+    """Readers balanced across studies, or (single_primary, MRI 9 approved 2026-11-16) the first code reads every
+    study and the others share the double reads."""
     if len(readers) > max_readers:
         raise ValueError(f"{len(readers)} readers but MCP allows {max_readers} annotator seats")
     if len(readers) < (2 if double > 0 else 1):
         raise ValueError("need at least two readers for double reads")
     w = w.reset_index(drop=True)
-    w["reader_1"] = [readers[i % len(readers)] for i in range(len(w))]
     n2 = int(round(double * len(w)))
     pick = set(rng.choice(len(w), n2, replace=False).tolist()) if n2 else set()
+    if single_primary:
+        others = readers[1:]
+        w["reader_1"] = readers[0]
+        order = sorted(pick)
+        w["reader_2"] = [others[order.index(i) % len(others)] if i in pick else "" for i in range(len(w))]
+        return w
+    w["reader_1"] = [readers[i % len(readers)] for i in range(len(w))]
     w["reader_2"] = [readers[(i + 1 + (i // len(readers)) % (len(readers) - 1)) % len(readers)] if i in pick else ""
                      for i in range(len(w))]
     return w
@@ -56,7 +65,11 @@ def select_mri(m: pd.DataFrame, readers: List[str], task: dict, seed: int = 2026
         chosen += rest.study_id.head(k - len(chosen)).tolist()
         picks.append(part[part.study_id.isin(chosen)])
     w = pd.concat(picks)[["study_id", "person_id", "split", "stratum", "dicom_uri"]]
-    return _assign(w, readers, float(task["double_read_fraction"]), rng, int(task.get("max_readers", 5)))
+    w = _assign(w, readers, float(task["double_read_fraction"]), rng, int(task.get("max_readers", 5)),
+                bool(task.get("single_primary_reader", False)))
+    k = int(task.get("first_round_studies", 0) or 0)                 # round 1 = outlined from scratch (no model yet)
+    w["round"] = [1 if i < k else 2 for i in range(len(w))] if k else 1
+    return w
 
 
 def select_echo(studies: pd.DataFrame, readers: List[str], task: dict, seed: int = 20261014, n: Optional[int] = None) -> pd.DataFrame:
