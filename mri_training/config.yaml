@@ -37,7 +37,9 @@ labels:
   infarct_exclude_regex: '(?i)(amyloid|(diffuse|global|circumferential) subendocardial)'
   infarct_keep_regex: '(?i)(infarct|coronary|ischa?emic|\b(lad|rca|lcx)\b)'
   nonischemic_regex: '(?i)((mid[- ]?wall|midmyocardial|mid-myocardial|subepicardial|epicardial|patchy|non[- ]?isch(a)?emic|nonisch(a)?emic|insertion[- ]point)\s+(?:[\w-]+\s+){0,2}?(late\s+)?(gadolinium\s+)?(enhancement|lge)|myocarditis|sarcoid|amyloid|hypertrophic cardiomyopathy)'
-  no_lge_regex: '(?i)(no (evidence of )?(late gadolinium enhancement|lge|delayed (myocardial )?enhancement|myocardial (scar|fibrosis|infarct))|without (late gadolinium )?enhancement)'
+  # Mayo wording (workspace check 2026-11-16: "delayed enhancement" far outnumbers "LGE"): "no abnormal delayed
+  # enhancement", "no areas of delayed myocardial enhancement", "delayed enhancement imaging is normal / negative"
+  no_lge_regex: '(?i)(\bno (?:(?:evidence|areas?|foci|regions?) of |abnormal |focal |significant |definite |definite areas of |myocardial )*(?:late gadolinium enhancement|lge|(?:delayed|late) (?:myocardial )?(?:gadolinium )?enhancement|myocardial (?:scar|fibrosis|infarct))|without (?:abnormal )?(?:late gadolinium |delayed (?:myocardial )?)?enhancement|(?:late gadolinium|delayed(?: myocardial)?) enhancement(?: images?| imaging| sequences?)? (?:is |are |was |were )?(?:normal|negative|unremarkable|absent))'
   thrombus_regex: '(?i)((lv|left ventricular|apical|ventricular|mural|intracavitary) (mural )?thromb)'
   aneurysm_regex: '(?i)((lv|left ventricular|apical|true|false|pseudo) ?aneurysm\b)'
   aneurysm_uncertain_regex: '(?i)(\baneurysmal\b|dyskine)'

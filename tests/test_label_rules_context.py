@@ -89,3 +89,19 @@ def test_echo_rules():
     assert e["terr_lad"] == 1 and e["terr_rca"] == 0 and e["terr_lcx"] == 0
     f = parse_report("The apical segments are hypokinetic. LVEF 48%.")
     assert f["terr_lad"] == 1 and f["terr_rca"] == 1 and f["terr_lcx"] == 1
+
+
+def test_mri_mayo_delayed_enhancement_wording():
+    """Mayo CMR reports say "delayed enhancement" far more than "LGE" (workspace check 2026-11-16)."""
+    from mri_training.dataset import load_config, report_labels
+    cfg = load_config()
+    r = lambda t: report_labels(t, cfg)  # noqa: E731
+    for t in ["Normal biventricular size. No abnormal delayed enhancement. LVEF 61%.",
+              "Delayed enhancement images are negative. LVEF 57%.",
+              "There are no definite areas of delayed myocardial enhancement."]:
+        x = r(t)
+        assert x["infarct"] == 0 and x["nonischemic_lge"] == 0, t
+    y = r("Transmural delayed enhancement of the basal inferior wall. LVEF 46%.")
+    assert y["infarct"] == 1 and y["nonischemic_lge"] == 0
+    z = r("Mid-wall delayed myocardial enhancement in the inferolateral wall.")
+    assert z["nonischemic_lge"] == 1 and z["infarct"] == 0
