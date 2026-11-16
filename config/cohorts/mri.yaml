@@ -62,7 +62,11 @@ exclusions:
     where: |
       NOT EXISTS (SELECT 1 FROM {{cdm}}.note n WHERE n.person_id = c.person_id
                   AND DATEDIFF(n.note_date, c.index_date) BETWEEN 0 AND 7
-                  AND n.note_title RLIKE '(?i)(cardiac mri|cardiac mr[^a-z]|cmr|cardiac magnetic|mri heart|mr heart)')
+                  AND n.note_title RLIKE '(?i)^mr card(iac)?($| (and|morp|funct|without and with))')
+                  -- Mayo report titles in OMOP note (radiology test names, 2026-11-16): MR CARDIAC WITHOUT AND WITH IV
+                  -- CONTRAST, MR CARDIAC AND STRESS ..., MR CARD FUNCT AND/OR MORPHOLOGY, MR CARDIAC MORPHOLOGY, MR CARDIAC.
+                  -- Not: MR CARDIAC WITHOUT IV CONTRAST or VELOCITY FLOW (no LGE), INTERPRETATION / ECONSULT OF OUTSIDE
+                  -- MR CARDIAC (studies done elsewhere). Same pattern as cmr_report_title in modality_tables.yaml.
   - name: "< 365 days of observation before index"
     where: |
       NOT EXISTS (SELECT 1 FROM {{cdm}}.observation_period op WHERE op.person_id = c.person_id

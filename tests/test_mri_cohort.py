@@ -49,7 +49,7 @@ def _seed_cmr(con):
       SELECT 900000000 + ROW_NUMBER() OVER (), person_id, {cpt}, {cpt}, d, NULL FROM cmr_seed""")
     cases = " ".join(f"WHEN {i} THEN '{r}'" for i, r in enumerate(REPORTS))
     con.execute(f"""INSERT INTO note
-      SELECT 900000000 + ROW_NUMBER() OVER (), person_id, d, 'Cardiac MRI report', CASE kind {cases} END, NULL FROM cmr_seed""")
+      SELECT 900000000 + ROW_NUMBER() OVER (), person_id, d, 'MR CARDIAC WITHOUT AND WITH IV CONTRAST', CASE kind {cases} END, NULL FROM cmr_seed""")
 
 
 def test_mri_cohort_builds_and_evaluates(tmp_path):
