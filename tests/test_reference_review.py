@@ -1,5 +1,7 @@
-"""Phase 2 MRI reference review (MRI 8, approved 2026-11-16): 100 reports, automatic proposals the cardiologist
-approves or corrects, 20 blinded, kappa per label against the reference, anchoring check, LVEF match."""
+"""Phase 2 MRI reference review (MRI 8a): the cardiologist approves or rejects each report's reference values with a
+note and signs off; 10 planted errors check the review is not simply agreeing; the auditor flags rows it reads
+differently."""
+import json
 import sys
 from pathlib import Path
 
@@ -33,84 +35,82 @@ def _cohort(n=1000, seed=0):
     return pd.DataFrame(rows)
 
 
-def _truth(kind, col):
-    v = T[kind][1].get(col)
-    if col == "report_lvef":
-        return v if v is not None else "none"
-    return "NM" if v is None else v
+SHOW = R.SHOW
 
 
-def _norm(col, v):
-    if col == "report_lvef":
-        return None if v == "none" else R.norm_value(v)
-    return R.norm_label(v)
+def _truth_row(kind):
+    t = T[kind][1]
+    row = {SHOW[lab]: R._word(t.get(lab)) for lab in R.LABELS}
+    row[SHOW["report_lvef"]] = R._lvef(t.get("report_lvef"))
+    return row
 
 
-def _fill(d, cohort, blind_wrong=False):
-    """The cardiologist: approve right proposals, correct wrong ones, fill blinded rows from the text."""
-    sheet = pd.read_excel(d / "review_sheet.xlsx", sheet_name="review", dtype=object)
+def _review(d, cohort, approve_all=False, sign=True):
+    """The cardiologist: approve a row when every value matches the report, else reject with a note."""
+    from openpyxl import load_workbook
     key = pd.read_csv(d / "key.csv")
     kind = dict(zip(key.review_id, cohort.set_index("person_id").loc[key.person_id, "kind"]))
-    for i, r in sheet.iterrows():
-        k = kind[r.review_id]
-        cols = list(REF) + ["report_lvef"]
-        if isinstance(r.blinded, str) and r.blinded:
-            for c in cols:
-                v = _truth(k, c)
-                if blind_wrong and c == "infarct" and v in (0, 1):
-                    v = 1 - v
-                sheet.loc[i, f"final_{c}"] = "" if v == "none" else v
-            continue
-        wrong = [c for c in cols if _norm(c, r[f"proposed_{c}"]) != _norm(c, _truth(k, c))]
-        sheet.loc[i, "decision"] = "correct" if wrong else "approve"
-        for c in wrong:
-            sheet.loc[i, f"final_{c}"] = _truth(k, c)
-    with pd.ExcelWriter(d / "review_sheet.xlsx", engine="openpyxl", mode="a", if_sheet_exists="replace") as w:
-        sheet.to_excel(w, sheet_name="review", index=False)
+    wb = load_workbook(d / "review_sheet.xlsx")
+    ws = wb["review"]
+    cols = [c.value for c in ws[1]]
+    for i in range(2, ws.max_row + 1):
+        rid = ws.cell(i, cols.index("review_id") + 1).value
+        truth = _truth_row(kind[rid])
+        wrong = [c for c, v in truth.items() if str(ws.cell(i, cols.index(c) + 1).value) != v]
+        ok = approve_all or not wrong
+        ws.cell(i, cols.index("decision") + 1).value = "approve" if ok else "reject"
+        if not ok:
+            ws.cell(i, cols.index("note") + 1).value = "wrong: " + ", ".join(wrong)
+    if sign:
+        so = wb["sign_off"]
+        so["B1"], so["B2"], so["B3"] = "Tamanna Nahar", "2026-11-17", "approve"
+    wb.save(d / "review_sheet.xlsx")
 
 
-def test_draw_is_seeded_blinded_and_topped_up():
+def test_draw_is_seeded_and_topped_up():
     c = _cohort()
     a, b = R.draw(c), R.draw(c)
-    assert a.person_id.tolist() == b.person_id.tolist()
-    assert len(a) >= 100 and a.blinded.sum() == 20
+    assert a.person_id.tolist() == b.person_id.tolist() and len(a) >= 110
     for ref in REF.values():
         assert (a[ref] == 1).sum() >= min(10, int((c[ref] == 1).sum()))
     assert R.draw(c, {**R.DEFAULTS, "seed": 1}).person_id.tolist() != a.person_id.tolist()
 
 
-def test_sheet_hides_the_reference_and_blinded_rows_have_no_proposal(tmp_path):
+def test_sheet_shows_values_and_plants_ten_errors(tmp_path):
     c = _cohort()
     meta = R.build(c, str(tmp_path))
     sheet = pd.read_excel(tmp_path / "review_sheet.xlsx", sheet_name="review", dtype=object)
-    assert meta["blinded"] == 20 and len(sheet) == meta["reports"]
-    assert not any(col.startswith("ref_") or col == "lvef_report" for col in sheet.columns)
-    blind = sheet[sheet.blinded.notna()]
-    assert len(blind) == 20 and blind.filter(like="proposed_").isna().all().all()
-    assert sheet[sheet.blinded.isna()].proposed_infarct.notna().all()
+    key = pd.read_csv(tmp_path / "key.csv")
+    assert meta["planted"] == 10 and (key.planted_label.notna()).sum() == 10 and len(sheet) == meta["reports"]
+    assert set(sheet["infarct"]) <= {"present", "absent", "unknown"}
+    planted = sheet[sheet.review_id.isin(key.loc[key.planted_label.notna(), "review_id"])]
+    assert (planted.auditor_check == "auditor agrees").all()            # planted rows look like any other
+    assert "planted_label" not in sheet.columns and "sign_off" in pd.ExcelFile(tmp_path / "review_sheet.xlsx").sheet_names
 
 
-def test_score_passes_when_the_reference_matches_the_cardiologist(tmp_path):
+def test_careful_review_passes_and_writes_the_signoff(tmp_path):
     c = _cohort()
     R.build(c, str(tmp_path))
-    _fill(tmp_path, c)
+    _review(tmp_path, c)
     r = R.score(str(tmp_path))
-    res = r["results"].set_index("label")
-    assert r["passed"], res.to_string()
-    assert res.loc["infarct", "kappa"] == 1.0 and res.loc["report_lvef", "agreement"] == 1.0
-    assert (tmp_path / "review_results.csv").exists()
+    assert r["passed"], r["results"].to_string()
+    rec = json.loads((tmp_path / "signoff.json").read_text())
+    assert rec["sign_off"]["cardiologist"] == "Tamanna Nahar" and rec["passed"] and rec["protocol"] == "MRI 8a"
 
 
-def test_anchoring_on_the_blinded_rows_asks_for_a_blind_reread(tmp_path):
+def test_approving_everything_is_caught_by_the_planted_errors(tmp_path):
     c = _cohort()
     R.build(c, str(tmp_path))
-    _fill(tmp_path, c, blind_wrong=True)
-    res = R.score(str(tmp_path))["results"].set_index("label")
-    assert res.loc["infarct", "result"].startswith("RE-READ")
+    _review(tmp_path, c, approve_all=True)
+    res = R.score(str(tmp_path))["results"].set_index("check")
+    assert res.loc["planted errors rejected", "result"].startswith("REVIEW AGAIN")
 
 
-def test_incomplete_sheet_is_refused(tmp_path):
+def test_incomplete_or_unsigned_sheet_is_refused(tmp_path):
     c = _cohort()
     R.build(c, str(tmp_path))
     with pytest.raises(SystemExit, match="not complete"):
+        R.score(str(tmp_path))
+    _review(tmp_path, c, sign=False)
+    with pytest.raises(SystemExit, match="sign_off"):
         R.score(str(tmp_path))
