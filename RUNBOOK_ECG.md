@@ -113,6 +113,7 @@ python scripts/deid_request.py --modality mri echo --out /workspace/deid   # CSV
    ```
    - ECG 4 passes at >= 95% approved in each labelled group (acute MI, STEMI, negative), at least 8 of 10 planted errors rejected, and an approved sign-off. Rejected ECGs (`rejected_ecgs.csv`) show which rule or concept set to fix; the fix goes back to the clinical lead.
    - Rename or move each `review_decisions.json` after scoring: the browser names every saved file the same.
+   - Workspace browser blocked? Review inside the VS Code notebook: `from annotation.notebook_review import review` then `review("<path to the .html page>")`. Decisions are saved next to the page (`review_decisions.json`, or `adjudication_<n>_decisions.json`), where `score` finds them without `--decisions`.
    - The cardiologist reads `troponin_concepts.csv` (which assays the troponin concept set really contains, with units and reference limits) and signs it off.
    - AF must PASS (PPV and NPV at least 0.95, lower bound at least 0.90). On a FAIL, fix `af_regex` or the `context` trigger words (`cardioai_mcp/report_context.py`), rebuild and re-audit on a fresh sample.
 

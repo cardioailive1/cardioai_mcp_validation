@@ -62,6 +62,8 @@ Model training does not use BigQuery: the queries build the training list and pu
    #   the cardiologist opens ~/cardioai_exports/ref_review/review_app.html in the workspace web browser (no Excel):
    #   one report at a time, Approve / Reject (+ note), then Finish and sign -> saves review_decisions.json (~/Downloads)
    #   (or fills review_sheet.xlsx: decision + note, then the sign_off tab)
+   #   workspace browser blocked? Review inside the VS Code notebook instead (saves review_decisions.json in the folder):
+   #     from annotation.notebook_review import review; review("~/cardioai_exports/ref_review/review_app.html")
    python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review --decisions ~/Downloads/review_decisions.json
    ```
    PASS needs >= 95% of the 100 genuine reports approved, at least 8 of the 10 planted errors rejected, and the sign_off tab approved. Rejected reports are in `rejected_reports.csv` with the notes: fix the rule in `mri_training/config.yaml`, rebuild the reference, re-lock and review a fresh sample (`--seed`). Too few planted errors caught: review again.
