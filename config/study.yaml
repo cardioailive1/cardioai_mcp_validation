@@ -53,8 +53,10 @@ unit_conversions:
   # MCP height concept 4030731 records numeric meters (unit_concept_id 9546), even when source label says In/CM.
   # Check unit_concept_id first so a mislabeled 'In' value is not treated as inches.
   height: [{unit_concept_id: 9546, factor: 100.0}, {unit_concept_id: 9330, unit_source_like: ['in', 'inch%', '[in_i]'], factor: 2.54}]
-  weight: [{unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
-  weight_series: [{unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
+  # MCP has many body-weight records with unit_source_value 'oz' and no unit_concept_id.
+  # Convert ounces before pound rules; kilogram measurements pass through unchanged.
+  weight: [{unit_source_like: ['oz'], factor: 0.028349523125}, {unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
+  weight_series: [{unit_source_like: ['oz'], factor: 0.028349523125}, {unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
 
 # --- Study plan: sample sizes + success rule (decision of 2026-10-12) --------
 # A = enlarge CAD / Risk / Longitudinal, keep the deck rule (lower 95% CI >= deck goal)
