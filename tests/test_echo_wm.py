@@ -361,7 +361,7 @@ def test_echo_link_by_clinic_number_and_date():
     con = duckdb.connect()
     con.execute("CREATE TABLE DIM_PATIENT (PATIENT_DK BIGINT, PATIENT_CLINIC_NUMBER VARCHAR, PATIENT_MERGED_FLAG VARCHAR)")
     con.execute("INSERT INTO DIM_PATIENT VALUES (1, 'C1', 'Y'), (2, 'C1', 'N'), (3, 'C2', 'N')")
-    con.execute("CREATE TABLE FACT_ECHO_TEST (PATIENT_DK BIGINT, ECHO_TEST_DTM TIMESTAMP, ECHO_NOTE VARCHAR, ACCESSION_NBR VARCHAR)")
+    con.execute("CREATE TABLE FACT_ECHO_TEST (PATIENT_DK BIGINT, ECHO_PERFORMED_DTM TIMESTAMP, ECHO_NOTE VARCHAR, ACCESSION_NBR VARCHAR)")
     con.execute("""INSERT INTO FACT_ECHO_TEST VALUES
         (2, TIMESTAMP '2019-04-01 09:00:00', 'Inferior hypokinesis. LVEF 45%.', NULL),
         (3, TIMESTAMP '2019-06-01 08:00:00', 'Normal wall motion.', NULL),
@@ -401,7 +401,7 @@ def test_echo_link_tte_filter_and_lvef_from_echo_results():
     q("INSERT INTO DIM_PATIENT VALUES (10, 'A100', 'N'), (11, 'A100', 'Y'), (20, 'B200', 'N')")
     q("CREATE TABLE DIM_ECHO_TEST (ECHO_TEST_DK BIGINT, ECHO_TEST_DESCRIPTION VARCHAR)")
     q("INSERT INTO DIM_ECHO_TEST VALUES (1, 'Echocardiogram TTE complete'), (2, 'Transesophageal echo (TEE)')")
-    q("""CREATE TABLE FACT_ECHO_TEST (ECHO_TEST_FPK BIGINT, PATIENT_DK BIGINT, ECHO_TEST_DTM TIMESTAMP, ECHO_NOTE VARCHAR,
+    q("""CREATE TABLE FACT_ECHO_TEST (ECHO_TEST_FPK BIGINT, PATIENT_DK BIGINT, ECHO_PERFORMED_DTM TIMESTAMP, ECHO_NOTE VARCHAR,
          ECHO_PERFORMED_TEST_DK BIGINT, ACCESSION_NBR VARCHAR)""")
     q("""INSERT INTO FACT_ECHO_TEST VALUES
          (1, 10, TIMESTAMP '2019-04-02 09:00:00', 'Inferior akinesis. LVEF 45%.', 1, NULL),
@@ -438,6 +438,19 @@ def test_echo_link_tte_filter_and_lvef_from_echo_results():
     t = me.build_lvef_table(eng, mod, log=lambda s: None).sort_values("clinic_number").reset_index(drop=True)
     assert t.lvef.tolist() == [52.0, 35.0] and t.lvef_method.tolist() == ["biplane", "visual"]
     assert t.person_id.astype(int).tolist() == [1, 2] and t.n_values.tolist() == [2, 1]
+    # Date bounds are applied to the exam date in SQL, before pandas receives matching rows.
+    filtered = me.build_lvef_table(
+        eng, mod, log=lambda s: None, start="2019-04-02", end="2019-04-02"
+    )
+    assert filtered.person_id.astype(int).tolist() == [1]
+    assert filtered.lvef.tolist() == [52.0]
+    sql = me.lvef_rows_sql(mod, start="2012-01-01", end="2024-01-01")
+    assert "CAST(t.ECHO_PERFORMED_DTM AS DATE) BETWEEN" in sql
+    assert "2012-01-01" in sql and "2024-01-01" in sql
+    with pytest.raises(ValueError, match="both start and end"):
+        me.lvef_rows_sql(mod, start="2012-01-01")
+    with pytest.raises(ValueError, match="start date"):
+        me.lvef_rows_sql(mod, start="2024-01-01", end="2012-01-01")
 
 
 def test_birth_year_1800_is_unknown_everywhere():

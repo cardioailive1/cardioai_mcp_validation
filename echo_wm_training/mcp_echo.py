@@ -254,8 +254,16 @@ def parse_lvef(value) -> Optional[float]:
     return round(v, 1) if 5.0 <= v <= 90.0 else None
 
 
-def lvef_rows_sql(modality_cfg: dict) -> str:
-    """Every LVEF-type result with the echo's clinic number and date (one row per stored value)."""
+def lvef_rows_sql(modality_cfg: dict, start: Optional[str] = None, end: Optional[str] = None) -> str:
+    """Every LVEF-type result, optionally restricted to inclusive echo dates (YYYY-MM-DD)."""
+    from datetime import date
+
+    if (start is None) != (end is None):
+        raise ValueError("LVEF extraction requires both start and end dates, or neither")
+    if start is not None:
+        first, last = date.fromisoformat(start), date.fromisoformat(end)
+        if first > last:
+            raise ValueError("LVEF start date must not be after end date")
     c = _cfg(modality_cfg)
     r, e, d, pm = c["results"], c["echo_test_columns"], c["dim_patient"], c.get("person_map") or {}
     rc, ty = r["columns"], r["result_type"]
@@ -268,6 +276,8 @@ def lvef_rows_sql(modality_cfg: dict) -> str:
         person = f"pm.{pm['person_id_column']}"
         pjoin = f"LEFT JOIN {_macro(pm['table'])} pm ON CAST(pm.{pm['clinic_number_column']} AS STRING) = CAST({clinic} AS STRING)"
     label = f"CONCAT(COALESCE(CAST(ty.{ty['name']} AS STRING), ''), ' | ', COALESCE(CAST(ty.{ty['description']} AS STRING), ''))"
+    date_filter = (f" AND CAST(t.{e['datetime']} AS DATE) BETWEEN CAST('{start}' AS DATE) "
+                   f"AND CAST('{end}' AS DATE)" if start is not None else "")
     return f"""
     SELECT {person} AS person_id, CAST({clinic} AS STRING) AS clinic_number,
            CAST(t.{e['datetime']} AS DATE) AS lvef_date, {label} AS result_label,
@@ -277,7 +287,7 @@ def lvef_rows_sql(modality_cfg: dict) -> str:
     JOIN {_t(c, 'echo_test_table')} t ON t.{e['test_key']} = x.{rc['test_key']}
     {djoin}
     {pjoin}
-    WHERE {label} RLIKE {_rx(r['lvef_regex'])} AND NOT ({label} RLIKE {_rx(r['exclude_regex'])})
+    WHERE {label} RLIKE {_rx(r['lvef_regex'])} AND NOT ({label} RLIKE {_rx(r['exclude_regex'])}){date_filter}
     """
 
 
@@ -314,9 +324,10 @@ def lvef_table(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
     return pd.DataFrame(out, columns=cols)
 
 
-def build_lvef_table(engine, modality_cfg: dict, log=print) -> pd.DataFrame:
+def build_lvef_table(engine, modality_cfg: dict, log=print, *, start: Optional[str] = None,
+                     end: Optional[str] = None) -> pd.DataFrame:
     """Save the result as {work}.echo_lvef, e.g. spark.createDataFrame(t).write.mode('overwrite').saveAsTable(...)."""
-    rows = engine.query(engine.render(lvef_rows_sql(modality_cfg), {}))
+    rows = engine.query(engine.render(lvef_rows_sql(modality_cfg, start=start, end=end), {}))
     t = lvef_table(rows, _cfg(modality_cfg)["results"])
     log(f"echo LVEF: {len(t)} patient-days from {len(rows)} stored values; methods {t.lvef_method.value_counts().to_dict()}")
     missing = int(t.person_id.isna().sum())
