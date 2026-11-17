@@ -50,7 +50,9 @@ export_dir: exports
 # OMOP unit concept ids: 8582 cm, 9330 inch, 9529 kg, 8739 lb.  Values whose
 # unit_source_value matches are converted; everything is range-checked.
 unit_conversions:
-  height: [{unit_concept_id: 9330, unit_source_like: ['in', 'inch%', '[in_i]'], factor: 2.54}]
+  # MCP height concept 4030731 records numeric meters (unit_concept_id 9546), even when source label says In/CM.
+  # Check unit_concept_id first so a mislabeled 'In' value is not treated as inches.
+  height: [{unit_concept_id: 9546, factor: 100.0}, {unit_concept_id: 9330, unit_source_like: ['in', 'inch%', '[in_i]'], factor: 2.54}]
   weight: [{unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
   weight_series: [{unit_concept_id: 8739, unit_source_like: ['lb%', '[lb_av]'], factor: 0.45359237}]
 
