@@ -59,9 +59,17 @@ def _value_expr(el: Element, study: dict) -> str:
         return "m.value_as_number"
     whens = []
     for c in conv:
-        likes = " OR ".join(f"LOWER(m.unit_source_value) LIKE '{u}'" for u in c.get("unit_source_like", []))
-        cond = f"m.unit_concept_id = {c['unit_concept_id']}" + (f" OR {likes}" if likes else "")
-        whens.append(f"WHEN {cond} THEN m.value_as_number * {c['factor']}")
+        conditions = []
+        if c.get("unit_concept_id") is not None:
+            conditions.append(f"m.unit_concept_id = {int(c['unit_concept_id'])}")
+        conditions.extend(
+            f"LOWER(m.unit_source_value) LIKE '{u}'"
+            for u in c.get("unit_source_like", [])
+        )
+        if not conditions:
+            raise ValueError("Unit conversion rule requires unit_concept_id or unit_source_like")
+        cond = " OR ".join(conditions)
+        whens.append(f"WHEN ({cond}) THEN m.value_as_number * {c['factor']}")
     return "CASE " + " ".join(whens) + " ELSE m.value_as_number END"
 
 
