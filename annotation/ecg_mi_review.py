@@ -125,6 +125,9 @@ def timeline(ecg: pd.Series, conds: pd.DataFrame, trops: pd.DataFrame, lab: dict
 def draw(m: pd.DataFrame, cfg: dict = DEFAULTS) -> pd.DataFrame:
     """The review sample, groups in GROUPS plus n_planted extra labelled ECGs. One ECG per patient. Seeded."""
     rng = np.random.default_rng(int(cfg["seed"]))
+    m = m.copy()
+    for c in ("acute_mi", "stemi"):                    # nullable Int64 / Float64 (pd.NA) -> plain floats
+        m[c] = pd.to_numeric(m[c], errors="coerce").astype(float)
     m = m.sample(frac=1.0, random_state=int(cfg["seed"])).drop_duplicates("person_id")
     pools = {"acute_mi_positive": m[(m.acute_mi == 1) & (m.stemi != 1)], "stemi_positive": m[m.stemi == 1],
              "negative": m[m.acute_mi == 0], "masked": m[m.acute_mi.isna()]}
