@@ -126,6 +126,19 @@ The first run refuses to continue while any label cell is empty. Then, for each 
   These rows, plus a random **10% spot-check** of the settled rows, are written to `adjudication_1.xlsx`. It is blinded in the same way: the cardiologist does not see the automatic label or the data scientists' entries. Running `score` again before the cardiologist answers does not create another sheet.
 - **The cardiologist's entry is the reference** wherever they filled it. Run `score` again. Any new disagreements, for example after a sheet is corrected, go to `adjudication_2.xlsx`.
 
+**Approve or reject in a browser (Audit 1, proposed 2026-11-17; `tasks.yaml` → `adjudication.mode: approve_reject`).** For cardiologists who don't work in Excel, `score` also writes `adjudication_1.html`. Open it in the workspace web browser. Each report shows one proposed value per column: the settled value; else the data scientists' value where they agree; else the automatic label. Where readings differ, the other readings are listed (not who gave them). The cardiologist approves the report, or rejects it, ticks the values that are wrong and writes a note. **Finish and sign** saves `review_decisions.json`. Then:
+
+```bash
+python -m annotation.label_audit score ecg --dir /workspace/audit/ecg --decisions ~/Downloads/review_decisions.json
+```
+
+- Approved values become the reference.
+- Ticked values on a rejected report become `U`: they count against the automatic label and are masked from training.
+- 5% of the rows (at least 5) are spot-check rows with a planted error. At least 80% must be rejected, else every label FAILs with "review again".
+- The sign-off (name, date, approve) is required. It is recorded in `adjudication_signoff.json`.
+
+This works for every agent: ECG AF, MRI and echo.
+
 An automatic label the code left unset (NaN, masked from training), where the text does state it, isn't adjudicated. It is counted as `masked_but_stated`: data the model could use but doesn't get.
 
 ### 1.5 Pass rules
