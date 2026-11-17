@@ -304,3 +304,55 @@ def test_automatic_audit_is_required(tmp_path):
     k.drop(columns=[c for c in k if c.startswith("aa_")]).to_csv(tmp_path / "key.csv", index=False)
     with pytest.raises(ValueError, match="no automatic audit"):
         L.score(str(tmp_path), "mri", CFG, log=lambda s: None)
+
+
+def test_cardiologist_approves_or_rejects_in_the_browser_page(tmp_path):
+    """Audit 1 (approve / reject): the cardiologist approves a proposed value per column or rejects, ticking what is
+    wrong; planted errors on spot-check rows; the bad thrombus rule still fails."""
+    import json
+    import re
+    m = _manifest()
+    cfg = {**CFG, "adjudication": {"mode": "approve_reject", "planted_fraction": 0.05, "planted_min": 5, "planted_caught_min": 0.8}}
+    key = L.sample(m, "mri", ["ds1", "ds2"], cfg, auto="assist")
+    L.write_auditor_sheets(key, tmp_path, "mri", cfg)
+    kinds = _kinds(tmp_path, m)
+    _fill(tmp_path / "sheet_ds1.xlsx", kinds)
+    _fill(tmp_path / "sheet_ds2.xlsx", kinds)
+    L.score(str(tmp_path), "mri", cfg, log=lambda s: None)
+    page = tmp_path / "adjudication_1.html"
+    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', page.read_text(), re.S).group(1))
+    prop = pd.read_csv(tmp_path / "adjudication_1_proposed.csv", dtype=str, keep_default_na=False)
+    assert len(data["rows"]) == len(prop) and (prop.planted != "").sum() >= 5
+
+    def careful(r):
+        truth = T[kinds[r["review_id"]]][1]
+        wrong = []
+        for col, shown in r["values"]:
+            want = L._show(L.norm_value(truth.get(col)) if col in ("report_lvef", "report_infarct_size")
+                           else L.norm_label(truth.get(col) if truth.get(col) is not None else "NM"),
+                           col in ("report_lvef", "report_infarct_size"))
+            if shown != want:
+                wrong.append(col)
+        return wrong
+
+    dec = []
+    for r in data["rows"]:
+        w = careful(r)
+        dec.append({"review_id": r["review_id"], "decision": "reject" if w else "approve", "note": ", ".join(w), "wrong": w})
+    out = {"sheet_id": data["sheet_id"], "signoff": {"cardiologist": "Tamanna Nahar", "date": "2026-11-17", "decision": "approve"},
+           "decisions": dec}
+    f = tmp_path / "dl.json"
+    f.write_text(json.dumps(out))
+    r2 = L.score(str(tmp_path), "mri", cfg, log=lambda s: None, decisions=[str(f)])
+    res = r2["results"].set_index("column")
+    assert (res.pending_cardiologist == 0).all()
+    assert res.loc["lv_thrombus", "result"].startswith("FAIL") and res.loc["lv_thrombus", "ppv"] < 0.8
+    for ok in ("infarct", "nonischemic_lge", "lv_aneurysm", "report_mvo"):
+        assert res.loc[ok, "result"] == "PASS", (ok, res.loc[ok].to_dict())
+    assert json.loads((tmp_path / "adjudication_signoff.json").read_text())[0]["planted_rejected"] >= 5
+
+    for x in dec:                                         # approving everything: the planted errors catch it
+        x.update(decision="approve", note="", wrong=[])
+    f.write_text(json.dumps(out))
+    res = L.score(str(tmp_path), "mri", cfg, log=lambda s: None, decisions=[str(f)])["results"]
+    assert res.result.str.contains("planted errors rejected: review again").all()

@@ -567,7 +567,112 @@ def metrics(res: pd.DataFrame, labels, values, cfg: dict) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def score(d: str, modality: str, cfg: Optional[dict] = None, log=print) -> Dict[str, object]:
+# --------------------------------------------------------------------------- approve / reject adjudication (Audit 1)
+def _show(v, is_val: bool) -> str:
+    if is_val:
+        return "not stated" if v is None or (isinstance(v, float) and math.isnan(v)) else (
+            "uncertain" if v == U else f"{float(v):g}")
+    return {1.0: "present", 0.0: "absent", U: "uncertain", NM: "not mentioned"}.get(v, "not mentioned") if v is not None else "not mentioned"
+
+
+def _proposed(rr) -> object:
+    """One value per row and column for the cardiologist to approve: the settled reference; else the data
+    scientists' value when they agree, else the automatic label, else the automatic auditor's reading."""
+    if rr.status != "needs cardiologist":
+        return rr.reference
+    d1, d2 = rr.ds1, rr.ds2
+    tol = None
+    if d1 is not None and d1 != U and (d2 is None or same(d1, d2, tol)):
+        return d1
+    if rr.auto is not None and rr.auto != NM:
+        return rr.auto
+    if rr.auto_auditor is not None and rr.auto_auditor != U:
+        return rr.auto_auditor
+    return d1
+
+
+def write_adjudication_page(dp: Path, rnd: int, sel: pd.DataFrame, res: pd.DataFrame, labels, values, modality: str,
+                            cfg: dict) -> Path:
+    """adjudication_<rnd>.html: approve / reject in a browser (annotation/review_page.py), with one proposed value per
+    column, the other readings shown where they differ, and planted errors on spot-check rows."""
+    from .auto_audit import AutoAuditor
+    from .review_page import file_id, write_page
+    aa = AutoAuditor(modality)
+    rng = np.random.default_rng(cfg["seed"] + 100 + rnd)
+    cols = labels + values
+    spot = [a for a in sel.audit_id if bool(sel.set_index("audit_id").at[a, "spot_check"])]
+    adj = cfg.get("adjudication", {})
+    n_pl = min(len(spot), max(int(adj.get("planted_min", 5)), int(round(adj.get("planted_fraction", 0.05) * len(sel)))))
+    planted = {}
+    for a in (rng.choice(spot, n_pl, replace=False).tolist() if n_pl else []):
+        binary = [c for c in labels if res[(res.audit_id == a) & (res.column == c)].reference.iloc[0] in (0.0, 1.0)]
+        if binary:
+            planted[a] = binary[int(rng.integers(len(binary)))]
+    prop_rows, page_rows = [], []
+    for _, k in sel.iterrows():
+        a = k.audit_id
+        r = res[res.audit_id == a].set_index("column")
+        prop = {c: _proposed(r.loc[c]) for c in cols}
+        shown = dict(prop)
+        if a in planted:
+            shown[planted[a]] = 1.0 - float(prop[planted[a]])
+        differ = []
+        if a not in planted:
+            for c in cols:
+                rr, is_val = r.loc[c], c in values
+                others = {_show(v, is_val) for v in (rr.auto, rr.ds1, rr.ds2, rr.auto_auditor) if v is not None} - {_show(prop[c], is_val)}
+                if rr.status == "needs cardiologist" and others:
+                    differ.append(f"{c} {' / '.join(sorted(others))}")
+        prop_rows.append({"audit_id": a, "planted": planted.get(a, ""),
+                          **{f"proposed_{c}": ("" if prop[c] is None else prop[c]) for c in cols}})
+        page_rows.append({"review_id": a, "report": k.text, "evidence": [x for x in aa.evidence(k.text).split("\n") if x.strip()],
+                          "values": [[c, _show(shown[c], c in values)] for c in cols],
+                          "check": ("CHECK - other readings: " + "; ".join(differ)) if differ else "",
+                          "check_label": "Other readings of this report: "})
+    pp = dp / f"adjudication_{rnd}_proposed.csv"
+    pd.DataFrame(prop_rows).to_csv(pp, index=False)
+    page = dp / f"adjudication_{rnd}.html"
+    write_page(page, f"{modality.upper()} label adjudication, round {rnd} (Audit 1)", "Audit 1", file_id(pp), page_rows,
+               help_text="Approve when every value matches the report (rule sheet: annotation/LABEL_AUDIT.md). Reject "
+               "when any value is wrong and say which. A rejected report's labels are not used for training. Some "
+               "reports carry a planted error: reject those like any other error. Your answers are kept in this "
+               "browser as you go.")
+    return page
+
+
+def _page_entries(dp: Path, labels, values, decisions: Iterable[str] = ()):
+    """Cardiologist entries from approve / reject decision files: approve -> the proposed values; reject -> U for the
+    labels ticked as wrong (every label if none ticked), the others as proposed. U counts against the automatic label
+    and is masked from training. Planted rows add no entry."""
+    from .review_page import file_id, read_decisions
+    files = [Path(x).expanduser() for x in decisions] + sorted(dp.glob("adjudication_*_decisions.json"))
+    props = {file_id(p): p for p in sorted(dp.glob("adjudication_*_proposed.csv"))}
+    cardio, checks = {}, []
+    for f in dict.fromkeys(files):
+        sid = json.loads(f.read_text()).get("sheet_id")
+        if sid not in props:
+            raise SystemExit(f"{f} does not belong to any adjudication round in {dp}")
+        rec = read_decisions(f, sid)
+        prop = pd.read_csv(props[sid], dtype=str, keep_default_na=False).set_index("audit_id")
+        missing = [a for a in prop.index if rec["decisions"].get(a, {}).get("decision") not in ("approve", "reject")]
+        missing += [a for a, d in rec["decisions"].items() if d["decision"] == "reject" and not d["note"]]
+        pl = prop[prop.planted != ""]
+        caught = sum(rec["decisions"].get(a, {}).get("decision") == "reject" for a in pl.index)
+        checks.append({"round_file": props[sid].name, "decisions": str(f), "incomplete": len(missing),
+                       "planted": len(pl), "planted_rejected": caught, "sign_off": rec["signoff"]})
+        for a, p in prop.iterrows():
+            d = rec["decisions"].get(a, {}).get("decision")
+            if p.planted or d not in ("approve", "reject"):
+                continue
+            v = {c: (norm_value if c in values else norm_label)(p[f"proposed_{c}"] or None) for c in labels + values}
+            if d == "reject":                           # ticked values (all, if none ticked) -> U / no value
+                wrong = set(rec["decisions"][a].get("wrong") or []) & set(labels + values) or set(labels + values)
+                v.update({c: (None if c in values else U) for c in wrong})
+            cardio[a] = pd.Series(v)
+    return cardio, checks
+
+
+def score(d: str, modality: str, cfg: Optional[dict] = None, log=print, decisions: Iterable[str] = ()) -> Dict[str, object]:
     cfg = cfg or load_tasks()["label_audit"]
     dp = Path(d)
     labels, values = _columns(cfg, modality)
@@ -584,6 +689,8 @@ def score(d: str, modality: str, cfg: Optional[dict] = None, log=print) -> Dict[
     key["cardiologist_round"] = key.cardiologist_round.astype(int)
     texts = pd.read_csv(dp / "texts.csv.gz", dtype=str, keep_default_na=False).set_index("audit_id")["text"]
     sheets, cardio = _load_entries(dp, key, labels, values)
+    page_cardio, page_checks = _page_entries(dp, labels, values, decisions)
+    cardio.update(page_cardio)                          # approve / reject decisions win over the blinded sheet
     res = resolve(key, sheets, cardio, labels, values, cfg["pass"]["value_tolerance"])
     pending = set(res.audit_id[res.status == "needs cardiologist"])
     new = sorted(a for a in pending if int(key.set_index("audit_id").at[a, "cardiologist_round"]) == 0)
@@ -605,9 +712,28 @@ def score(d: str, modality: str, cfg: Optional[dict] = None, log=print) -> Dict[
         write_sheet(sel, sheet, labels, values, modality,
                     f"{modality.upper()} label adjudication round {rnd} - cardiologist - {len(sel)} rows (fill every cell you can)")
         key.to_csv(dp / "key.csv", index=False)
+        if cfg.get("adjudication", {}).get("mode", "values") == "approve_reject":
+            page = write_adjudication_page(dp, rnd, sel, res, labels, values, modality, cfg)
+            log(f"cardiologist: open {page} in the workspace web browser (approve / reject); "
+                f"then score again with --decisions <saved review_decisions.json>")
         res = resolve(key, sheets, cardio, labels, values, cfg["pass"]["value_tolerance"])
         log(f"{len(new)} rows need the cardiologist (+ spot-check): {sheet}")
     met = metrics(res, labels, values, cfg)
+    adj = cfg.get("adjudication", {})
+    extra = []
+    for c in page_checks:
+        if c["incomplete"]:
+            extra.append(f"{c['round_file']}: {c['incomplete']} reports without a decision or a reject note")
+        need = int(np.ceil(float(adj.get("planted_caught_min", 0.8)) * c["planted"]))
+        if c["planted"] and c["planted_rejected"] < need:
+            extra.append(f"{c['round_file']}: {c['planted_rejected']} of {c['planted']} planted errors rejected: review again")
+        so = c["sign_off"]
+        if not (so["cardiologist"] and so["date"] and so["decision"].lower() == "approve"):
+            extra.append(f"{c['round_file']}: cardiologist sign-off missing or not approved")
+    if page_checks:
+        (dp / "adjudication_signoff.json").write_text(json.dumps(page_checks, indent=1, default=str))
+    if extra:
+        met["result"] = ["FAIL: " + "; ".join(extra) + ("; " + r[6:] if r.startswith("FAIL: ") else "") for r in met.result]
     met.to_csv(dp / "audit_results.csv", index=False)
     wrong = np.array([not same(a, b, cfg["pass"]["value_tolerance"] if k == "value" else None)
                       for a, b, k in zip(res.auto, res.reference, res.kind)], dtype=bool)
@@ -624,7 +750,7 @@ def troponin_rows_sql(modality_cfg: dict, ecg_ids: Iterable[str], days: int = 30
     e = modality_cfg["ecg"]
     c = e["columns"]
     ids = ", ".join("'" + str(i).replace("'", "''") + "'" for i in ecg_ids)
-    t = e["table"].replace("{modality}", "{{modality}}")
+    t = e["table"].replace("{modality}", "{{modality}}").replace("{work}", "{{work}}")
     return (f"SELECT CAST(x.{c['ecg_id']} AS STRING) AS ecg_id, CAST(x.{c['acquisition_datetime']} AS DATE) AS ecg_date, "
             "p.gender_concept_id, m.measurement_date, m.value_as_number, m.unit_source_value, m.range_high, "
             "m.measurement_concept_id, m.measurement_source_concept_id, "
@@ -920,6 +1046,8 @@ def main(argv=None):
     sc = sub.add_parser("score")
     sc.add_argument("modality", choices=["mri", "ecg", "echo"])
     sc.add_argument("--dir", required=True)
+    sc.add_argument("--decisions", action="append", default=[],
+                    help="review_decisions.json saved by adjudication_<n>.html (approve / reject); repeat per round")
     tr = sub.add_parser("troponin")
     tr.add_argument("--manifest", required=True)
     tr.add_argument("--out", required=True)
@@ -953,7 +1081,7 @@ def main(argv=None):
         print(f"{len(key)} rows; data scientists read {n_ds} ({int(key.ds_verify.sum())} of them verify the automatic "
               f"auditor); {len(key) - n_ds} settled automatically; sheets: {', '.join(p.name for p in paths)}")
     elif a.cmd == "score":
-        r = score(a.dir, a.modality, cfg)
+        r = score(a.dir, a.modality, cfg, decisions=a.decisions)
         cols = [c for c in ["column", "ppv", "ppv_n", "ppv_ci_low", "npv", "npv_n", "npv_ci_low", "kappa_ds1_ds2",
                             "value_match", "value_miss_rate", "auto_vs_reference", "auto_vs_reference_all",
                             "pending_cardiologist", "result"]
