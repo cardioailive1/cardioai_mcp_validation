@@ -242,7 +242,7 @@ pacemaker_icd_implant:
     - {vocab: CPT4, codes: ["33206", "33207", "33208", "33249", "33270"]}
 
 # ---------------------------------------------------------------- measurements (LOINC)
-height:        {domain: Measurement, include: [{vocab: LOINC, codes: ["8302-2", "8306-3"]}]}
+height:        {domain: Measurement, include: [{vocab: LOINC, codes: ["8302-2", "8306-3"]}, {vocab: SNOMED, codes: ["14456009"]}]} # MCP: concept 4030731, Measuring height of patient
 weight:        {domain: Measurement, include: [{vocab: LOINC, codes: ["29463-7", "3141-9"]}]}
 bmi:           {domain: Measurement, include: [{vocab: LOINC, codes: ["39156-5"]}]}
 sbp:           {domain: Measurement, include: [{vocab: LOINC, codes: ["8480-6", "8459-0", "8460-8"]}]}
