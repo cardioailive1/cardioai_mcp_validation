@@ -4,6 +4,7 @@ numpy>=1.24
 scipy>=1.10
 pyarrow>=14           # parquet: manifests, de-identification selection
 sqlglot>=25           # Spark SQL -> BigQuery (MCP workspace) and -> DuckDB (tests)
+ipywidgets>=8         # cardiologist review inside a VS Code notebook (annotation/notebook_review.py)
 # in the MCP workspace (BigQuery client; usually preinstalled there)
 # google-cloud-bigquery>=3.10
 # db-dtypes>=1.1
