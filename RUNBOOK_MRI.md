@@ -59,8 +59,10 @@ Model training does not use BigQuery: the queries build the training list and pu
    **Then the cardiologist reviews the reference** (MRI 8a: approve or reject with notes, then sign off; replaces the two blinded cardiologists of VALIDATION_RUNBOOK 7c for MRI). 110 reports are shown with their reference values; the automatic auditor marks rows it reads differently (amber); 10 rows carry a planted error:
    ```bash
    python -m annotation.reference_review sheet --out ~/cardioai_exports/ref_review   # review_sheet.xlsx + key.csv
-   #   the cardiologist, in review_sheet.xlsx: decision approve / reject (+ note), then the sign_off tab
-   python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review   # review_results.csv, signoff.json
+   #   the cardiologist opens ~/cardioai_exports/ref_review/review_app.html in the workspace web browser (no Excel):
+   #   one report at a time, Approve / Reject (+ note), then Finish and sign -> saves review_decisions.json (~/Downloads)
+   #   (or fills review_sheet.xlsx: decision + note, then the sign_off tab)
+   python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review --decisions ~/Downloads/review_decisions.json
    ```
    PASS needs >= 95% of the 100 genuine reports approved, at least 8 of the 10 planted errors rejected, and the sign_off tab approved. Rejected reports are in `rejected_reports.csv` with the notes: fix the rule in `mri_training/config.yaml`, rebuild the reference, re-lock and review a fresh sample (`--seed`). Too few planted errors caught: review again.
 

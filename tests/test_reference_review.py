@@ -114,3 +114,33 @@ def test_incomplete_or_unsigned_sheet_is_refused(tmp_path):
     _review(tmp_path, c, sign=False)
     with pytest.raises(SystemExit, match="sign_off"):
         R.score(str(tmp_path))
+
+
+def test_browser_page_and_its_decisions_file(tmp_path):
+    """review_app.html (no Excel) embeds the same rows; the decisions file it saves is scored like the sheet."""
+    import re as _re
+    c = _cohort()
+    R.build(c, str(tmp_path))
+    html = (tmp_path / "review_app.html").read_text()
+    data = json.loads(_re.search(r'<script id="data" type="application/json">(.*?)</script>', html, _re.S).group(1))
+    sheet = pd.read_excel(tmp_path / "review_sheet.xlsx", sheet_name="review", dtype=object)
+    assert [r["review_id"] for r in data["rows"]] == sheet.review_id.tolist() and "__DATA__" not in html
+    assert "planted" not in html.lower().replace("planted error even", "")   # nothing marks the planted rows
+    key = pd.read_csv(tmp_path / "key.csv")
+    kind = dict(zip(key.review_id, c.set_index("person_id").loc[key.person_id, "kind"]))
+    dec = []
+    for r in data["rows"]:
+        truth = _truth_row(kind[r["review_id"]])
+        wrong = [lab for lab, v in r["values"] if truth[lab] != v]
+        dec.append({"review_id": r["review_id"], "decision": "reject" if wrong else "approve",
+                    "note": ", ".join(wrong)})
+    out = {"sheet_id": data["sheet_id"], "signoff": {"cardiologist": "Tamanna Nahar", "date": "2026-11-17",
+                                                    "decision": "approve", "comments": ""}, "decisions": dec}
+    p = tmp_path / "dl" / "review_decisions.json"
+    p.parent.mkdir()
+    p.write_text(json.dumps(out))
+    r = R.score(str(tmp_path), decisions=str(p))
+    assert r["passed"], r["results"].to_string()
+    p.write_text(json.dumps({**out, "sheet_id": "other"}))
+    with pytest.raises(SystemExit, match="different review sheet"):
+        R.score(str(tmp_path), decisions=str(p))

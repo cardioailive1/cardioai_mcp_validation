@@ -11,15 +11,18 @@ against; the cardiologist approves the row or rejects it with a note, then signs
              10 rows carry one planted error (a flipped label or an LVEF off by 15 points) and say "auditor agrees".
              The cardiologist knows some rows are planted, not which: catching them shows the review is not
              simply agreeing with what is shown.
-  2. the cardiologist, in review_sheet.xlsx inside the workspace: decision = approve or reject; a reject needs a
-     note naming what is wrong. Then the sign_off tab: name, date, decision.
+  2. the cardiologist reviews inside the workspace, either way:
+       - review_app.html (no Excel needed): open it in the workspace web browser; one report at a time with the
+         evidence highlighted, Approve / Reject buttons, a note on rejects, then a sign-off screen that saves
+         review_decisions.json (usually to ~/Downloads). Progress is kept in the browser between sessions.
+       - review_sheet.xlsx: decision = approve or reject (+ note), then the sign_off tab.
   3. score : PASS when >= 95% of the 100 genuine reports are approved, at least 8 of the 10 planted errors are
              rejected, and the sign_off tab is filled and approved. Rejected genuine reports are listed with their
              notes (rejected_reports.csv) to fix the rule in mri_training/config.yaml, rebuild the reference,
              re-lock and review a fresh sample (--seed). Fewer than 8 planted errors caught: review again.
 
     python -m annotation.reference_review sheet --out ~/cardioai_exports/ref_review      # reads mri_analytic_locked
-    python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review
+    python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review [--decisions ~/Downloads/review_decisions.json]
 
 Everything stays in the workspace: the sheet holds report text. key.csv (true values, planted rows) is for the
 scoring step only; the cardiologist does not open it.
@@ -28,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -147,11 +151,28 @@ def build(analytic: pd.DataFrame, out: str, cfg: dict = DEFAULTS, auditor: Optio
     d.mkdir(parents=True, exist_ok=True)
     _write_xlsx(sheet, d / "review_sheet.xlsx")
     key.to_csv(d / "key.csv", index=False)
+    write_app(sheet, d / "review_app.html", _sheet_id(d))
     meta = {**cfg, "reports": int(len(s)), "planted": len(planted), "auditor_flagged": int(key.auditor_flag.sum()),
             "topped_up": s.attrs["topped_up"], "auto_auditor": "annotation/auto_audit.py",
             "reference": "mri_training/reference.py via the locked cohort", "protocol": "MRI 8a (approve / reject + notes)"}
     (d / "review_meta.json").write_text(json.dumps(meta, indent=1, default=str))
     return meta
+
+
+def _sheet_id(d: Path) -> str:
+    """Ties a decisions file to the sheet it was made from (hash of key.csv)."""
+    return hashlib.sha256((d / "key.csv").read_bytes()).hexdigest()[:16]
+
+
+def write_app(sheet: pd.DataFrame, path: Path, sheet_id: str) -> None:
+    """review_app.html: a self-contained page (no network, no packages) for approve / reject review in a browser."""
+    labels = [SHOW[x] for x in list(LABELS) + [VALUE]]
+    rows = [{"review_id": r.review_id, "report": r.report, "evidence": [x for x in str(r.evidence).split("\n") if x.strip()],
+             "values": [[lab, str(r[lab])] for lab in labels], "check": r.auditor_check} for _, r in sheet.iterrows()]
+    data = {"title": "Phase 2 MRI reference review (MRI 8a)", "protocol": "MRI 8a", "sheet_id": sheet_id, "rows": rows}
+    blob = json.dumps(data).replace("</", "<\\/")                   # cannot close the <script> block
+    html = (Path(__file__).parent / "templates" / "review_app.html").read_text().replace("__DATA__", blob)
+    path.write_text(html, encoding="utf-8")
 
 
 def _write_xlsx(sheet: pd.DataFrame, path: Path) -> None:
@@ -221,16 +242,34 @@ def read_signoff(path: Path) -> Dict[str, str]:
     return dict(zip(["cardiologist", "date", "decision", "comments"], vals))
 
 
-def score(d: str, cfg: dict = DEFAULTS) -> Dict:
+def apply_decisions(sheet: pd.DataFrame, path: Path, sheet_id: str):
+    """Decisions saved by review_app.html -> the sheet's decision / note columns, and the sign-off."""
+    rec = json.loads(Path(path).expanduser().read_text())
+    if rec.get("sheet_id") != sheet_id:
+        raise SystemExit(f"{path} was saved from a different review sheet (sheet_id {rec.get('sheet_id')} != {sheet_id})")
+    dec = {x["review_id"]: x for x in rec["decisions"]}
+    sheet = sheet.copy()
+    sheet["decision"] = sheet.review_id.map(lambda r: dec.get(r, {}).get("decision", ""))
+    sheet["note"] = sheet.review_id.map(lambda r: dec.get(r, {}).get("note", ""))
+    s = rec.get("signoff") or {}
+    return sheet, {k: _txt(s.get(k)) for k in ("cardiologist", "date", "decision", "comments")}
+
+
+def score(d: str, cfg: dict = DEFAULTS, decisions: Optional[str] = None) -> Dict:
     d = Path(d).expanduser()
     sheet = pd.read_excel(d / "review_sheet.xlsx", sheet_name="review", dtype=object)
     key = pd.read_csv(d / "key.csv", dtype={"planted_label": str}).fillna({"planted_label": ""})
+    if decisions is None and (d / "review_decisions.json").exists():
+        decisions = str(d / "review_decisions.json")
+    if decisions:
+        sheet, sign = apply_decisions(sheet, Path(decisions), _sheet_id(d))
+    else:
+        sign = read_signoff(d / "review_sheet.xlsx")
     m = sheet.merge(key, on="review_id")
     m["decision"] = m.decision.map(lambda v: _txt(v).lower())
     m["note"] = m.note.map(_txt)
     problems = [f"{r.review_id}: decision empty" for _, r in m.iterrows() if r.decision not in ("approve", "reject")]
     problems += [f"{r.review_id}: rejected without a note" for _, r in m.iterrows() if r.decision == "reject" and not r.note]
-    sign = read_signoff(d / "review_sheet.xlsx")
     if not sign["cardiologist"] or not sign["date"] or sign["decision"].lower() not in ("approve", "reject"):
         problems.append("sign_off tab: name, date and decision (approve / reject) are needed")
     if problems:
@@ -257,7 +296,7 @@ def score(d: str, cfg: dict = DEFAULTS) -> Dict:
     res.to_csv(d / "review_results.csv", index=False)
     rej = gen[gen.decision == "reject"][["review_id", "note", "auditor_check"] + [SHOW[x] for x in list(LABELS) + [VALUE]]]
     rej.to_csv(d / "rejected_reports.csv", index=False)
-    record = {"protocol": "MRI 8a", "scored_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    record = {"protocol": "MRI 8a", "decisions_from": decisions or "review_sheet.xlsx", "scored_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
               "sign_off": sign, "passed": passed, "results": rows, "rejected_genuine": int(len(rej))}
     (d / "signoff.json").write_text(json.dumps(record, indent=1))
     return {"results": res, "rejected": rej, "passed": passed, "sign_off": sign}
@@ -274,6 +313,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     s.add_argument("--engine", choices=["bigquery", "spark"], default="bigquery")
     sc = sub.add_parser("score")
     sc.add_argument("--dir", required=True)
+    sc.add_argument("--decisions", default=None, help="review_decisions.json saved by review_app.html (e.g. ~/Downloads/...)")
     a = ap.parse_args(argv)
     if a.cmd == "sheet":
         from cardioai_mcp.config import load_study
@@ -282,9 +322,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         analytic = make_engine(a.engine, study).read_table(a.cohort)
         meta = build(analytic, a.out, {**DEFAULTS, "seed": a.seed})
         print(f"{meta['reports']} reports ({meta['planted']} planted, {meta['auditor_flagged']} flagged by the auditor; "
-              f"topped up {meta['topped_up'] or 'none'}): {Path(a.out).expanduser() / 'review_sheet.xlsx'}")
+              f"topped up {meta['topped_up'] or 'none'})")
+        print(f"  open in the workspace web browser: {Path(a.out).expanduser() / 'review_app.html'}")
+        print(f"  or the spreadsheet:                {Path(a.out).expanduser() / 'review_sheet.xlsx'}")
     else:
-        r = score(a.dir)
+        r = score(a.dir, decisions=a.decisions)
         print(r["results"].to_string(index=False))
         print("\nSIGNED AND PASSED: the Phase 2 MRI reference stands (signoff.json)" if r["passed"]
               else "\nNot passed: see review_results.csv and rejected_reports.csv")
