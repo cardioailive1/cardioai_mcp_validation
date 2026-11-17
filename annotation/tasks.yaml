@@ -60,6 +60,16 @@ label_audit:
     troponin_match_min: 1.0       # recomputed troponin flag must match exactly: any mismatch is a code bug
   second_auditor_fraction: 0.20
   cardiologist_spot_check_fraction: 0.10
+  # Audit 1 (proposed 2026-11-17): the cardiologist approves or rejects in a browser page (adjudication_<n>.html)
+  # instead of typing values. approve -> the proposed values are the reference; reject (+ note, values ticked as
+  # wrong) -> U for those labels: it counts against the automatic label and is masked from training. Planted errors
+  # on spot-check rows.
+  # mode: values = the blinded value sheet only (adjudication_<n>.xlsx, always written as the fallback).
+  adjudication:
+    mode: approve_reject
+    planted_fraction: 0.05
+    planted_min: 5
+    planted_caught_min: 0.80
   mri:
     id: study_id
     text: report_text

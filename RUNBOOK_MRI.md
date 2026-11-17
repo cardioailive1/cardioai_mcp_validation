@@ -56,13 +56,17 @@ Model training does not use BigQuery: the queries build the training list and pu
    ```
    Snapshot the analytic table as `cardioai_work.mri_analytic_locked`.
 
-   **Then review the reference on 100 reports** (MRI 8, approved 2026-11-16; this replaces the two blinded cardiologists of VALIDATION_RUNBOOK 7c for MRI). The automatic auditor proposes every label; the cardiologist approves or corrects in the workspace; 20 reports are blinded to measure anchoring:
+   **Then the cardiologist reviews the reference** (MRI 8a: approve or reject with notes, then sign off; replaces the two blinded cardiologists of VALIDATION_RUNBOOK 7c for MRI). 110 reports are shown with their reference values; the automatic auditor marks rows it reads differently (amber); 10 rows carry a planted error:
    ```bash
    python -m annotation.reference_review sheet --out ~/cardioai_exports/ref_review   # review_sheet.xlsx + key.csv
-   #   the cardiologist fills review_sheet.xlsx (decision approve / correct; blinded rows: every final_ column)
-   python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review   # review_results.csv
+   #   the cardiologist opens ~/cardioai_exports/ref_review/review_app.html in the workspace web browser (no Excel):
+   #   one report at a time, Approve / Reject (+ note), then Finish and sign -> saves review_decisions.json (~/Downloads)
+   #   (or fills review_sheet.xlsx: decision + note, then the sign_off tab)
+   #   workspace browser blocked? Review inside the VS Code notebook instead (saves review_decisions.json in the folder):
+   #     from annotation.notebook_review import review; review("~/cardioai_exports/ref_review/review_app.html")
+   python -m annotation.reference_review score --dir ~/cardioai_exports/ref_review --decisions ~/Downloads/review_decisions.json
    ```
-   Every label must PASS (kappa >= 0.80 against the reference, stated LVEF within 1 point in >= 98%). "RE-READ BLIND" means the blinded 20 agreed more than 0.10 kappa less than the rest: re-read all 100 with no proposals. On a FAIL, fix the rule in `mri_training/config.yaml`, rebuild the reference, re-lock and review a fresh sample (`--seed`).
+   PASS needs >= 95% of the 100 genuine reports approved, at least 8 of the 10 planted errors rejected, and the sign_off tab approved. Rejected reports are in `rejected_reports.csv` with the notes: fix the rule in `mri_training/config.yaml`, rebuild the reference, re-lock and review a fresh sample (`--seed`). Too few planted errors caught: review again.
 
 2. **Find the CMR studies and build the DICOM request.** First fill in `config/modality_tables.yaml` → `mri.mcp`:
    - the schema of the FACT tables;

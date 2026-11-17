@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CardioAI Report Review</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#5d6676; --line:#d9dde4; --ok:#1f7a3f; --okbg:#e5f4e4;
+          --bad:#a8261c; --badbg:#fbebeb; --warn:#8a5a00; --warnbg:#f9eeda; --hi:#fff3b0; --accent:#1f3864; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 Arial, Helvetica, sans-serif; }
+  header { background:var(--accent); color:#fff; padding:12px 20px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; font-weight:700; }
+  header .meta { opacity:.85; font-size:14px; }
+  .bar { flex:1; min-width:160px; height:10px; background:rgba(255,255,255,.25); border-radius:5px; overflow:hidden; }
+  .bar > div { height:100%; background:#8fd19e; width:0; }
+  main { max-width:1300px; margin:0 auto; padding:16px; display:grid; grid-template-columns: 1.6fr 1fr; gap:16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px 18px; }
+  .card h2 { font-size:15px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .report { white-space:pre-wrap; font-size:17px; line-height:1.6; max-height:70vh; overflow:auto; }
+  .report.mono { font-family: "Courier New", monospace; font-size:15px; }
+  mark { background:var(--hi); padding:0 2px; border-radius:2px; }
+  table { width:100%; border-collapse:collapse; font-size:16px; }
+  td { padding:8px 6px; border-bottom:1px solid var(--line); }
+  td.v { font-weight:700; text-align:right; }
+  .v.present { color:var(--bad); } .v.absent { color:var(--ok); } .v.unknown { color:var(--muted); }
+  .check { margin-top:12px; padding:10px 12px; border-radius:6px; font-size:15px; }
+  .check.ok { background:var(--okbg); color:var(--ok); } .check.warn { background:var(--warnbg); color:var(--warn); font-weight:700; }
+  .actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  button { font:inherit; font-size:17px; padding:12px 20px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.approve { background:var(--ok); color:#fff; border-color:var(--ok); flex:1; }
+  button.reject { background:var(--bad); color:#fff; border-color:var(--bad); flex:1; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  textarea, input, select { font:inherit; width:100%; padding:10px; border:1px solid var(--line); border-radius:6px; }
+  textarea { min-height:80px; }
+  .status { margin-top:10px; font-weight:700; }
+  .status.approve { color:var(--ok); } .status.reject { color:var(--bad); }
+  .nav { display:flex; gap:8px; margin-top:12px; align-items:center; }
+  .nav span { color:var(--muted); font-size:14px; flex:1; text-align:center; }
+  .hidden { display:none !important; }
+  .full { grid-column: 1 / -1; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(54px,1fr)); gap:6px; margin-top:10px; }
+  .grid button { padding:6px 0; font-size:13px; }
+  .grid .approve-d { background:var(--okbg); } .grid .reject-d { background:var(--badbg); } .grid .cur { outline:3px solid var(--accent); }
+  label { display:block; margin:12px 0 4px; font-weight:700; }
+  .help { color:var(--muted); font-size:14px; }
+  .err { color:var(--bad); font-weight:700; margin-top:8px; }
+  #wrongList label { display:flex; gap:8px; align-items:center; font-weight:400; margin:4px 0; }
+  #wrongList input { width:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Report review</h1>
+  <div class="meta" id="progressText"></div>
+  <div class="bar"><div id="progress"></div></div>
+  <button class="primary" id="toSign">Finish and sign</button>
+</header>
+
+<main id="review">
+  <section class="card">
+    <h2 id="rid">Report</h2>
+    <div class="report" id="report"></div>
+  </section>
+  <section class="card">
+    <h2>Values to check</h2>
+    <table id="values"></table>
+    <div class="check" id="check"></div>
+    <div class="actions">
+      <button class="approve" id="approve">Approve (A)</button>
+      <button class="reject" id="reject">Reject (R)</button>
+    </div>
+    <div id="noteBox" class="hidden">
+      <label>Which values are wrong?</label>
+      <div id="wrongList"></div>
+      <label for="note">What is wrong? (required to reject)</label>
+      <textarea id="note" placeholder="Say which value is wrong and why"></textarea>
+      <button class="reject" id="saveReject" style="margin-top:8px;width:100%">Save rejection</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="nav">
+      <button id="prev">&larr; Previous</button><span id="pos"></span><button id="next">Next &rarr;</button>
+    </div>
+    <p class="help" id="helpText"></p>
+  </section>
+  <section class="card full">
+    <h2>All reports</h2>
+    <div class="grid" id="grid"></div>
+  </section>
+</main>
+
+<main id="sign" class="hidden">
+  <section class="card full">
+    <h2>Sign-off</h2>
+    <p id="signSummary"></p>
+    <label for="sName">Cardiologist (name)</label><input id="sName">
+    <label for="sDate">Date</label><input id="sDate" type="date">
+    <label for="sDec">Decision</label>
+    <select id="sDec"><option value="">Choose…</option><option value="approve">Approve: the reviewed values stand</option>
+      <option value="reject">Reject (say why below)</option></select>
+    <label for="sCom">Comments</label><textarea id="sCom"></textarea>
+    <div class="err" id="signErr"></div>
+    <div class="actions">
+      <button id="back">&larr; Back to the reports</button>
+      <button class="primary" id="save">Sign and save the decisions file</button>
+    </div>
+    <p class="help" id="saveHelp">Saving downloads <b>review_decisions.json</b>. Tell the data scientist where it was
+      saved (usually the Downloads folder); they run the score step on it. Nothing leaves the workspace.</p>
+  </section>
+</main>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  "use strict";
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var rows = D.rows, key = "cardioai-review-" + D.sheet_id;
+  var state = { decisions: {}, i: 0 };
+  try { var saved = JSON.parse(localStorage.getItem(key) || "null"); if (saved && saved.decisions) state = saved; } catch (e) {}
+  function persist() { try { localStorage.setItem(key, JSON.stringify(state)); } catch (e) {} }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+
+  $("title").textContent = D.title;
+  $("helpText").textContent = D.help || "Approve when every value matches the report. Reject when any value is wrong, and say what. " +
+    "Some reports contain a planted error even when the second reading agrees: reject those like any other error. " +
+    "Your answers are kept in this browser as you go.";
+  if (D.mono) $("report").classList.add("mono");
+  function done() { return Object.keys(state.decisions).length; }
+
+  function highlight(text, evidence) {
+    var out = esc(text);
+    (evidence || []).forEach(function (s) {
+      s = esc(s.trim()); if (s.length < 4) return;
+      var at = out.indexOf(s); if (at >= 0) out = out.slice(0, at) + "<mark>" + s + "</mark>" + out.slice(at + s.length);
+    });
+    return out;
+  }
+
+  function render() {
+    var r = rows[state.i], d = state.decisions[r.review_id];
+    $("rid").textContent = "Report " + r.review_id + "  (" + (state.i + 1) + " of " + rows.length + ")";
+    $("report").innerHTML = highlight(r.report, r.evidence);
+    $("values").innerHTML = r.values.map(function (v) {
+      return "<tr><td>" + esc(v[0]) + "</td><td class='v " + esc(v[1].split(" ")[0]) + "'>" + esc(v[1]) + "</td></tr>";
+    }).join("");
+    var warn = (r.check || "").indexOf("CHECK") === 0;
+    $("check").className = "check " + (warn ? "warn" : "ok") + (r.check ? "" : " hidden");
+    $("check").textContent = warn ? (r.check_label || "A second, independent reading differs: ") + r.check.replace(/^CHECK - [^:]*: /, "") :
+      (r.check_ok || "Second reading agrees");
+    $("noteBox").classList.add("hidden");
+    $("note").value = d && d.decision === "reject" ? d.note : "";
+    var wrong = (d && d.wrong) || [];
+    $("wrongList").innerHTML = r.values.map(function (v, j) {
+      return "<label><input type='checkbox' data-name='" + esc(v[0]) + "'" + (wrong.indexOf(v[0]) >= 0 ? " checked" : "") +
+             "> " + esc(v[0]) + " (shown: " + esc(v[1]) + ")</label>";
+    }).join("");
+    $("status").className = "status " + (d ? d.decision : "");
+    $("status").textContent = d ? (d.decision === "approve" ? "Approved" : "Rejected: " + d.note) : "";
+    $("pos").textContent = done() + " of " + rows.length + " reviewed";
+    $("prev").disabled = state.i === 0; $("next").disabled = state.i === rows.length - 1;
+    $("progress").style.width = (100 * done() / rows.length) + "%";
+    $("progressText").textContent = done() + " / " + rows.length + " reviewed";
+    $("grid").innerHTML = rows.map(function (x, j) {
+      var dd = state.decisions[x.review_id];
+      return "<button data-j='" + j + "' class='" + (dd ? dd.decision + "-d" : "") + (j === state.i ? " cur" : "") + "'>" + esc(x.review_id) + "</button>";
+    }).join("");
+    persist();
+  }
+
+  function decide(dec, note, wrong) {
+    state.decisions[rows[state.i].review_id] = { decision: dec, note: note || "", wrong: wrong || [], at: new Date().toISOString() };
+    var j = state.i + 1;                                   // next report not yet reviewed
+    while (j < rows.length && state.decisions[rows[j].review_id]) j++;
+    if (j < rows.length) state.i = j;
+    render();
+  }
+
+  $("approve").onclick = function () { decide("approve"); };
+  $("reject").onclick = function () { $("noteBox").classList.remove("hidden"); $("note").focus(); };
+  $("saveReject").onclick = function () {
+    var n = $("note").value.trim(); if (!n) { $("note").focus(); return; }
+    var w = Array.prototype.slice.call(document.querySelectorAll("#wrongList input:checked")).map(function (x) { return x.getAttribute("data-name"); });
+    decide("reject", n, w);
+  };
+  $("prev").onclick = function () { if (state.i > 0) { state.i--; render(); } };
+  $("next").onclick = function () { if (state.i < rows.length - 1) { state.i++; render(); } };
+  $("grid").onclick = function (e) { var j = e.target.getAttribute("data-j"); if (j !== null) { state.i = +j; render(); } };
+  document.addEventListener("keydown", function (e) {
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT" || !$("sign").classList.contains("hidden")) return;
+    if (e.key === "a" || e.key === "A") $("approve").click();
+    if (e.key === "r" || e.key === "R") $("reject").click();
+    if (e.key === "ArrowRight") $("next").click();
+    if (e.key === "ArrowLeft") $("prev").click();
+  });
+
+  $("toSign").onclick = function () {
+    var a = 0, rj = 0; Object.keys(state.decisions).forEach(function (k) { state.decisions[k].decision === "approve" ? a++ : rj++; });
+    $("signSummary").textContent = done() + " of " + rows.length + " reports reviewed: " + a + " approved, " + rj + " rejected." +
+      (done() < rows.length ? " Every report needs a decision before you can sign." : "");
+    var s = state.signoff || {}; $("sName").value = s.cardiologist || ""; $("sDate").value = s.date || new Date().toISOString().slice(0, 10);
+    $("sDec").value = s.decision || ""; $("sCom").value = s.comments || ""; $("signErr").textContent = "";
+    $("review").classList.add("hidden"); $("sign").classList.remove("hidden");
+  };
+  $("back").onclick = function () { $("sign").classList.add("hidden"); $("review").classList.remove("hidden"); render(); };
+  $("save").onclick = function () {
+    var s = { cardiologist: $("sName").value.trim(), date: $("sDate").value, decision: $("sDec").value, comments: $("sCom").value.trim() };
+    state.signoff = s; persist();
+    if (done() < rows.length) { $("signErr").textContent = "Some reports have no decision yet: go back and finish them."; return; }
+    if (!s.cardiologist || !s.date || !s.decision) { $("signErr").textContent = "Name, date and decision are needed."; return; }
+    if (s.decision === "reject" && !s.comments) { $("signErr").textContent = "Say why in the comments."; return; }
+    var out = { sheet_id: D.sheet_id, protocol: D.protocol, saved_utc: new Date().toISOString(), signoff: s,
+                decisions: rows.map(function (r) { var d = state.decisions[r.review_id]; return { review_id: r.review_id, decision: d.decision, note: d.note, wrong: d.wrong || [] }; }) };
+    var blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "review_decisions.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    $("signErr").style.color = "var(--ok)"; $("signErr").textContent = "Saved review_decisions.json. Thank you.";
+  };
+  render();
+})();
+</script>
+</body>
+</html>
