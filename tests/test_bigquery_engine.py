@@ -131,6 +131,7 @@ def test_training_and_mcp_queries_translate():
     import echo_wm_training.dataset as wd
     import mri_training.dataset as md
     from annotation.label_audit import troponin_concepts_sql, troponin_rows_sql
+    from annotation.ecg_mi_review import conditions_sql
     from cardioai_mcp.config import load_study
     from ecg_training import mcp_waveforms as mw
     from ecg_training.extract_waveforms import waveform_batch_sql
@@ -142,7 +143,7 @@ def test_training_and_mcp_queries_translate():
     sqls = [ed.evidence_sql(eng, st, ed.load_config(), mod), md.evidence_sql(eng, md.load_config(), mod),
             wd.evidence_sql(eng, mod), mw.ecg_index_sql(mod), mw.waveform_rows_sql(mod, ["C1"]), waveform_batch_sql(mod, ["1"]),
             me.echo_studies_sql(mod), me.lvef_rows_sql(mod), mi.cmr_studies_sql(mod), mi.series_sql(mod, ["1.2"]),
-            troponin_rows_sql(mod, ["1"]), troponin_concepts_sql()]
+            troponin_rows_sql(mod, ["1"]), troponin_concepts_sql(), conditions_sql(mod, ["1"])]
     for s in sqls:
         import re
         out = re.sub(r"/\*.*?\*/", "", eng.transpile(s), flags=re.S)        # comments may mention {{macros}}

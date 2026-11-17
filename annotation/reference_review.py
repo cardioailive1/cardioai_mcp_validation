@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -42,6 +41,7 @@ import pandas as pd
 
 from .auto_audit import AutoAuditor
 from .label_audit import NM, U
+from .review_page import file_id, read_decisions, write_page
 
 # sheet label -> reference column in the MRI analytic table
 LABELS: Dict[str, str] = {"infarct": "ref_infarct", "nonischemic_lge": "ref_nonischemic_lge", "report_mvo": "ref_mvo",
@@ -161,18 +161,15 @@ def build(analytic: pd.DataFrame, out: str, cfg: dict = DEFAULTS, auditor: Optio
 
 def _sheet_id(d: Path) -> str:
     """Ties a decisions file to the sheet it was made from (hash of key.csv)."""
-    return hashlib.sha256((d / "key.csv").read_bytes()).hexdigest()[:16]
+    return file_id(d / "key.csv")
 
 
 def write_app(sheet: pd.DataFrame, path: Path, sheet_id: str) -> None:
-    """review_app.html: a self-contained page (no network, no packages) for approve / reject review in a browser."""
+    """review_app.html: approve / reject in a web browser (annotation/review_page.py)."""
     labels = [SHOW[x] for x in list(LABELS) + [VALUE]]
     rows = [{"review_id": r.review_id, "report": r.report, "evidence": [x for x in str(r.evidence).split("\n") if x.strip()],
              "values": [[lab, str(r[lab])] for lab in labels], "check": r.auditor_check} for _, r in sheet.iterrows()]
-    data = {"title": "Phase 2 MRI reference review (MRI 8a)", "protocol": "MRI 8a", "sheet_id": sheet_id, "rows": rows}
-    blob = json.dumps(data).replace("</", "<\\/")                   # cannot close the <script> block
-    html = (Path(__file__).parent / "templates" / "review_app.html").read_text().replace("__DATA__", blob)
-    path.write_text(html, encoding="utf-8")
+    write_page(path, "Phase 2 MRI reference review (MRI 8a)", "MRI 8a", sheet_id, rows)
 
 
 def _write_xlsx(sheet: pd.DataFrame, path: Path) -> None:
@@ -244,15 +241,12 @@ def read_signoff(path: Path) -> Dict[str, str]:
 
 def apply_decisions(sheet: pd.DataFrame, path: Path, sheet_id: str):
     """Decisions saved by review_app.html -> the sheet's decision / note columns, and the sign-off."""
-    rec = json.loads(Path(path).expanduser().read_text())
-    if rec.get("sheet_id") != sheet_id:
-        raise SystemExit(f"{path} was saved from a different review sheet (sheet_id {rec.get('sheet_id')} != {sheet_id})")
-    dec = {x["review_id"]: x for x in rec["decisions"]}
+    rec = read_decisions(path, sheet_id)
+    dec = rec["decisions"]
     sheet = sheet.copy()
     sheet["decision"] = sheet.review_id.map(lambda r: dec.get(r, {}).get("decision", ""))
     sheet["note"] = sheet.review_id.map(lambda r: dec.get(r, {}).get("note", ""))
-    s = rec.get("signoff") or {}
-    return sheet, {k: _txt(s.get(k)) for k in ("cardiologist", "date", "decision", "comments")}
+    return sheet, rec["signoff"]
 
 
 def score(d: str, cfg: dict = DEFAULTS, decisions: Optional[str] = None) -> Dict:

@@ -19,6 +19,7 @@
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px 18px; }
   .card h2 { font-size:15px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
   .report { white-space:pre-wrap; font-size:17px; line-height:1.6; max-height:70vh; overflow:auto; }
+  .report.mono { font-family: "Courier New", monospace; font-size:15px; }
   mark { background:var(--hi); padding:0 2px; border-radius:2px; }
   table { width:100%; border-collapse:collapse; font-size:16px; }
   td { padding:8px 6px; border-bottom:1px solid var(--line); }
@@ -46,6 +47,8 @@
   label { display:block; margin:12px 0 4px; font-weight:700; }
   .help { color:var(--muted); font-size:14px; }
   .err { color:var(--bad); font-weight:700; margin-top:8px; }
+  #wrongList label { display:flex; gap:8px; align-items:center; font-weight:400; margin:4px 0; }
+  #wrongList input { width:auto; }
 </style>
 </head>
 <body>
@@ -70,17 +73,17 @@
       <button class="reject" id="reject">Reject (R)</button>
     </div>
     <div id="noteBox" class="hidden">
+      <label>Which values are wrong?</label>
+      <div id="wrongList"></div>
       <label for="note">What is wrong? (required to reject)</label>
-      <textarea id="note" placeholder="e.g. MVO present, not absent"></textarea>
+      <textarea id="note" placeholder="Say which value is wrong and why"></textarea>
       <button class="reject" id="saveReject" style="margin-top:8px;width:100%">Save rejection</button>
     </div>
     <div class="status" id="status"></div>
     <div class="nav">
       <button id="prev">&larr; Previous</button><span id="pos"></span><button id="next">Next &rarr;</button>
     </div>
-    <p class="help">Approve when every value matches the report. Reject when any value is wrong, and say what. Some
-      reports contain a planted error even when the second reading agrees: reject those like any other error. Your
-      answers are kept in this browser as you go.</p>
+    <p class="help" id="helpText"></p>
   </section>
   <section class="card full">
     <h2>All reports</h2>
@@ -121,6 +124,10 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
 
   $("title").textContent = D.title;
+  $("helpText").textContent = D.help || "Approve when every value matches the report. Reject when any value is wrong, and say what. " +
+    "Some reports contain a planted error even when the second reading agrees: reject those like any other error. " +
+    "Your answers are kept in this browser as you go.";
+  if (D.mono) $("report").classList.add("mono");
   function done() { return Object.keys(state.decisions).length; }
 
   function highlight(text, evidence) {
@@ -139,12 +146,17 @@
     $("values").innerHTML = r.values.map(function (v) {
       return "<tr><td>" + esc(v[0]) + "</td><td class='v " + esc(v[1].split(" ")[0]) + "'>" + esc(v[1]) + "</td></tr>";
     }).join("");
-    var warn = r.check.indexOf("CHECK") === 0;
-    $("check").className = "check " + (warn ? "warn" : "ok");
-    $("check").textContent = warn ? "A second, independent reading differs: " + r.check.replace(/^CHECK - auditor reads: /, "") :
-      "Second reading agrees";
+    var warn = (r.check || "").indexOf("CHECK") === 0;
+    $("check").className = "check " + (warn ? "warn" : "ok") + (r.check ? "" : " hidden");
+    $("check").textContent = warn ? (r.check_label || "A second, independent reading differs: ") + r.check.replace(/^CHECK - [^:]*: /, "") :
+      (r.check_ok || "Second reading agrees");
     $("noteBox").classList.add("hidden");
     $("note").value = d && d.decision === "reject" ? d.note : "";
+    var wrong = (d && d.wrong) || [];
+    $("wrongList").innerHTML = r.values.map(function (v, j) {
+      return "<label><input type='checkbox' data-name='" + esc(v[0]) + "'" + (wrong.indexOf(v[0]) >= 0 ? " checked" : "") +
+             "> " + esc(v[0]) + " (shown: " + esc(v[1]) + ")</label>";
+    }).join("");
     $("status").className = "status " + (d ? d.decision : "");
     $("status").textContent = d ? (d.decision === "approve" ? "Approved" : "Rejected: " + d.note) : "";
     $("pos").textContent = done() + " of " + rows.length + " reviewed";
@@ -158,8 +170,8 @@
     persist();
   }
 
-  function decide(dec, note) {
-    state.decisions[rows[state.i].review_id] = { decision: dec, note: note || "", at: new Date().toISOString() };
+  function decide(dec, note, wrong) {
+    state.decisions[rows[state.i].review_id] = { decision: dec, note: note || "", wrong: wrong || [], at: new Date().toISOString() };
     var j = state.i + 1;                                   // next report not yet reviewed
     while (j < rows.length && state.decisions[rows[j].review_id]) j++;
     if (j < rows.length) state.i = j;
@@ -169,7 +181,9 @@
   $("approve").onclick = function () { decide("approve"); };
   $("reject").onclick = function () { $("noteBox").classList.remove("hidden"); $("note").focus(); };
   $("saveReject").onclick = function () {
-    var n = $("note").value.trim(); if (!n) { $("note").focus(); return; } decide("reject", n);
+    var n = $("note").value.trim(); if (!n) { $("note").focus(); return; }
+    var w = Array.prototype.slice.call(document.querySelectorAll("#wrongList input:checked")).map(function (x) { return x.getAttribute("data-name"); });
+    decide("reject", n, w);
   };
   $("prev").onclick = function () { if (state.i > 0) { state.i--; render(); } };
   $("next").onclick = function () { if (state.i < rows.length - 1) { state.i++; render(); } };
@@ -198,7 +212,7 @@
     if (!s.cardiologist || !s.date || !s.decision) { $("signErr").textContent = "Name, date and decision are needed."; return; }
     if (s.decision === "reject" && !s.comments) { $("signErr").textContent = "Say why in the comments."; return; }
     var out = { sheet_id: D.sheet_id, protocol: D.protocol, saved_utc: new Date().toISOString(), signoff: s,
-                decisions: rows.map(function (r) { var d = state.decisions[r.review_id]; return { review_id: r.review_id, decision: d.decision, note: d.note }; }) };
+                decisions: rows.map(function (r) { var d = state.decisions[r.review_id]; return { review_id: r.review_id, decision: d.decision, note: d.note, wrong: d.wrong || [] }; }) };
     var blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "review_decisions.json";
     document.body.appendChild(a); a.click(); a.remove();
