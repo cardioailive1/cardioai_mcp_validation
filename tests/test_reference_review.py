@@ -144,3 +144,14 @@ def test_browser_page_and_its_decisions_file(tmp_path):
     p.write_text(json.dumps({**out, "sheet_id": "other"}))
     with pytest.raises(SystemExit, match="different review sheet"):
         R.score(str(tmp_path), decisions=str(p))
+
+
+def test_bigquery_nullable_columns(tmp_path):
+    """read_table from BigQuery gives Int64 / Float64 columns with pd.NA for missing values."""
+    c = _cohort()
+    for ref in list(REF.values()) + ["lvef_report"]:
+        c[ref] = c[ref].astype("Float64")
+    c["ref_infarct"] = c.ref_infarct.round().astype("Int64")
+    a = R.draw(c)
+    assert len(a) >= 110 and a.ref_infarct.dtype == float
+    assert R.build(c, str(tmp_path))["planted"] == 10

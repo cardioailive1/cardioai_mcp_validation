@@ -80,3 +80,11 @@ def test_sql_runs_on_omop_and_the_review_scores(tmp_path):
     (tmp_path / "review_decisions.json").write_text(json.dumps(out))
     res = E.score(str(tmp_path))["results"].set_index("check")
     assert res.loc["planted errors rejected", "result"].startswith("REVIEW AGAIN")
+
+
+def test_nullable_manifest_columns():
+    m = _manifest()
+    m["acute_mi"] = m.acute_mi.astype("Float64")
+    m["stemi"] = m.stemi.astype("Float64")
+    s = E.draw(m)
+    assert s.group.value_counts().to_dict() == {**E.GROUPS, "planted": 10}

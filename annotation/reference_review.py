@@ -78,6 +78,9 @@ def draw(analytic: pd.DataFrame, cfg: dict = DEFAULTS) -> pd.DataFrame:
     """n genuine + n_planted reports with a report text, topped up to min_positives per label. Seeded."""
     rng = np.random.default_rng(int(cfg["seed"]))
     pool = analytic[analytic[TEXT].notna() & (analytic[TEXT].astype(str).str.strip().str.len() > 0)].copy()
+    # BigQuery returns nullable Int64 / Float64 columns (missing = pd.NA, which cannot be compared): plain floats
+    for c in list(LABELS.values()) + [VALUE_REF]:
+        pool[c] = pd.to_numeric(pool[c], errors="coerce").astype(float)
     pool = pool.sort_values("person_id").reset_index(drop=True)
     n = min(int(cfg["n"]) + int(cfg["n_planted"]), len(pool))
     pick = list(rng.choice(len(pool), n, replace=False))
