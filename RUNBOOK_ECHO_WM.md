@@ -39,11 +39,34 @@ Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md
 1. **Lock the Phase 2 echo cohort first.** The wall-motion endpoints are evaluated on it, so its patients must never train the model.
    First build the expert-LVEF table (the cohort's reference standard) from `FACT_ECHO_RESULTS`, and point the cohort at it:
    ```python
+   from datetime import date, timedelta
+   from cardioai_mcp.config import load_study
+   from cardioai_mcp.engine import make_engine
    from echo_wm_training import mcp_echo as me
-   lvef = me.build_lvef_table(eng, study["modality"])        # one LVEF per patient and echo date, with its method
+
+   study = load_study()
+   eng = make_engine("bigquery", study)
+   # The echo cohort accepts an LVEF measurement on the index day or the following day.
+   # Restrict the source SQL before transferring rows into pandas.
+   start = str(study["index_start"])
+   end = (date.fromisoformat(str(study["index_end"])) + timedelta(days=1)).isoformat()
+   lvef = me.build_lvef_table(eng, study["modality"], start=start, end=end)
+   print(f"LVEF patient-days: {len(lvef):,}")
+   print(lvef["lvef"].describe())
+   print(lvef["lvef_method"].value_counts())
+   # After reviewing these checks, persist the source for the Phase 2 echo cohort.
    eng.write_table(lvef, "echo_lvef")
-   # config/cohorts/echo.yaml -> macros.lvef_rows: switch to the {{work}}.echo_lvef form
    ```
+   The extraction uses `FACT_ECHO_TEST.ECHO_PERFORMED_DTM`, confirmed in the MCP
+   workspace. If the schema changes, verify the date column in
+   `config/modality_tables.yaml` before running. The date range is inclusive;
+   omitting both date arguments retains the historical unbounded extraction for
+   other consumers, but is not recommended for this cohort.
+
+   In `config/cohorts/echo.yaml`, replace the active `macros.lvef_rows` with
+   the `{{work}}.echo_lvef` form already shown as a commented example. Do this
+   **before** running `run_cohorts.py`; otherwise it continues to read OMOP
+   `measurement` instead of the MCP echo result reference.
    Then:
    ```bash
    python scripts/run_cohorts.py --cohorts echo --save-tables
