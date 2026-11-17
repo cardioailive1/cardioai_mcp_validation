@@ -24,13 +24,12 @@ calendar: {}
 # Expert LVEF (the reference standard). MCP (Adam Resnick, 2026-10-28): echo LVEF is in FACT_ECHO_RESULTS
 # (ECHO_RESULT_VALUE, type named in DIM_ECHO_TEST_RESULT_TYPE). The MCP OMOP ETL loads no echo tables, so OMOP
 # measurement is expected to hold little or no echo LVEF. Before building this cohort on Mayo data, build
-# {work}.echo_lvef (echo_wm_training.mcp_echo.build_lvef_table) and switch lvef_rows to the second form.
+# {work}.echo_lvef (echo_wm_training.mcp_echo.build_lvef_table).
 macros:
   lvef_rows: >-
-    (SELECT m.person_id, CAST(m.measurement_date AS DATE) AS lvef_date, m.value_as_number AS lvef
-     FROM {{cdm}}.measurement m
-     WHERE m.measurement_concept_id IN {{cs:lvef}} OR m.measurement_source_concept_id IN {{cs:lvef}})
-  # lvef_rows: "(SELECT person_id, CAST(lvef_date AS DATE) AS lvef_date, lvef FROM {{work}}.echo_lvef WHERE person_id IS NOT NULL)"
+    (SELECT person_id, CAST(lvef_date AS DATE) AS lvef_date, lvef
+     FROM {{work}}.echo_lvef
+     WHERE person_id IS NOT NULL)
 
 index:
   description: "adult TTE in study window with a same-day expert LVEF on the echo report"
