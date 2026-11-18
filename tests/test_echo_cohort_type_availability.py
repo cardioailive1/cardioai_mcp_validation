@@ -74,8 +74,11 @@ def test_counts_are_patient_days_not_duplicate_acc_ord_records():
     assert int(adult.patient_days) == 4
     assert int(adult.with_mapped_lvedv) == 3
     assert int(adult.source_test_records) == 5
-    # Type categories intentionally overlap across a patient-day.
-    assert int(types.patient_days.sum()) == 5
+    # The fifth patient-day has a separate exam type with an outcome cell
+    # below the disclosure threshold and is therefore omitted from the
+    # public type summary. The private detail still contains all five.
+    assert int(types.patient_days.sum()) == 4
+    assert len(detail) == 5
 
 
 def test_suppress_small_type_breakdown():
