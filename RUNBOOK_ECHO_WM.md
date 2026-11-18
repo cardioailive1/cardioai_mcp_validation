@@ -254,6 +254,46 @@ cohort are untouched. The 302 provisional within-group disagreements remain
 reviewable rather than being accepted or permanently discarded; neither the
 10-point review threshold nor Modified Quinones priority has clinical sign-off.
 
+### Separate within-method and between-method EF disagreement (read-only)
+
+For all plausible LVEF values within each eligible exam identifier group,
+the new diagnostic records:
+
+- `lvef_within_method_spread_pp`: the largest max-minus-min value
+  **inside one classified method** (e.g., two visual estimates).
+- `lvef_between_method_spread_pp`: the difference between the largest
+  and smallest **per-method medians**, when more than one method exists.
+- `lvef_disagreement_category`: `none`, `within_method`,
+  `between_method`, `both`, or `mixed_spread`. Matched ACC/ORD
+  pairs can additionally be `multiple_categories`.
+
+This is a diagnostic categorization, NOT a revised clinical policy. The
+existing >10-percentage-point **total EF spread** remains the exclusion
+trigger; `unresolved_method_disagreement` stays unchanged until clinical
+review. There is no change to method priority, patient eligibility, or any
+saved BigQuery table.
+
+```bash
+python -m pytest tests/test_echo_exam_comparison.py tests/test_echo_unified_reference.py -q
+```
+
+After restarting IPython and running the prior
+`build_unified_echo_diagnostics` call, use the **aggregate-only** summary:
+
+```python
+print(candidate_exams.loc[
+    candidate_exams["lvef_method_disagreement"],
+    "lvef_disagreement_category",
+].value_counts(dropna=False).to_string())
+print(candidate_exams.groupby(
+    ["record_source", "lvef_disagreement_category"]
+).size().to_string())
+```
+
+Detailed candidate rows contain sensitive identifiers and must stay inside MCP.
+The source test labels and method-priority mappings remain subject to clinical
+review.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written

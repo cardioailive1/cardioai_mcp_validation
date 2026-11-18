@@ -184,3 +184,60 @@ def test_strain_only_has_no_eligible_conventional_tte():
                           "result_label": "LV_EF_2D_by_vis_est",
                           "result_value": "13", "metric": "lvef"}])
     assert unified_exam_candidates(pd.DataFrame([strain]), rows, cfg).empty
+
+
+def test_disagreement_categories_split_within_and_between_methods():
+    from echo_wm_training.exam_comparison import _measurement_groups
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    def measurements(pid, values):
+        base = dict(person_id=pid, index_date="2020-01-02",
+                    echo_test_fpk=str(pid), exam_datetime="2020-01-02 10:00:00",
+                    accession_number=str(pid), order_proc_id=None)
+        return base, [{**base, "result_label": method,
+                       "result_name": method, "result_value": str(value),
+                       "metric": "lvef"} for method, value in values]
+    data = []
+    tests = []
+    samples = [
+        (1, [("LVEF visual", 40), ("LVEF visual", 60)], "within_method"),
+        (2, [("LVEF visual", 40), ("LVEF biplane", 60)], "between_method"),
+        (3, [("LVEF visual", 20), ("LVEF visual", 40),
+             ("LVEF biplane", 60)], "both"),
+        (4, [("LVEF visual", 50), ("LVEF biplane", 55)], "none"),
+    ]
+    for pid, values, _ in samples:
+        base, rows = measurements(pid, values)
+        tests.append(base)
+        data.extend(rows)
+    groups = _measurement_groups(pd.DataFrame(data), cfg)
+    candidates = unified_exam_candidates(pd.DataFrame(tests), pd.DataFrame(data), cfg)
+    for pid, _, expected in samples:
+        actual = groups.loc[groups.person_id == pid, "lvef_disagreement_category"].iloc[0]
+        assert actual == expected
+        candidate = candidates.loc[candidates.person_id == pid].iloc[0]
+        assert candidate.lvef_disagreement_category == expected
+        if expected == "none":
+            assert candidate.candidate_status == "single_exam_candidate"
+            assert pd.notna(candidate.lvef)
+        else:
+            assert candidate.candidate_status == "unresolved_method_disagreement"
+            assert pd.isna(candidate.lvef)
+
+
+def test_same_method_spread_not_inflated_by_different_method_labels():
+    from echo_wm_training.exam_comparison import _measurement_groups
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    rows = pd.DataFrame([
+        dict(person_id=1, index_date="2020-01-02", echo_test_fpk="1",
+             accession_number="A", order_proc_id=None,
+             metric="lvef", result_label=label, result_value=value)
+        for label, value in [
+            ("LV_EF_2D_by_mod_Quin", "59"),
+            ("LV_EF_2D_by_mod_Quin_Acf", "63"),
+            ("LVEF visual", "13"),
+        ]
+    ])
+    g = _measurement_groups(rows, cfg).iloc[0]
+    assert g.lvef_within_method_spread_pp == 4
+    assert g.lvef_between_method_spread_pp == 48
+    assert g.lvef_disagreement_category == "between_method"

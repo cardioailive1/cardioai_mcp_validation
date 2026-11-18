@@ -36,6 +36,8 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
     cols = ["person_id", "index_date", "group_key", "partner_key", "group_status",
             "record_source", "lvef", "lvedv", "lvef_source", "lvedv_source",
             "lvef_conflict", "lvedv_conflict", "lvef_method_disagreement",
+            "lvef_disagreement_category", "lvef_within_method_spread_pp",
+            "lvef_between_method_spread_pp",
             "candidate_exams", "candidate_status"]
     if tte_rows.empty:
         return pd.DataFrame(columns=cols)
@@ -86,6 +88,28 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
             bool(x.lvef_method_disagreement)
             for x in (own, other) if x is not None
         )
+        categories = {
+            x.lvef_disagreement_category
+            for x in (own, other) if x is not None
+            and x.lvef_disagreement_category != "none"
+        }
+        # Pair-level categories can combine different kinds of conflict from
+        # the accession and order sides; keep this diagnostic separate from status.
+        ef_category = ("none" if not categories else
+                       next(iter(categories)) if len(categories) == 1 else
+                       "multiple_categories")
+        within_spread = max(
+            (x.lvef_within_method_spread_pp
+             for x in (own, other) if x is not None
+             and pd.notna(x.lvef_within_method_spread_pp)),
+            default=None
+        )
+        between_spread = max(
+            (x.lvef_between_method_spread_pp
+             for x in (own, other) if x is not None
+             and pd.notna(x.lvef_between_method_spread_pp)),
+            default=None
+        )
         # A discrepant method set cannot be silently promoted to a reference.
         if ef_method_disagreement:
             ef = None
@@ -98,6 +122,9 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
             lvedv_source=edv_source, lvef_conflict=ef_conflict,
             lvedv_conflict=edv_conflict,
             lvef_method_disagreement=ef_method_disagreement,
+            lvef_disagreement_category=ef_category,
+            lvef_within_method_spread_pp=within_spread,
+            lvef_between_method_spread_pp=between_spread,
         ))
     result = pd.DataFrame(entries)
     result["candidate_exams"] = result.groupby(
@@ -182,6 +209,8 @@ def build_unified_echo_diagnostics(engine, modality_cfg: dict, *, start: str, en
     if not candidates.empty:
         log(f"Exam candidate statuses: {candidates.candidate_status.value_counts().to_dict()}")
         log(f"Candidate measurement sources: {candidates.record_source.value_counts().to_dict()}")
+        log(f"EF disagreement categories: "
+            f"{candidates.loc[candidates.lvef_method_disagreement, 'lvef_disagreement_category'].value_counts().to_dict()}")
         log(f"Candidate LVEF: {int(candidates.lvef.notna().sum())}; "
             f"LVEDV: {int(candidates.lvedv.notna().sum())}")
     log("Read-only comparison to saved echo_lvef; provisional matching is NOT clinical validation")

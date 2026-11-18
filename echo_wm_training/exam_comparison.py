@@ -53,7 +53,9 @@ def _clean_string(series: pd.Series) -> pd.Series:
 def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
     """Values per patient/index-date/identifier group without cross-group mixing."""
     cols = ["person_id", "index_date", "group_key", "lvef", "lvedv",
-            "lvef_spread_pp", "lvef_method_disagreement"]
+            "lvef_spread_pp", "lvef_method_disagreement",
+            "lvef_within_method_spread_pp", "lvef_between_method_spread_pp",
+            "lvef_disagreement_category"]
     if rows.empty:
         return pd.DataFrame(columns=cols)
     d = rows.copy()
@@ -75,15 +77,45 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
         # Compare all plausible stored EF values within the same identifier group,
         # before applying a method priority. Never auto-resolve a large conflict.
         ef_spread = float(ef.number.max() - ef.number.min()) if len(ef) else None
-        ef_disagreement = (ef_spread is not None and
-                           ef_spread > float(results_cfg.get("lvef_disagreement_threshold_pp", 10)))
+        threshold = float(results_cfg.get("lvef_disagreement_threshold_pp", 10))
+        ef_disagreement = ef_spread is not None and ef_spread > threshold
+        within_spread = None
+        between_spread = None
+        disagreement_category = "none"
         if not ef.empty:
+            # Classify ALL plausible measurements before selecting a preferred
+            # method, so a priority change cannot hide conflicting measurements.
             def ef_rank(label):
                 return next((i for i, (_, rx) in enumerate(methods)
                              if rx.search(str(label))), len(methods))
             ef["rank"] = ef.result_label.map(ef_rank)
-            ef = ef[ef["rank"] == ef["rank"].min()]
-            lvef = float(ef.number.median())
+            ef["method_group"] = ef["rank"].map(
+                lambda rank: methods[rank][0] if rank < len(methods) else "other"
+            )
+            spread_by_method = ef.groupby("method_group")["number"].agg(
+                lambda values: float(values.max() - values.min())
+            )
+            within_spread = float(spread_by_method.max())
+            if ef["method_group"].nunique() > 1:
+                # Across method families, summarize each family with its median
+                # to avoid comparing every outlying repeated measurement.
+                method_medians = ef.groupby("method_group")["number"].median()
+                between_spread = float(method_medians.max() - method_medians.min())
+            within_flag = within_spread > threshold
+            between_flag = between_spread is not None and between_spread > threshold
+            if ef_disagreement:
+                if within_flag and between_flag:
+                    disagreement_category = "both"
+                elif within_flag:
+                    disagreement_category = "within_method"
+                elif between_flag:
+                    disagreement_category = "between_method"
+                else:
+                    # Full range can exceed threshold even though no family
+                    # median or within-family range individually exceeds it.
+                    disagreement_category = "mixed_spread"
+            best = ef[ef["rank"] == ef["rank"].min()]
+            lvef = float(best.number.median())
         else:
             lvef = None
         edv = g[g.metric == "lvedv"].copy()
@@ -98,7 +130,10 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
         out.append(dict(person_id=pid, index_date=dt, group_key=key,
                         lvef=lvef, lvedv=lvedv,
                         lvef_spread_pp=ef_spread,
-                        lvef_method_disagreement=bool(ef_disagreement)))
+                        lvef_method_disagreement=bool(ef_disagreement),
+                        lvef_within_method_spread_pp=within_spread,
+                        lvef_between_method_spread_pp=between_spread,
+                        lvef_disagreement_category=disagreement_category))
     return pd.DataFrame(out, columns=cols)
 
 
