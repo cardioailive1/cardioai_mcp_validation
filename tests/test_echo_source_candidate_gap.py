@@ -110,3 +110,40 @@ def test_missing_source_provenance_rejected():
     }])
     with pytest.raises(ValueError, match="missing columns"):
         diagnose_source_not_candidate(cohort, source, candidates)
+
+
+
+def test_numeric_lvedv_in_excluded_candidate_status_is_diagnosed_not_rejected():
+    # A candidate can retain a numeric LVEDV and still fail provisional
+    # selection because the examination is ambiguous. This was observed in
+    # live MCP data and must not raise ValueError.
+    cohort = pd.DataFrame([
+        {"person_id": 1, "index_date": "2020-02-03"},
+        {"person_id": 2, "index_date": "2020-02-03"},
+    ])
+    source = pd.DataFrame([
+        dict(person_id=pid, index_date="2020-02-03", echo_test_fpk=f"test{pid}",
+             test_type="Adult TTE", record_source="ACC",
+             has_mapped_lvedv=True, has_priority_lvedv=True,
+             has_mayo_lvedv=False)
+        for pid in (1, 2)
+    ])
+    candidates = pd.DataFrame([
+        dict(person_id=1, index_date="2020-02-03",
+             candidate_status="ambiguous_multiple_exams",
+             lvedv=125.0),
+        dict(person_id=2, index_date="2020-02-03",
+             candidate_status="unresolved_identifier",
+             lvedv=140.0),
+    ])
+    private, reasons, statuses = diagnose_source_not_candidate(
+        cohort, source, candidates
+    )
+    assert len(private) == 2
+    assert private.candidate_has_lvedv.all()
+    assert dict(zip(private.person_id, private.reason)) == {
+        1: "multiple_exam_candidates",
+        2: "unresolved_identifier",
+    }
+    assert int(reasons.patient_days.sum()) == 2
+    assert int(statuses.candidate_groups.sum()) == 2
