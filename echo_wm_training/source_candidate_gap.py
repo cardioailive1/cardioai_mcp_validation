@@ -34,6 +34,9 @@ def diagnose_source_not_candidate(
       - No eligible candidate matching the source patient-day.
       - Recognized source value missing at candidate stage (investigate).
 
+    Candidate group values may be non-null even when their status is excluded.
+    This is expected and must not be treated as accepted coverage.
+
     Reason is assigned per patient-day, never per ACC/ORD record. Additional
     flags remain in private output for cases with multiple simultaneous
     causes. No clinical promotion is recommended here.
@@ -105,8 +108,10 @@ def diagnose_source_not_candidate(
               .merge(candidate_days, on=KEYS, how="left", validate="one_to_one"))
     private["candidate_groups"] = private.candidate_groups.fillna(0).astype(int)
     private["candidate_has_lvedv"] = private.candidate_has_lvedv.fillna(False).astype(bool)
-    if private.candidate_has_lvedv.any():
-        raise ValueError("Source-not-candidate group unexpectedly contains candidate LVEDV")
+    # A numeric LVEDV can survive group extraction while its candidate_status
+    # prevents provisional acceptance (e.g. multiple examinations or an
+    # unresolved identifier). That is precisely an exclusion to investigate,
+    # not a consistency failure. Preserve the flag in private details.
     for col in ("has_priority_lvedv", "has_mayo_lvedv", "lvedv_conflict",
                 "lvef_conflict", "ef_method_disagreement",
                 *(("status_" + label) for label in flag_labels)):
