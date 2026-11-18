@@ -334,10 +334,12 @@ def read_sheet(path: Path, labels: List[str], values: List[str]) -> pd.DataFrame
     df = pd.read_excel(path, sheet_name="audit", dtype=object) if path.suffix == ".xlsx" else pd.read_csv(path, dtype=object)
     df["audit_id"] = df["audit_id"].astype(str)
     out = pd.DataFrame({"audit_id": df.audit_id})
+    # object dtype keeps None as None: a numeric-only column would turn it into NaN, and a blank value cell (no value
+    # stated) would then read as "a value the automatic label missed"
     for col in labels:
-        out[col] = [norm_label(v) for v in df.get(col, pd.Series([None] * len(df)))]
+        out[col] = pd.Series([norm_label(v) for v in df.get(col, pd.Series([None] * len(df)))], index=out.index, dtype=object)
     for col in values:
-        out[col] = [norm_value(v) for v in df.get(col, pd.Series([None] * len(df)))]
+        out[col] = pd.Series([norm_value(v) for v in df.get(col, pd.Series([None] * len(df)))], index=out.index, dtype=object)
     return out.set_index("audit_id")
 
 
@@ -604,7 +606,9 @@ def write_adjudication_page(dp: Path, rnd: int, sel: pd.DataFrame, res: pd.DataF
     adj = cfg.get("adjudication", {})
     n_pl = min(len(spot), max(int(adj.get("planted_min", 5)), int(round(adj.get("planted_fraction", 0.05) * len(sel)))))
     planted = {}
-    for a in (rng.choice(spot, n_pl, replace=False).tolist() if n_pl else []):
+    for a in (rng.permutation(spot).tolist() if n_pl else []):     # until n_pl rows with a stated label are planted
+        if len(planted) >= n_pl:
+            break
         binary = [c for c in labels if res[(res.audit_id == a) & (res.column == c)].reference.iloc[0] in (0.0, 1.0)]
         if binary:
             planted[a] = binary[int(rng.integers(len(binary)))]
@@ -695,7 +699,9 @@ def score(d: str, modality: str, cfg: Optional[dict] = None, log=print, decision
     pending = set(res.audit_id[res.status == "needs cardiologist"])
     new = sorted(a for a in pending if int(key.set_index("audit_id").at[a, "cardiologist_round"]) == 0)
     sheet = None
-    if new:
+    # round 1 always runs once the data scientists are done: even with no disagreement the cardiologist sees the
+    # blinded spot-check of settled rows (and the planted errors), so no label passes without a cardiologist look
+    if new or int(key.cardiologist_round.max()) == 0:
         rnd = int(key.cardiologist_round.max()) + 1
         rows = set(new)
         if rnd == 1:                                    # blinded spot-check of rows the data scientists settled
@@ -717,7 +723,7 @@ def score(d: str, modality: str, cfg: Optional[dict] = None, log=print, decision
             log(f"cardiologist: open {page} in the workspace web browser (approve / reject); "
                 f"then score again with --decisions <saved review_decisions.json>")
         res = resolve(key, sheets, cardio, labels, values, cfg["pass"]["value_tolerance"])
-        log(f"{len(new)} rows need the cardiologist (+ spot-check): {sheet}")
+        log(f"{len(new)} rows need the cardiologist (+ {int(key.spot_check.sum())} spot-check): {sheet}")
     met = metrics(res, labels, values, cfg)
     adj = cfg.get("adjudication", {})
     extra = []
