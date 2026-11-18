@@ -177,6 +177,49 @@ cells are omitted from this document.
 of ACC/ORD timestamps does not establish a single clinical exam,
 and matching groups may still leave genuinely separate examinations.
 
+### Source and report discovery on the same saved cohort (2026-11-18)
+
+A follow-up **read-only** MCP metadata/count discovery identified why
+the currently built cohort has low report-derived completeness:
+
+| Cohort evidence | Observed count | Interpretation |
+|---|---:|---|
+| Conventional index-day TTE source | 1,477 / 1,500 | Source-test presence, not validated one-exam linkage |
+| Existing nonempty `echo_report` column | 282 / 1,500 (18.80%) | Current extracted report coverage |
+| Nonempty conventional-TTE `FACT_ECHO_TEST.ECHO_NOTE` | 592 / 1,500 (39.47%) | Available alternative report text; overlap with existing reports unknown |
+| Source `ECHO_NOTE` mentioning wall-motion keywords | 440 / 1,500 (29.33%) | Keyword cue only, **not** clinically adjudicated wall-motion labels |
+| Source `ECHO_NOTE` mentioning quality keywords | 55 / 1,500 (3.67%) | Keyword cue only, not automatic adequate/poor image-quality classification |
+| Source `ECHO_NOTE` mentioning indication keywords | 0 | Current exploratory phrase search detected no indication cues |
+
+`FACT_ECHO_TEST` has `ECHO_NOTE` but **no dedicated height or
+weight fields** in the inspected schema. The source result type
+`Body_Surface_area` appears in **1,210** cohort patient-days with
+a result row; BSA is not individually measured height or weight.
+
+Source result-name discovery also found LVESV
+`LV_vol_4C_es_2D_by_MOD` in **936** patient-days with a result row,
+LVEDV `LV_vol_4C_ed_2D_by_MOD` in **942**, and candidate LA
+diameter result names `LA_dim_s_MM` in **26** and
+`LA_dim_es_2D` in **13**. Rows have not yet been screened here
+for numeric values, units or unambiguous exam identity. Left-atrial
+**volumes** occur much more often, but cannot automatically substitute
+for a requested **diameter**.
+
+The source-wide OMOP note-title screen found `Echo Report Text`,
+`ECHOCARDIOLOGY IMAGE EXAM`, `Echocardiogram Report`, etc.; title
+totals were **not** cohort-specific. The initial broad regex also
+matched unrelated *Letter* titles through substring `tte`, which
+was corrected. A cohort-scoped OMOP note overlap and numeric-source
+audit has now been added, but its BigQuery results **have not been
+received yet**. Therefore the incremental recoverable coverage for
+report-derived labels, LVESV or LA diameter is still unknown.
+
+**Do not conflate** the deck's `wall_motion` field (derived from
+`echo_report`) with the model-performance reference
+`ref_wma` (from the separate `echo_wm_reference` table). Improving
+report extraction does not itself establish that the latter has
+been built and clinically adjudicated.
+
 ### Interpretation, constraints, and decision requests
 
 - **Source absence dominates:** At least 485 index-day patient-days
