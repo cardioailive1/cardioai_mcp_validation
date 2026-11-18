@@ -356,3 +356,59 @@ def test_cardiologist_approves_or_rejects_in_the_browser_page(tmp_path):
     f.write_text(json.dumps(out))
     res = L.score(str(tmp_path), "mri", cfg, log=lambda s: None, decisions=[str(f)])["results"]
     assert res.result.str.contains("planted errors rejected: review again").all()
+
+
+def test_cardiologist_round_runs_even_when_nothing_is_disputed(tmp_path):
+    """No disagreement between the code and the data scientists (e.g. ECG AF on a clean sample) must still give the
+    cardiologist round 1: the blinded spot-check and, in approve / reject mode, the page with its planted errors."""
+    import json
+    import re
+    m = _manifest()
+    m = m[m.kind.isin(["A", "B", "C", "D"])].reset_index(drop=True)           # the code reads these correctly
+    cfg = {**CFG, "adjudication": {"mode": "approve_reject", "planted_fraction": 0.05, "planted_min": 5, "planted_caught_min": 0.8}}
+    key = L.sample(m, "mri", ["ds1", "ds2"], cfg, auto="assist")
+    L.write_auditor_sheets(key, tmp_path, "mri", cfg)
+    kinds = _kinds(tmp_path, m)
+    _fill(tmp_path / "sheet_ds1.xlsx", kinds)
+    _fill(tmp_path / "sheet_ds2.xlsx", kinds)
+    L.score(str(tmp_path), "mri", cfg, log=lambda s: None)
+    page = tmp_path / "adjudication_1.html"
+    assert page.exists() and (tmp_path / "adjudication_1.xlsx").exists()
+    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', page.read_text(), re.S).group(1))
+    k = pd.read_csv(tmp_path / "key.csv")
+    assert len(data["rows"]) == int(k.spot_check.sum()) > 0                    # spot-check only, nothing disputed
+    assert {v[0] for v in data["rows"][0]["values"]} >= {"infarct", "lv_thrombus"}
+
+
+def test_ecg_af_reaches_the_cardiologist(tmp_path):
+    """ECG: AF is the only text-read label; the cardiologist's round must show it, disputed or not."""
+    import json
+    import re
+    rnd = np.random.default_rng(3)
+    reads = {"af": ("Atrial fibrillation with rapid ventricular response. Nonspecific ST abnormality.", 1),
+             "sinus": ("Normal sinus rhythm. Normal ECG.", 0),
+             "hist": ("Sinus rhythm. History of atrial fibrillation.", 0),
+             "flutter": ("Atrial flutter with 2:1 block.", 1)}
+    kinds = rnd.choice(list(reads), 1200, p=[0.25, 0.55, 0.1, 0.1])
+    m = pd.DataFrame({"ecg_id": [f"E{i:05d}" for i in range(len(kinds))], "person_id": range(len(kinds)),
+                      "read_text": [reads[k][0] for k in kinds], "af": [float(reads[k][1]) for k in kinds], "kind": kinds})
+    cfg = {**CFG, "adjudication": {"mode": "approve_reject", "planted_fraction": 0.05, "planted_min": 5, "planted_caught_min": 0.8}}
+    key = L.sample(m, "ecg", ["ds1", "ds2"], cfg, auto="assist")
+    L.write_auditor_sheets(key, tmp_path, "ecg", cfg)
+    kk = pd.read_csv(tmp_path / "key.csv", dtype=str)
+    truth = dict(zip(kk.audit_id, m.set_index("ecg_id").loc[kk.ecg_id, "af"]))
+    from openpyxl import load_workbook
+    for s in ("sheet_ds1.xlsx", "sheet_ds2.xlsx"):
+        wb = load_workbook(tmp_path / s)
+        ws = wb["audit"]
+        col = [c.value for c in ws[1]].index("af") + 1
+        for r in range(2, ws.max_row + 1):
+            ws.cell(r, col).value = int(truth[ws.cell(r, 1).value])
+        wb.save(tmp_path / s)
+    L.score(str(tmp_path), "ecg", cfg, log=lambda s: None)
+    page = tmp_path / "adjudication_1.html"
+    assert page.exists()
+    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', page.read_text(), re.S).group(1))
+    assert data["rows"] and all([v[0] for v in r["values"]] == ["af"] for r in data["rows"])
+    prop = pd.read_csv(tmp_path / "adjudication_1_proposed.csv", dtype=str, keep_default_na=False)
+    assert (prop.planted == "af").sum() >= 5
