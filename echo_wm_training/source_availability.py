@@ -13,7 +13,6 @@ from __future__ import annotations
 from datetime import date
 import pandas as pd
 
-from .exam_resolution import tte_record_rows_sql
 from .exam_results import LVEDV_PRIORITY
 from .mcp_echo import _cfg, _macro, _t
 from .next_day_lvedv import ADDITIONAL_LVEDV_NAME
@@ -29,14 +28,16 @@ def source_availability_sql(modality_cfg: dict, *, start: str, end: str) -> str:
         raise ValueError("start must not exceed end")
     c = _cfg(modality_cfg)
     e, tt, r = c["echo_test_columns"], c["test_type"], c["results"]
+    d, pm = c["dim_patient"], c["person_map"]
     rc, ty = r["columns"], r["result_type"]
-    tte = tte_record_rows_sql(modality_cfg, start=start, end=end)
     names = (*LVEDV_PRIORITY, ADDITIONAL_LVEDV_NAME)
     quoted = ", ".join("'" + n.replace("'", "''") + "'" for n in names)
     return f"""
 WITH all_tte AS (
   SELECT DISTINCT
     CAST(t.{e['test_key']} AS STRING) AS echo_test_fpk,
+    t.{e['patient_dk']} AS patient_dk,
+    DATE(t.{e['datetime']}) AS exam_date,
     CAST(tt.{tt['description']} AS STRING) AS test_type,
     CASE
       WHEN NULLIF(TRIM(CAST(t.{e['link']} AS STRING)), '') IS NOT NULL THEN 'ACC'
@@ -53,7 +54,17 @@ WITH all_tte AS (
                             r'tee|transesophageal|stress|strain|outside|review|fetal')
 ),
 cohort_tte AS (
-  SELECT DISTINCT echo_test_fpk FROM ({tte})
+  SELECT DISTINCT t.echo_test_fpk
+  FROM all_tte t
+  JOIN {_macro(d['table'])} d
+    ON d.{d['patient_dk']} = t.patient_dk
+  JOIN {_macro(pm['table'])} pm
+    ON CAST(pm.{pm['clinic_number_column']} AS STRING)
+     = CAST(d.{d['clinic_number']} AS STRING)
+  JOIN {{{{work}}}}.echo_analytic a
+    ON a.person_id = pm.{pm['person_id_column']}
+   AND DATE(a.index_date) = t.exam_date
+   AND DATE(a.index_date) BETWEEN DATE('{start}') AND DATE('{end}')
 ),
 edv_by_test AS (
   SELECT CAST(r.{rc['test_key']} AS STRING) AS echo_test_fpk,
