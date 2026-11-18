@@ -73,6 +73,38 @@ Queries run in BigQuery through `make_engine("bigquery", study)` (RUNBOOK_MRI.md
    ```
    Snapshot the analytic table as `cardioai_work.echo_analytic_locked`.
 
+### Accession-aware Echo reference candidates (validation only)
+
+The original `echo_lvef` is patient/day aggregated and remains the active cohort
+reference. Do **not** overwrite it or lock the cohort until examination identity
+and test-type filtering are independently reviewed. Mayo's verified exam
+identifier in `FACT_ECHO_TEST` is `ACCESSION_NUMBER`, and a single accession
+can contain several `ECHO_TEST_FPK` rows.
+
+The first comparison extractor is read-only. It queries only the already saved
+`{{work}}.echo_analytic` patients and matching index-day/next-day echo results.
+Its returned rows preserve accession and count ambiguities among
+**measurement-bearing candidate accessions**. They are not yet proof of a
+unique eligible TTE or a DICOM match. Its LVEDV method order and LVEF priorities
+remain proposed, pending clinical review.
+
+```python
+from echo_wm_training.exam_results import build_exam_reference_candidates
+candidates = build_exam_reference_candidates(
+    eng, study["modality"],
+    start=str(study["index_start"]), end=str(study["index_end"])
+)
+print(candidates.status.value_counts(dropna=False))
+# Aggregate only: do not copy/export patient IDs or accession numbers from MCP.
+print(candidates.groupby("status")[["lvef", "lvedv"]].count())
+```
+
+This function makes no changes to saved tables. Before promotion, implement
+complete TTE eligibility and uniqueness checks across **all** candidate echo
+records (including exams lacking these measurements), verify multi-date
+accessions and the LVEF/LVEDV method definitions, and compare the result
+against the current cohort on a stable sample within MCP.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
