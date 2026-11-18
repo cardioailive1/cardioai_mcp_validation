@@ -1135,3 +1135,60 @@ single-plane measurements in a separate *diagnostic*; seek clinical
 approval for a priority policy before altering production extraction.
 If provisional ACC/ORD pairing dominates, establish authoritative exam
 identity with Mayo, rather than automatically accepting timestamp pairs.
+
+### Unit metadata vs method differences in 454/448 held volumes (read-only)
+
+The most recent MCP preview-barrier audit reconciled all 1,500 saved
+patient/index-days: 703 selected single-identifier groups, 718
+provisional ACC/ORD pairings withheld, and 79 other identifier/exam
+review cases. Among the 703, LVEDV had 58 accepted by the deliberately
+strict preview, 191 without recognized usable results, and **454 held
+for unit/method review**; LVESV respectively 61, 194, **448**.
+
+This does **not** demonstrate a 4% source-availability ceiling. The
+strict preview requires every plausible in-range value from biplane,
+3D, and single-plane methods to match exactly, and disallows unknown
+or non-mL units. It can reject clinically plausible differing methods.
+
+To distinguish these technical exclusion causes without altering
+selection, `echo_wm_training/volume_hold_detail.py` produces **one
+mutually exclusive primary reason** per held metric in a selected
+identifier group:
+
+- `unit_metadata_only`: one or more in-range values has absent or
+  non-mL unit metadata, but numeric values otherwise agree
+- `different_methods_only`: all in-range values carry mL units;
+  values differ **between** result names but not within each name
+- `same_method_conflict`: mL values disagree **within** a result name,
+  regardless of whether other methods also differ
+- `unit_and_value_disagreement`: both unknown/non-mL unit metadata
+  and differing values occur
+
+```bash
+python -m pytest tests/test_echo_volume_hold_detail.py -q
+```
+
+Fresh IPython inside MCP:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.volume_hold_detail import run_volume_hold_audit
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+hold_causes = run_volume_hold_audit(eng, study)
+print("LVEDV/LVESV HOLD REASONS WITHIN SELECTED EXAMS")
+print(hold_causes.to_string(index=False))
+```
+
+All source values, identifiers and notes stay in MCP; this function
+returns only reason/count aggregates with whole-metric suppression if
+any category has a positive count below the configured threshold.
+Apply platform cross-report disclosure rules before sharing results.
+
+**No value-selection change occurs.** In particular, never assume a
+blank unit is mL merely because the result name looks like a volume.
+Follow up with Mayo/developer/clinical reviewer for units, trusted
+method selection and authoritative examination identity.
