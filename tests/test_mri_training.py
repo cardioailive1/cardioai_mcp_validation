@@ -323,3 +323,15 @@ if os.environ.get("CARDIOAI_APP_REPO"):  # cross-repo: the app must pin exactly 
         import yaml
         reg = yaml.safe_load((Path(os.environ["CARDIOAI_APP_REPO"]) / "app" / "validated_agents" / "registry.yaml").read_text())
         assert reg["agents"]["mri"]["output_adapter"]["runtime_fingerprint"] == runtime.fingerprint()
+
+
+def test_lvef_is_not_taken_from_the_rv_or_a_comparison_echo():
+    """MRI 8a review (2026-11-18): a measurement list gave the RV ejection fraction as the LVEF."""
+    from annotation.auto_audit import AutoAuditor
+    text = ("Findings: right ventricle: mildly reduced function, rv ejection fraction = 41% (normal = 42-66). "
+            "Measurements: lv end diastolic volume = 160 ml; lv ejection fraction = 56% (normal = 48-68); "
+            "rv ejection fraction = 41%. Comparison: transthoracic echocardiogram, ejection fraction 60%.")
+    assert report_labels(text, CFG)["report_lvef"] == 56
+    assert AutoAuditor("mri").read(text)["report_lvef"] == 56
+    assert report_labels("LVEF 42 %. Infarct size 18 %.", CFG)["report_lvef"] == 42
+    assert report_labels("bsa 1.8 m2, rv size normal. lv ejection fraction 61%.", CFG)["report_lvef"] == 61

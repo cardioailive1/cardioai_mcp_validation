@@ -47,6 +47,10 @@ labels:
   mvo_regex: '(?i)(microvascular obstruction|\bmvo\b|no[- ]reflow)'
   context: {}
   lvef_regex: '(?i)(?:lvef|ejection fraction)[^0-9]{0,25}(?P<val>[1-8][0-9](?:\.[0-9])?) ?%'
+  # A match is skipped when its own clause (since the last ; | . or line break) names the right ventricle, an echo or
+  # a prior study: CMR measurement blocks list "rv ejection fraction = 40%" next to the LV value, and a comparison
+  # echo may be quoted (found in the MRI 8a review, 2026-11-18).
+  lvef_exclude_regex: '(?i)\b(rv|rvef|right ventric\w*|echo\w*|tte|prior|previous|comparison)\b'
   infarct_size_regex: '(?i)(?:infarct size|scar burden|lge burden|extent of (?:late )?enhancement)[^0-9]{0,25}(?P<val>[0-9]{1,2}(?:\.[0-9])?) ?%'
   thrombus_aneurysm_default_negative: true   # not mentioned in a full LGE report = absent (assumption, in model card)
   # Signed by the clinical lead, Tamanna Nahar, 2026-11-16 (sign-off sheet MRI 1): silence means absent for thrombus,

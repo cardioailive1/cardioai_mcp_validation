@@ -181,7 +181,8 @@ class AutoAuditor:
         kw = re.compile(self.m["values"][name], re.I)
         ex = re.compile(self.m["value_exclude"][name], re.I) if self.m.get("value_exclude", {}).get(name) else None
         found, ranged = [], False
-        for s in sentences(text):
+        # value by clause: a CMR measurement list is one long "sentence" with LV and RV values separated by ; or |
+        for s in [c.strip() for x in sentences(text) for c in re.split(r"[;|]", x) if c.strip()]:
             if _SKIP.search(s) or not kw.search(s) or (ex is not None and ex.search(s)):
                 continue
             tail = s[kw.search(s).end():]
