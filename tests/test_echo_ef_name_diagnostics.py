@@ -30,7 +30,7 @@ def test_ef_name_diagnostic_classifies_same_and_different_names():
         (1, [("LVEF visual", 40), ("LVEF visual", 60)], "same_name_only"),
         (2, [("LVEF visual A", 40), ("LVEF visual B", 60)], "different_names_only"),
         (3, [("LVEF visual A", 40), ("LVEF visual A", 60),
-             ("LVEF visual B", 50)], "both"),
+             ("LVEF visual B", 35)], "both"),
         (4, [("LVEF visual A", 40), ("LVEF biplane", 60)], "neither"),
     ]
     candidates, readings = [], []
