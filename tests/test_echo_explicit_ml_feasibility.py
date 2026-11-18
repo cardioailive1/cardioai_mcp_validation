@@ -68,7 +68,7 @@ def test_selected_cohort_counts_and_excludes_unselected_exams():
         p, t, v, small_cell=1
     )
     lv = summary.set_index("metric").loc["lv_end_diastolic_volume"]
-    assert lv.selected_patient_days == 8
+    assert lv.selected_patient_days == "8"
     assert lv.with_explicit_ml == "6"
     assert lv.without_explicit_ml == "2"
     by_tier = tiers[tiers.metric.eq("lv_end_diastolic_volume")]
