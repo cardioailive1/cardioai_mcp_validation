@@ -230,7 +230,8 @@ def test_same_method_spread_not_inflated_by_different_method_labels():
     rows = pd.DataFrame([
         dict(person_id=1, index_date="2020-01-02", echo_test_fpk="1",
              accession_number="A", order_proc_id=None,
-             metric="lvef", result_label=label, result_value=value)
+             metric="lvef", result_name=label,
+             result_label=label, result_value=value)
         for label, value in [
             ("LV_EF_2D_by_mod_Quin", "59"),
             ("LV_EF_2D_by_mod_Quin_Acf", "63"),
