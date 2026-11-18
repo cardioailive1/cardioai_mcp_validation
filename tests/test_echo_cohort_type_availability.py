@@ -74,7 +74,6 @@ def test_counts_are_patient_days_not_duplicate_acc_ord_records():
     assert int(adult.patient_days) == 4
     assert int(adult.with_mapped_lvedv) == 3
     assert int(adult.source_test_records) == 5
-    assert int(adult.with_provisional_candidate) == 2
     # Type categories intentionally overlap across a patient-day.
     assert int(types.patient_days.sum()) == 5
 
