@@ -45,6 +45,7 @@ def diagnose_within_method_names(measurement_rows: pd.DataFrame,
     ].copy()
     if targets.empty:
         return pd.DataFrame(columns=details_columns), pd.DataFrame(columns=summary_columns)
+    targets["index_date"] = pd.to_datetime(targets.index_date).dt.date
     if measurement_rows.empty:
         raise ValueError("No measurement rows supplied for flagged examinations")
     required = {"person_id", "index_date", "echo_test_fpk",
