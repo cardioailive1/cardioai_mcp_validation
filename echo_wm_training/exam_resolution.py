@@ -35,20 +35,31 @@ def eligible_tte_records(rows: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def tte_record_rows_sql(modality_cfg: dict, *, start: str, end: str) -> str:
+def tte_record_rows_sql(modality_cfg: dict, *, start: str, end: str,
+                        day_offset: int = 0) -> str:
     """Retrieve all TTE-classified tests for saved Echo cohort index dates.
 
     Unlike the measurement candidate query, this does not require an LVEF or
     LVEDV result, so measurement absence cannot create artificial uniqueness.
+    day_offset=1 is a separate read-only next-day audit; the default remains
+    strictly same-day for all current consumers.
     """
     first, last = date.fromisoformat(start), date.fromisoformat(end)
     if first > last:
         raise ValueError("start must be on or before end")
+    if day_offset not in (0, 1):
+        raise ValueError("day_offset must be 0 or 1")
     c = _cfg(modality_cfg)
     e, d, pm, tt = (c["echo_test_columns"], c["dim_patient"],
                     c.get("person_map") or {}, c["test_type"])
     if not pm.get("table") or not tt.get("table"):
         raise ValueError("Echo person_map and test_type are required")
+    exam_date_predicate = (
+        f"CAST(t.{e['datetime']} AS DATE) = CAST(a.index_date AS DATE)"
+        if day_offset == 0 else
+        f"CAST(t.{e['datetime']} AS DATE) = "
+        "DATE_ADD(CAST(a.index_date AS DATE), INTERVAL 1 DAY)"
+    )
     return f"""
     SELECT DISTINCT a.person_id,
            CAST(a.index_date AS DATE) AS index_date,
@@ -67,7 +78,7 @@ def tte_record_rows_sql(modality_cfg: dict, *, start: str, end: str) -> str:
     JOIN {_macro(tt['table'])} tt
       ON tt.{tt['key']} = t.{e['performed_test_dk']}
     WHERE CAST(a.index_date AS DATE) BETWEEN CAST('{start}' AS DATE) AND CAST('{end}' AS DATE)
-      AND CAST(t.{e['datetime']} AS DATE) = CAST(a.index_date AS DATE)
+      AND {exam_date_predicate}
       AND LOWER(CAST(tt.{tt['description']} AS STRING)) RLIKE 'tte|transthoracic|echocardiogram'
       AND NOT (LOWER(CAST(tt.{tt['description']} AS STRING)) RLIKE
             'tee|transesophageal|stress|strain|outside|review|fetal')
