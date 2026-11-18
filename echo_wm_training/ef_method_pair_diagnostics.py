@@ -114,12 +114,13 @@ def diagnose_ef_method_pairs(
                 "p90_abs_difference_pp": float(g.difference_pp.quantile(0.9)),
                 "max_abs_difference_pp": float(g.difference_pp.max()),
             })
-        summary = (flagged.groupby(["method_a", "method_b"])
-                   .apply(pair_statistics, include_groups=False)
-                   .reset_index().sort_values(
-                       ["candidate_groups", "median_abs_difference_pp"],
-                       ascending=[False, False],
-                   ))[summary_cols]
+        summary_rows = []
+        for (a, b), group in flagged.groupby(["method_a", "method_b"]):
+            summary_rows.append({"method_a": a, "method_b": b,
+                                 **pair_statistics(group).to_dict()})
+        summary = (pd.DataFrame(summary_rows, columns=summary_cols)
+                   .sort_values(["candidate_groups", "median_abs_difference_pp"],
+                                ascending=[False, False]))
     coverage = []
     for source, sub in targets.groupby("record_source"):
         current = flagged[flagged.record_source == source]
