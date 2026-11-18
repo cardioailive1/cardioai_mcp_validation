@@ -239,6 +239,56 @@ def test_same_method_spread_not_inflated_by_different_method_labels():
         ]
     ])
     g = _measurement_groups(rows, cfg).iloc[0]
-    assert g.lvef_within_method_spread_pp == 4
-    assert g.lvef_between_method_spread_pp == 48
+    assert g.lvef_within_method_spread_pp == 0
+    assert g.lvef_between_method_spread_pp == 50
     assert g.lvef_disagreement_category == "between_method"
+
+
+def test_mayo_ef_names_use_correct_priority_and_diagnostic_variant():
+    from echo_wm_training.mcp_echo import classify_lvef_method
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    cases = [
+        ("LV_EF_2C_2D_by_MOD | Left Ventricular EF MOD by 2-D 2-Chamber View",
+         "single_plane", "single_plane_2c_mod"),
+        ("LV_EF_4C_2D_by_MOD | Left Ventricular EF MOD by 2-D 4-Chamber View",
+         "single_plane", "single_plane_4c_mod"),
+        ("LV_EF_BP_2D_by_MOD | Left Ventricular EF MOD by 2-D Biplane Apical Views",
+         "biplane", "biplane_2d_mod"),
+        ("LV_EF_2D_by_mod_Quin | Modified Quinones by 2-D",
+         "modified_quinones", "quinones_standard"),
+        ("LV_EF_2D_by_mod_Quin_Acf | Modified Quinones with Apical Correction Factor",
+         "modified_quinones", "quinones_apical_correction"),
+        ("MC CV ECHO EJECTION FRACTION | Ejection Fraction",
+         "other", "unspecified_ef"),
+    ]
+    for label, method, variant in cases:
+        _, actual_method, actual_variant = classify_lvef_method(label, cfg)
+        assert (actual_method, actual_variant) == (method, variant)
+    # Both single-plane views and both Quinones variants share selection rank.
+    r2, _, _ = classify_lvef_method(cases[0][0], cfg)
+    r4, _, _ = classify_lvef_method(cases[1][0], cfg)
+    rq, _, _ = classify_lvef_method(cases[3][0], cfg)
+    rqa, _, _ = classify_lvef_method(cases[4][0], cfg)
+    rb, _, _ = classify_lvef_method(cases[2][0], cfg)
+    assert r2 == r4 and rq == rqa
+    assert rb < r2
+
+
+def test_two_chamber_four_chamber_disagreement_is_between_variants():
+    from echo_wm_training.exam_comparison import _measurement_groups
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    rows = pd.DataFrame([
+        dict(person_id=1, index_date="2020-01-02", echo_test_fpk="1",
+             accession_number="A", order_proc_id=None,
+             metric="lvef", result_name=label, result_label=label,
+             result_value=value)
+        for label, value in [
+            ("LV_EF_2C_2D_by_MOD", "40"),
+            ("LV_EF_4C_2D_by_MOD", "60"),
+        ]
+    ])
+    g = _measurement_groups(rows, cfg).iloc[0]
+    assert g.lvef_method_disagreement
+    assert g.lvef_disagreement_category == "between_method"
+    assert g.lvef_within_method_spread_pp == 0
+    assert g.lvef_between_method_spread_pp == 20
