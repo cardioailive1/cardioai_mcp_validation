@@ -706,3 +706,53 @@ Query output is aggregate only. Follow MCP disclosure controls when sharing
 aggregate counts, including complementary suppression if relevant. Do not
 export row-level identifiers or change `echo_analytic` based on these rates.
 
+
+### Cohort-specific examination-type LVEDV audit (read-only)
+
+The follow-up to the **source-wide** availability report compares
+conventional TTE records on the **saved cohort's index day** against
+the same patient's provisional examination-matching status. It answers:
+
+- How many unique cohort patient/index-days have a mapped structured
+  absolute LVEDV, independently of EF disagreement?
+- How many have source LVEDV but no eligible provisional candidate,
+  versus source TTE records without mapped LVEDV?
+- Which TTE descriptions occur among patient-days with/without mapped
+  LVEDV? (A patient-day can have multiple descriptions; do **not**
+  sum examination-type patient-days as a cohort denominator.)
+
+The diagnostic uses the same TTE include/exclude filters, five candidate
+LVEDV result names (including the additional Mayo label), and a
+**provisional** numeric 20–500 mL filter as the source-wide audit. It
+does not authorize clinical method substitutions, matching, relaxing
+requirements, or changing the existing analytic cohort.
+
+Run after merging `validation/echo-wm-mcp` into MCP source:
+
+```bash
+python -m pytest tests/test_echo_cohort_type_availability.py -q
+```
+
+Inside the restricted MCP Cloud PC, in fresh IPython:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.cohort_type_availability import run_cohort_type_audit
+
+study = load_study()
+eng = make_engine("bigquery", study)
+private_detail, overall, by_type = run_cohort_type_audit(eng, study)
+
+print("Mutually exclusive patient-day dispositions:")
+print(overall.to_string(index=False))
+print("Examination-type availability (overlapping patient-days):")
+print(by_type.to_string(index=False))
+print("Cohort index-days:", len(private_detail))
+```
+
+**Do not print, export or publish `private_detail`** (patient IDs and
+index dates). Type rows whose mapped or unmapped cell is smaller than
+`small_cell` are withheld. Still apply MCP disclosure rules, including
+secondary/complementary suppression when distributing aggregate output.
+Tests are synthetic; BigQuery execution must be verified inside MCP.
