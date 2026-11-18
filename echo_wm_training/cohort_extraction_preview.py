@@ -257,11 +257,64 @@ def compare_echo_completeness(
     return report, a
 
 
-def run_echo_extraction_preview(eng, study: dict):
-    """MCP read-only runner: (private, 27-field comparison, safe summary).
+def suppress_completeness_comparison(
+    report: pd.DataFrame, *, cohort_size: int, small_cell: int = 11
+) -> pd.DataFrame:
+    """Public-facing version with primary/complementary/change suppression.
 
-    Never print/export private or the second DataFrame from
-    compare_echo_completeness(); they contain patient-level information.
+    Percentages are not published if they reveal an existing or missing cell
+    smaller than small_cell. If a small positive increase could be deduced
+    from before/after counts, BOTH percentages and gap are suppressed.
+    """
+    if small_cell < 1 or cohort_size < 1:
+        raise ValueError("Invalid cohort size or small_cell")
+    cols = ["element", "domain", "required", "expected", "before_pct",
+            "after_pct", "change_pp", "after_gap_to_target_pp", "status"]
+    rows = []
+    for r in report.itertuples(index=False):
+        before = int(round(float(r.before) * cohort_size))
+        after = int(round(float(r.after) * cohort_size))
+        if not (0 <= before <= after <= cohort_size):
+            raise ValueError("Preview must not remove source values")
+        delta = after - before
+        def individually_safe(count):
+            return (count == 0 or count >= small_cell) and (
+                cohort_size - count == 0 or cohort_size - count >= small_cell)
+        safe = (individually_safe(before) and individually_safe(after)
+                and (delta == 0 or delta >= small_cell))
+        rows.append({
+            "element": r.element, "domain": r.domain,
+            "required": bool(r.required), "expected": r.expected,
+            "before_pct": round(float(r.before) * 100, 2) if safe else None,
+            "after_pct": round(float(r.after) * 100, 2) if safe else None,
+            "change_pp": round(float(r.change_pp), 2) if safe else None,
+            "after_gap_to_target_pp": (
+                round(float(r.gap_to_target_pp), 2) if safe else None
+            ),
+            "status": ("BELOW TARGET" if r.after_flag else "PASS")
+                if safe else "SUPPRESSED",
+        })
+    return pd.DataFrame(rows, columns=cols)
+
+
+def suppress_exam_statuses(
+    private: pd.DataFrame, *, small_cell: int = 11
+) -> pd.DataFrame:
+    """Avoid disclosing a small subgroup via the 1,500 total."""
+    totals = private.exam_status.value_counts().rename_axis(
+        "exam_status").reset_index(name="patient_days")
+    if (totals.patient_days.between(1, small_cell - 1)).any():
+        # Complementary suppression: do not show the other statuses
+        # whose counts would reconstruct a small status by subtraction.
+        totals["patient_days"] = "suppressed"
+    return totals
+
+
+def run_echo_extraction_preview(eng, study: dict):
+    """MCP read-only runner: (private detail, safe 27-field report, safe statuses).
+
+    Never print/export the first DataFrame: it contains patient IDs, volume
+    values and potentially protected full ECHO_NOTE report text.
     """
     start, end = str(study["index_start"]), str(study["index_end"])
     tests = eng.query(tte_record_rows_sql(study["modality"], start=start, end=end))
@@ -271,7 +324,9 @@ def run_echo_extraction_preview(eng, study: dict):
     private = preview_echo_extraction(analytic, tests, volume, notes)
     cohort = load_cohort("echo")
     report, _ = compare_echo_completeness(cohort, analytic, private)
-    statuses = private.exam_status.value_counts().rename_axis(
-        "exam_status").reset_index(name="patient_days")
-    # Aggregates require MCP disclosure review, especially status small cells.
-    return private, report, statuses
+    safe_report = suppress_completeness_comparison(
+        report, cohort_size=len(analytic),
+        small_cell=int(study.get("small_cell", 11)))
+    safe_status = suppress_exam_statuses(
+        private, small_cell=int(study.get("small_cell", 11)))
+    return private, safe_report, safe_status
