@@ -294,6 +294,51 @@ Detailed candidate rows contain sensitive identifiers and must stay inside MCP.
 The source test labels and method-priority mappings remain subject to clinical
 review.
 
+### Result-name diversity inside within-method disagreements (read-only)
+
+MCP reported 144 within-method, 74 between-method, 67 mixed-spread,
+and 17 both-type flagged examination groups. This follow-up examines the
+144 `within_method` candidates. It distinguishes an exact
+`ECHO_TEST_RESULT_NAME` repeated with discordant values from two different
+result names grouped into the same configured method family. A matched ACC/ORD
+pair is analyzed **within each original group**, not across the pair.
+A different result name does not necessarily mean a clinically distinct method.
+
+```bash
+python -m pytest tests/test_echo_ef_name_diagnostics.py tests/test_echo_unified_reference.py -q
+```
+
+After restarting IPython and running `build_unified_echo_diagnostics`
+from above, use this additional **read-only** MCP query and aggregation:
+
+```python
+from echo_wm_training.exam_comparison import tte_measurement_rows_sql
+from echo_wm_training.ef_name_diagnostics import diagnose_within_method_names
+
+rows_sql = tte_measurement_rows_sql(
+    study["modality"], start=str(study["index_start"]),
+    end=str(study["index_end"]),
+)
+measurement_rows = eng.query(eng.render(rows_sql, {}))
+name_details, name_summary = diagnose_within_method_names(
+    measurement_rows, candidate_exams,
+    study["modality"]["echo"]["mcp"]["results"],
+)
+print(name_details.name_conflict_class.value_counts(dropna=False).to_string())
+print(name_summary.to_string(index=False))
+```
+
+`name_details` and `measurement_rows` contain examination/patient identifiers
+and must stay in the restricted MCP environment. The aggregate
+`name_summary` reports `same_name_only`, `different_names_only`,
+`both`, and `neither` grouped by original ACC/ORD provenance. The
+comparison uses a strict >10 percentage-point difference between numeric
+values and unchanged method-regex precedence. It does not update the EF
+classification, exclusion rule, saved `echo_lvef`, or cohort.
+`neither` means the threshold was not exceeded *within an individual
+original group and method family* by these checks, not that an examination
+is clinically resolved. The original 302 flags remain unchanged.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
