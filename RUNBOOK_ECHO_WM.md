@@ -134,6 +134,31 @@ This query currently compares tests on the **index date** only; the cohort's
 one-day LVEF allowance is a separate policy to evaluate before promotion.
 The TTE description regex is provisional and subject to clinical review.
 
+### Compare LVEF and LVEDV on provisional ACC/ORD pairs
+
+After checking `tests/test_echo_exam_resolution.py` and
+`tests/test_echo_exam_comparison.py`, run this **read-only** comparison in MCP:
+
+```python
+from echo_wm_training.exam_comparison import build_tte_measurement_comparison
+pairs, summary = build_tte_measurement_comparison(
+    eng, study["modality"],
+    start=str(study["index_start"]), end=str(study["index_end"]),
+    max_seconds=60,
+)
+print(summary.to_string(index=False))
+```
+
+The returned `pairs` DataFrame contains identifiers and must stay in MCP.
+`summary` reports LVEF and LVEDV availability on both sides of each
+provisional pair, and median/p90 absolute disagreement where **both** sides
+have a valid value. A low disagreement supports consistency but does not
+confirm two records represent the same clinical examination. No merging or
+overwriting occurs. The query checks TTE-classified records on **index day
+only**; it does not address next-day reference eligibility or clinically
+validate test-type/measurement-method rules. Never use these candidate
+measurements in the production cohort before completing those checks.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
