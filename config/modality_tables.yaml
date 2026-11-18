@@ -173,7 +173,11 @@ echo:
         - {method: biplane, regex: '(?i)(biplane|bi-plane|simpson|method of discs|\bmod\b|\bbp\b)'}
         - {method: 3d, regex: '(?i)(\b3[- ]?d\b|three[- ]dimensional)'}
         - {method: single_plane, regex: '(?i)(a4c|a2c|4[- ]?ch|2[- ]?ch|single[- ]plane|monoplane)'}
+        # Modified Quinones is not Simpson biplane; this position is PROVISIONAL, subject to clinical sign-off.
+        - {method: modified_quinones, regex: '(?i)(mod[_ ]?quin|modified[ _-]*quinones|quinones)'}
         - {method: visual, regex: '(?i)(visual|estimat|eyeball|qualitative)'}
+      # Review threshold only, NOT a validated clinical quality gate.
+      lvef_disagreement_threshold_pp: 10.0
   wm_requirements:        # wall-motion model input spec (echo_wm_training runtime 1.0.0)
     views: [A4C, A2C, A3C]   # at least one; all three for all 17 AHA segments
     mode: greyscale B-mode
