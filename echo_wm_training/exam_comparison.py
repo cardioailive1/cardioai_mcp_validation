@@ -119,8 +119,13 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
         else:
             lvef = None
         edv = g[g.metric == "lvedv"].copy()
-        edv["number"] = pd.to_numeric(edv.result_value, errors="coerce")
-        edv = edv[edv.number.between(20, 500) & edv.result_name.isin(rank)]
+        # EF-only diagnostics may have no LVEDV rows or result_name column.
+        # The name is only required when actual LVEDV measurements exist.
+        if not edv.empty:
+            if "result_name" not in edv.columns:
+                raise ValueError("LVEDV rows require result_name")
+            edv["number"] = pd.to_numeric(edv.result_value, errors="coerce")
+            edv = edv[edv.number.between(20, 500) & edv.result_name.isin(rank)]
         if not edv.empty:
             edv["rank"] = edv.result_name.map(rank)
             edv = edv[edv["rank"] == edv["rank"].min()]
