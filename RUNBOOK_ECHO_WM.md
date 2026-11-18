@@ -198,6 +198,33 @@ evaluated. Provisional ACC/ORD matches require independent clinical review.
 EF/EDV method priorities and measurement equivalence also need clinical
 sign-off. Do not promote these results automatically.
 
+### Modified Quinones method recognition and EF disagreement review
+
+Observed MCP source case: four EF values for the same patient/day were
+59 (Modified Quinones 2D), 13 (visual estimate), 63 (Modified Quinones
+with apical correction), and 63 (MC CV ECHO EJECTION FRACTION). The
+previous priority regex did not recognize `mod_Quin` as biplane, and the
+visual estimate won. Modified Quinones is **not** Simpson biplane.
+
+`config/modality_tables.yaml` now recognizes `modified_quinones` as
+its own method, provisionally ranked after single-plane and before
+visual. **Clinical review is required** before treating that priority
+as definitive. The read-only unified candidate comparison additionally
+flags a within-identifier-group range greater than 10 EF percentage
+points as `unresolved_method_disagreement`. Such a candidate's
+LVEF is withheld (null) from the single-exam baseline comparison.
+The threshold is a provisional diagnostic cutoff, not a validated
+clinical eligibility rule. This is different from the existing
+`echo_lvef` writer: do not rerun/persist that writer or modify the
+locked cohort based on this provisional method priority.
+
+After pulling the branch, rerun synthetic tests:
+```bash
+python -m pytest tests/test_echo_exam_results.py tests/test_echo_exam_comparison.py tests/test_echo_unified_reference.py -q
+```
+Then rerun `build_unified_echo_diagnostics` from the preceding section
+and inspect only aggregate candidate statuses and counts in MCP.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
