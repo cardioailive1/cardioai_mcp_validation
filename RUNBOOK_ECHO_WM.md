@@ -1068,3 +1068,70 @@ the selected exam's report with a separately validated text parsing
 policy. Then compare the locked before/after 27-field reports after
 an explicitly approved rebuild. Do **not** enable the generic placeholder
 `echo.study_table` source or loosen matching to increase coverage.
+
+### Diagnosing unexpectedly low strict extraction preview (2026-11-18)
+
+The MCP conservative preview executed against the unchanged 1,500-patient
+cohort. Its selected `single_identifier_group` population is
+**703** patient-days; **797** were withheld for additional examination
+identity review. This is a *stricter* gate than the earlier provisional
+LVEDV diagnostic; the outcomes must not be compared as if they used the
+same selection criteria. The 27-element completeness preview showed
+LVESV improving from 0.00% to **4.07%** (still below 90%).
+The exact LVEDV before/after was **suppressed** because the saved
+baseline has a complementary small cell. No model reference or cohort
+table was changed. Other 25 fields remain unchanged because report
+NLP has not been applied in the preview.
+
+The strict volume selector presently demands every in-range measurement
+across *all* methods in the selected identifier group have compatible
+explicit mL units and the **exact same numeric value**. Biplane and
+single-plane volume estimates may reasonably differ. This creates a
+potentially over-restrictive preview condition, not evidence that the
+source contains little usable LVESV. Do not loosen it or choose a method
+solely to improve coverage; get the rejection-reason breakdown and
+confirm a clinical measurement hierarchy first.
+
+The new aggregate-only audit characterizes:
+- selected single identifier vs provisional ACC/ORD pairing vs other
+  examination/identifier review;
+- among selected patient-days, consistent absolute-mL volume, no
+  recognized/usable numeric volume, and values held for method or
+  unit review.
+
+```bash
+python -m pytest tests/test_echo_cohort_preview_diagnostics.py -q
+```
+
+Fresh IPython inside MCP:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.cohort_preview_diagnostics import run_preview_barrier_audit
+
+study = load_study()
+eng = make_engine("bigquery", study)
+private_detail, exam_barriers, volume_barriers = run_preview_barrier_audit(eng, study)
+
+print("EXAMINATION SELECTION BARRIERS")
+print(exam_barriers.to_string(index=False))
+print("VOLUME REASONS WITHIN SINGLE IDENTIFIER GROUPS")
+print(volume_barriers.to_string(index=False))
+```
+
+**Keep `private_detail` inside MCP**, where it includes patient keys,
+numeric values, and potentially full echo report text. The detailed
+within-MCP helper `within_mcp_reason_counts(private_detail)` returns
+PRIVATE status breakdowns that are **not approved to export or screenshot**
+without disclosure review. The two printed aggregate tables redact
+all counts in a category group if any positive cell is below the
+small-cell threshold, protecting against subtraction from the known
+denominator. Cross-report disclosure checks may require further redaction.
+
+Next step: if method/unit review dominates, distinguish within-method
+duplicate conflicts from legitimate differences across biplane/3D/
+single-plane measurements in a separate *diagnostic*; seek clinical
+approval for a priority policy before altering production extraction.
+If provisional ACC/ORD pairing dominates, establish authoritative exam
+identity with Mayo, rather than automatically accepting timestamp pairs.
