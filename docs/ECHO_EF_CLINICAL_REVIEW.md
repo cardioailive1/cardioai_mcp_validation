@@ -210,15 +210,78 @@ The source-wide OMOP note-title screen found `Echo Report Text`,
 totals were **not** cohort-specific. The initial broad regex also
 matched unrelated *Letter* titles through substring `tte`, which
 was corrected. A cohort-scoped OMOP note overlap and numeric-source
-audit has now been added, but its BigQuery results **have not been
-received yet**. Therefore the incremental recoverable coverage for
-report-derived labels, LVESV or LA diameter is still unknown.
+audit has now run inside MCP. See the 2026-11-18 results immediately
+below.
 
 **Do not conflate** the deck's `wall_motion` field (derived from
 `echo_report`) with the model-performance reference
 `ref_wma` (from the separate `echo_wm_reference` table). Improving
 report extraction does not itself establish that the latter has
 been built and clinically adjudicated.
+
+### Second-pass numeric-result and report-overlap findings (2026-11-18)
+
+The following aggregates were observed on the **unchanged saved cohort**
+after applying the curated OMOP echo-note title matching and numeric
+parseability screens. They measure *potential availability*, not validated
+clinical reference values or approved exam assignment.
+
+| Discovery measure | Patient/index-days | Denominator |
+|---|---:|---:|
+| Current extracted report text | 282 (18.80%) | 1,500 |
+| Same-day conventional `FACT_ECHO_TEST.ECHO_NOTE` | 592 (39.47%) | 1,500 |
+| Curated OMOP echo note, index day or +1 | 429 (28.60%) | 1,500 |
+| **Union: at least one report text candidate** | **980 (65.33%)** | **1,500** |
+| Curated OMOP candidate not already extracted | 156 (10.40%) | 1,500 |
+| Source or OMOP note containing wall-motion keywords | 754 (50.27%) | 1,500 |
+| OMOP note containing image-quality keywords | 52 (3.47%) | 1,500 |
+| OMOP note containing indication keywords | 0 | 1,500 |
+| Numeric `LA_dim_s_MM` or `LA_dim_es_2D` | **39 (2.60%)** | 1,500 |
+| Numeric `Body_Surface_area` | 1,210 (80.67%) | 1,500 |
+| Numeric `LV_WMS_index_2D` / `MC CV WALL MOTION SCORE INDEX` | 346 (23.07%) | 1,500 |
+
+The 980 potential report-text patient-days are a union across three
+sources, **not their sum**; their overlap with distinct clinical exams
+and with the model's wall-motion reference is not validated. The
+available source/OMOP wall-motion keywords (754) are not equivalent
+to validated wall-motion labels. Even if all 980 note candidates
+were linked correctly and yielded labels, note text alone could
+supply no more than 65.33% of this fixed cohort, below the individual
+wall-motion target of 95% (1,425/1,500). More complete or different
+reference sources, improved mapping, or a clinically authorized
+protocol decision would be needed.
+
+The numeric LA-diameter rows were observed only under the two screened
+result names, with explicit units **mm**: `LA_dim_s_MM` (26) and
+`LA_dim_es_2D` (13), totaling 39 unique cohort patient-days in the
+audit. This is only 2.60% against the configured 85% (1,275/1,500)
+target. This **does not prove** all other potential LA diameter
+sources are absent; it means the currently identified source names
+do not supply the requirement. LA volume, LA area, and indexed LA
+volume are not equivalent to LA diameter and must not be silently
+substituted.
+
+The numeric-result table withheld the LVEDV, LVESV and LA-volume
+counts as **suppressed**, due to the audit's within-row complementary
+small-difference rule. The suppression is **not evidence of low
+coverage**, nor does it overturn the separately conducted provisional
+969-patient-day LVEDV examination-aware audit. LVESV should be
+verified under an approved disclosure-safe approach if exact
+aggregate counts are necessary.
+
+`FACT_ECHO_TEST` still has no dedicated height/weight columns.
+A numeric BSA in 1,210 patient-days does not recover either
+individual measurement. The WMSI result name reflects a numeric
+**score index** and is not an approved replacement for the
+categorical wall-motion reference or a complete 17-segment label.
+
+**Decision gate:** Request developer/clinical input on whether
+a separate note/report or exam-linked measurement source exists for
+wall-motion, image-quality, indication and LA diameter; independently
+validate any new join and measurement-unit definitions. Do not
+rebuild `echo_analytic`, promote a reference, substitute endpoints,
+or change the locked completeness targets based on these exploratory
+counts.
 
 ### Interpretation, constraints, and decision requests
 
