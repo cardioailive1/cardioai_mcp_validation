@@ -57,8 +57,8 @@ def tte_record_rows_sql(modality_cfg: dict, *, start: str, end: str,
     exam_date_predicate = (
         f"CAST(t.{e['datetime']} AS DATE) = CAST(a.index_date AS DATE)"
         if day_offset == 0 else
-        f"CAST(t.{e['datetime']} AS DATE) = "
-        "DATE_ADD(CAST(a.index_date AS DATE), INTERVAL 1 DAY)"
+        f"DATEDIFF(CAST(t.{e['datetime']} AS DATE), "
+        "CAST(a.index_date AS DATE)) = 1"
     )
     return f"""
     SELECT DISTINCT a.person_id,

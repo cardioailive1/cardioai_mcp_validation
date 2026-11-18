@@ -661,3 +661,48 @@ ceiling in the limited mapped source, not a validated reference.
 - To confirm in the workspace: the `DIM_ECHO_TEST`, `FACT_ECHO_RESULTS` and `DIM_ECHO_TEST_RESULT_TYPE` key names; whether `FACT_ECHO_TEST` still carries `PATIENT_DK` (MCP is retiring it in some tables) or `PATIENT_CLINIC_NUMBER`.
 - Clinical lead: sign the sign-off sheet (rule sheet incl. rules 4 and 8, A3C apical slots, territory map, red flags, goals). Proposals are in the code, marked proposed.
 - Territory output is "consistent with" an AHA territory, not a coronary diagnosis: coronary anatomy varies (dominance, wrap-around LAD).
+
+### Source-wide conventional-TTE LVEDV availability (read-only)
+
+After the next-day/indexed-volume audits, distinguish **source-data
+availability** from cohort-selection effects. The source-wide audit
+measures FACT_ECHO_TEST records (identified by ECHO_TEST_FPK) from the
+configured study window and compares them with records linked to the
+existing echo_analytic index day. It preserves the same conventional
+TTE inclusion/exclusion predicates and checks five known absolute LVEDV
+result names for numeric values 20–500 mL.
+
+**Important:** ACC and ORD can describe the same clinical examination;
+record-level percentages are **not** clinical examination-level or
+patient-level completeness and do not validate the 90% cohort threshold.
+No LVEF disagreement gate is applied to the availability measure. The
+extra Mayo result name and numeric screening range remain provisional,
+subject to clinical review. The query is native GoogleSQL and executes
+through the BigQuery client, bypassing Spark/SQLGlot date and SAFE_CAST
+transpilation problems.
+
+In the MCP Cloud PC (after merging this branch into the MCP source
+repository):
+
+```bash
+python -m pytest tests/test_echo_source_availability.py -q
+```
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.source_availability import run_source_availability_audit
+
+study = load_study()
+eng = make_engine("bigquery", study)
+by_source, safe_by_type = run_source_availability_audit(eng, study)
+print("Source-record availability by scope/source:")
+print(by_source.to_string(index=False))
+print("Test types with non-small cells in both outcome categories:")
+print(safe_by_type.to_string(index=False))
+```
+
+Query output is aggregate only. Follow MCP disclosure controls when sharing
+aggregate counts, including complementary suppression if relevant. Do not
+export row-level identifiers or change `echo_analytic` based on these rates.
+

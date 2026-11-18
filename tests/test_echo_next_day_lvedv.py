@@ -13,12 +13,12 @@ def test_next_day_sql_keeps_default_same_day_query_unchanged():
     day0 = tte_record_rows_sql(config, start="2020-01-01", end="2020-01-02")
     day1 = tte_record_rows_sql(config, start="2020-01-01", end="2020-01-02", day_offset=1)
     assert "CAST(t.ECHO_PERFORMED_DTM AS DATE) = CAST(a.index_date AS DATE)" in day0
-    assert "DATE_ADD(CAST(a.index_date AS DATE), INTERVAL 1 DAY)" in day1
-    assert "DATE_ADD" not in day0
+    assert "DATEDIFF(CAST(t.ECHO_PERFORMED_DTM AS DATE), CAST(a.index_date AS DATE)) = 1" in day1
+    assert "DATEDIFF" not in day0
     query = next_day_lvedv_rows_sql(config, start="2020-01-01", end="2020-01-02")
     assert "MC CV LV END DIASTOLIC VOLUME" in query
     assert "LEFT JOIN volume_rows" in query
-    assert "DATE_ADD(CAST(a.index_date AS DATE), INTERVAL 1 DAY)" in query
+    assert "DATEDIFF(CAST(t.ECHO_PERFORMED_DTM AS DATE), CAST(a.index_date AS DATE)) = 1" in query
 
 
 def test_next_day_counts_only_new_unambiguous_single_test():
