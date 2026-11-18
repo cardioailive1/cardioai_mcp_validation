@@ -339,6 +339,43 @@ classification, exclusion rule, saved `echo_lvef`, or cohort.
 original group and method family* by these checks, not that an examination
 is clinically resolved. The original 302 flags remain unchanged.
 
+### Mayo EF method taxonomy correction (read-only diagnostics)
+
+MCP examination of actual `result_label` values confirmed that three separate
+Mayo MOD result types were classified as `biplane` by the old broad
+`\\bmod\\b` match: `LV_EF_2C_2D_by_MOD`,
+`LV_EF_4C_2D_by_MOD`, and `LV_EF_BP_2D_by_MOD`.
+The first two are single-plane views; only `BP` is explicitly biplane.
+
+The taxonomy now recognizes those exact Mayo names, retains the existing
+provisional priority **tiers** (biplane > 3D > single-plane >
+Modified Quinones > visual > other), and introduces **diagnostic variants**
+within the single-plane and Modified Quinones tiers:
+`single_plane_2c_mod`, `single_plane_4c_mod`,
+`quinones_standard`, and `quinones_apical_correction`. The
+`MC CV ECHO EJECTION FRACTION` name remains `other` for clinical
+selection priority while receiving the diagnostic label `unspecified_ef`.
+
+The diagnostic within-method spread now measures within each variant;
+differences between variants are classified as between-variant disagreements
+even when their priority tier is the same. This improves attribution and
+**does not change** the >10-point total-range review flag, automatic
+withholding of discordant unified candidates, clinical approval requirements,
+or saved tables. Correcting the falsely-biplane single-plane regex can change
+which value a *read-only* candidate chooses when no review flag applies.
+Do not rerun the historical `echo_lvef` table writer or promote the
+provisional taxonomy without clinical review.
+
+```bash
+python -m pytest tests/test_echo_unified_reference.py tests/test_echo_ef_name_diagnostics.py tests/test_echo_exam_comparison.py -q
+```
+
+Recompute `build_unified_echo_diagnostics` after restarting IPython and
+compare category counts with the previous snapshot of 302 flags:
+144 within-method, 74 between-method, 67 mixed, 17 both. Changes to
+subcategory counts are expected; a large shift in the *total number of
+flagged groups* or eligibility warrants investigation before proceeding.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
