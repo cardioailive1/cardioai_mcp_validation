@@ -22,8 +22,12 @@ def tte_measurement_rows_sql(modality_cfg: dict, *, start: str, end: str) -> str
     rc, ty = r["columns"], r["result_type"]
     label = (f"CONCAT(COALESCE(CAST(ty.{ty['name']} AS STRING), ''), ' | ', "
              f"COALESCE(CAST(ty.{ty['description']} AS STRING), ''))")
-    ef = (f"({label} RLIKE {_rx(r['lvef_regex'])} "
-          f"AND NOT ({label} RLIKE {_rx(r['exclude_regex'])}))")
+    # The accession-side Mayo result catalog names EF explicitly. Keep this
+    # alongside the configured LVEF regex, rather than depending on the
+    # description remaining unchanged.
+    ef = (f"(ty.{ty['name']} = 'MC CV ECHO EJECTION FRACTION' OR "
+          f"({label} RLIKE {_rx(r['lvef_regex'])} "
+          f"AND NOT ({label} RLIKE {_rx(r['exclude_regex'])})))")
     volumes = ", ".join(f"'{v}'" for v in LVEDV_PRIORITY)
     return f"""
     WITH tte AS ({tte})
