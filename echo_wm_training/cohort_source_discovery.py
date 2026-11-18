@@ -172,7 +172,7 @@ def echo_note_titles_sql(cdm_schema: str, *, small_cell: int = 11) -> str:
 SELECT CAST(note_title AS STRING) AS note_title, COUNT(*) AS note_rows
 FROM {cdm_schema}.note
 WHERE REGEXP_CONTAINS(LOWER(COALESCE(CAST(note_title AS STRING), '')),
-  r'echo|tte|transthoracic|ultrasound.*heart|cardiac us')
+  r'echo|\\btte\\b|transthoracic|ultrasound.*heart|cardiac us')
 GROUP BY 1
 HAVING COUNT(*) >= {small_cell}
 ORDER BY note_rows DESC
