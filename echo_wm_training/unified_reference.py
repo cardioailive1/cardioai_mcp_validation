@@ -34,7 +34,8 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
                             results_cfg: dict, *, max_seconds: int = 60) -> pd.DataFrame:
     """One row per provisional/residual exam group; never silently merge conflicts."""
     cols = ["person_id", "index_date", "group_key", "partner_key", "group_status",
-            "record_source", "lvef", "lvedv", "lvef_conflict", "lvedv_conflict",
+            "record_source", "lvef", "lvedv", "lvef_source", "lvedv_source",
+            "lvef_conflict", "lvedv_conflict",
             "candidate_exams", "candidate_status"]
     if tte_rows.empty:
         return pd.DataFrame(columns=cols)
@@ -57,17 +58,19 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
             has_x, has_y = pd.notna(x), pd.notna(y)
             if has_x and has_y:
                 if float(x) != float(y):
-                    return None, True
-                return float(x), False
-            return (float(x) if has_x else float(y) if has_y else None), False
-        ef, ef_conflict = choose("lvef")
-        edv, edv_conflict = choose("lvedv")
+                    return None, "CONFLICT", True
+                return float(x), "BOTH", False
+            source = group.key_type if has_x else ("ORD" if group.key_type == "ACC" else "ACC") if has_y else None
+            return (float(x) if has_x else float(y) if has_y else None), source, False
+        ef, ef_source, ef_conflict = choose("lvef")
+        edv, edv_source, edv_conflict = choose("lvedv")
         entries.append(dict(
             person_id=group.person_id, index_date=group.index_date,
             group_key=group.group_key, partner_key=partner,
             group_status=group.status,
             record_source=("ACC+ORD" if partner else group.key_type),
-            lvef=ef, lvedv=edv, lvef_conflict=ef_conflict,
+            lvef=ef, lvedv=edv, lvef_source=ef_source,
+            lvedv_source=edv_source, lvef_conflict=ef_conflict,
             lvedv_conflict=edv_conflict,
         ))
     result = pd.DataFrame(entries)
