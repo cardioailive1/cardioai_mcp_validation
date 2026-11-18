@@ -57,8 +57,18 @@ def test_synthetic_barrier_counts_are_pure_aggregates():
 
 def test_suppress_all_exam_categories_when_one_category_is_small():
     s = _sample()
+    # Change the synthetic examination classification *and* the volume
+    # statuses consistently. A selected exam cannot have the extractor's
+    # "exam_not_selected" sentinel. The sentinel is appropriate only for
+    # source groups intentionally withheld at the examination gate.
     s["exam_status"] = "single_identifier_group"
+    newly_selected = s["lv_end_diastolic_volume_status"].eq("exam_not_selected")
+    for metric in ("lv_end_diastolic_volume", "lv_end_systolic_volume"):
+        s.loc[newly_selected, metric + "_status"] = "no_named_measurement"
     s.loc[:4, "exam_status"] = "provisional_pair_requires_review"
+    # These five are now withheld and should carry the corresponding sentinel.
+    for metric in ("lv_end_diastolic_volume", "lv_end_systolic_volume"):
+        s.loc[:4, metric + "_status"] = "exam_not_selected"
     exam, _ = summarize_preview_barriers(s, small_cell=11)
     assert (exam.patient_days == "suppressed").all()
 
@@ -79,6 +89,17 @@ def test_suppress_all_reason_categories_for_small_positive_remainder():
     edv = volume.query("metric == 'lv_end_diastolic_volume'")
     assert (edv.selected_group_patient_days == "suppressed").all()
 
+
+
+
+
+def test_rejects_inconsistent_selected_exam_and_volume_reason():
+    s = _sample()
+    # A production regression guard: a selected examination with the
+    # "exam_not_selected" sentinel must be flagged, not hidden in "missing".
+    s.loc[70, "exam_status"] = "single_identifier_group"
+    with pytest.raises(ValueError, match="Unknown volume preview reason"):
+        summarize_preview_barriers(s)
 
 def test_rejects_unknown_status_and_missing_columns():
     s = _sample()
