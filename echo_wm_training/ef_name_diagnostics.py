@@ -10,7 +10,7 @@ import re
 import pandas as pd
 
 from .exam_comparison import _clean_string
-from .mcp_echo import parse_lvef
+from .mcp_echo import parse_lvef, classify_lvef_method
 
 
 def diagnose_within_method_names(measurement_rows: pd.DataFrame,
@@ -64,11 +64,9 @@ def diagnose_within_method_names(measurement_rows: pd.DataFrame,
     data.loc[acc.notna(), "group_key"] = "ACC:" + acc[acc.notna()]
     data["number"] = data.result_value.map(parse_lvef)
     data = data[data.number.notna()].copy()
-    rules = [(rule["method"], re.compile(rule["regex"], re.I))
-             for rule in results_cfg["method_priority"]]
-    def classify(label: str) -> str:
-        return next((name for name, regex in rules if regex.search(str(label))), "other")
-    data["method"] = data.result_label.map(classify)
+    data["method"] = data.result_label.map(
+        lambda label: classify_lvef_method(label, results_cfg)[2]
+    )
     data["result_name"] = data.result_name.fillna("").astype(str).str.strip()
     threshold = float(results_cfg.get("lvef_disagreement_threshold_pp", 10.0))
     lookup = {key: group for key, group in data.groupby(
