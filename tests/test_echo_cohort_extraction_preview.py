@@ -7,6 +7,8 @@ from echo_wm_training.cohort_extraction_preview import (
     echo_source_note_rows_sql,
     echo_volume_rows_sql,
     preview_echo_extraction,
+    suppress_completeness_comparison,
+    suppress_exam_statuses,
 )
 from cardioai_mcp.config import load_study
 
@@ -139,3 +141,25 @@ def test_completeness_comparison_is_read_only_and_only_changes_volumes():
     assert r.loc["wall_motion", "after"] == r.loc["wall_motion", "before"]
     assert r.loc["image_quality", "after"] == r.loc["image_quality", "before"]
     assert r.loc["clinical_indication", "after"] == r.loc["clinical_indication", "before"]
+
+
+def test_public_completeness_suppresses_small_counts_and_delta():
+    cohort = load_cohort("echo")
+    analytic = _cohort(tuple(range(1500)))
+    for el in cohort.deck_elements:
+        analytic[el.name] = None
+    # Old existing LVEDV 10 (<small_cell) must not appear as 0.67%.
+    analytic.loc[:9, "lv_end_diastolic_volume"] = 120.
+    private = analytic[["person_id", "index_date"]].copy()
+    private["lv_end_diastolic_volume"] = None
+    private.loc[10:20, "lv_end_diastolic_volume"] = 125.
+    private["lv_end_systolic_volume"] = None
+    report, _ = compare_echo_completeness(cohort, analytic, private)
+    safe = suppress_completeness_comparison(report, cohort_size=1500)
+    lv = safe.set_index("element").loc["lv_end_diastolic_volume"]
+    assert pd.isna(lv.before_pct) and pd.isna(lv.after_pct)
+    assert lv.status == "SUPPRESSED"
+    statuses = pd.DataFrame(dict(exam_status=["single_identifier_group"]*1499 +
+                                               ["multiple_exams"]))
+    ss = suppress_exam_statuses(statuses)
+    assert (ss.patient_days == "suppressed").all()
