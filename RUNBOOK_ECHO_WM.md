@@ -871,3 +871,58 @@ provisional coverage is not clinically validated completeness.
 Keep any patient/exam-level adjudication and small-cell findings
 inside MCP. The latest audit did not write or rebuild any BigQuery
 table.
+
+### Read-only pre-PR echo source discovery on the saved cohort
+
+Before changing `config/cohorts/echo.yaml`, verify actual source-result
+names, schema fields, and report coverage. This **does not rebuild the
+cohort or extract raw patient/note/result rows**. Unlike a source-wide
+result-name inventory, the result-type counts in this discovery are
+restricted to the saved cohort's **same-day conventional TTE records**.
+
+After merging the fork's `validation/echo-wm-mcp` changes into MCP's
+corporate source repository and pulling the result:
+
+```bash
+python -m pytest tests/test_echo_cohort_source_discovery.py -q
+```
+
+Run in fresh IPython inside the MCP Cloud PC:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.cohort_source_discovery import run_echo_source_discovery
+
+study = load_study()
+eng = make_engine("bigquery", study)
+result_types, source_columns, note_titles, report_coverage = (
+    run_echo_source_discovery(eng, study)
+)
+print("\\nRESULT TYPES on cohort index-day conventional TTEs (count-gated):")
+print(result_types.to_string(index=False))
+print("\\nMAYO ECHO source schema (metadata only):")
+print(source_columns.to_string(index=False))
+print("\\nOMOP echo-like NOTE titles (source-wide, count-gated):")
+print(note_titles.to_string(index=False))
+print("\\nCOHORT ECHO_NOTE and existing report-coverage flags:")
+print(report_coverage.to_string(index=False))
+```
+
+**Interpretation:** Result-type rows are aggregated by result name and
+description, with counts of result rows, source tests and distinct
+patient/index-days; the current screen excludes types below the configured
+minimum count. Source tests can be multiple representations of the same
+clinical exam. ECHO_NOTE keyword flags indicate *only text availability /
+candidate phrases*, **not clinically valid wall-motion, image-quality or
+indication labels**. Echo test table height/weight columns, if present,
+still require unit and provenance checks; do not silently extend OMOP
+lookback windows.
+
+`source_columns` and the count-gated tables contain no clinical values,
+but the metadata, small cells and combinations still require the site's
+disclosure rules before screenshots are sent outside MCP. Do not export
+unredacted `ECHO_NOTE`, `FACT_ECHO_RESULTS` values, patient identifiers
+or accessions. Do not make new mappings, change completeness goals,
+or rebuild `echo_analytic` until the source names and clinical identity
+requirements have been reviewed.
