@@ -82,7 +82,7 @@ def report_labels(text: Optional[str], cfg: dict) -> dict:
     if ane == 0.0 and lab.get("aneurysm_uncertain_regex") and re.search(lab["aneurysm_uncertain_regex"], text):
         ane = nan                                          # "aneurysmal segment" / dyskinesis, no aneurysm named
     mvo = present(lab["mvo_regex"])
-    ef = re.search(lab["lvef_regex"], text)
+    ef = first_value(text, lab["lvef_regex"], lab.get("lvef_exclude_regex"))
     size = re.search(lab["infarct_size_regex"], text)
     return {"infarct": infarct, "nonischemic_lge": nonisch,
             "lv_thrombus": thr if (thr != 0.0 or default_neg) else nan,
@@ -90,6 +90,20 @@ def report_labels(text: Optional[str], cfg: dict) -> dict:
             "report_mvo": mvo,
             "report_lvef": float(ef.group("val")) if ef else nan,
             "report_infarct_size": float(size.group("val")) if size else nan}
+
+
+_CLAUSE_END = re.compile(r"[;|\n]|\.(?!\d)")
+
+
+def first_value(text: str, pattern: str, exclude: Optional[str] = None):
+    """First match of pattern whose clause (text since the last ; | sentence end or line break, up to the match)
+    does not match exclude: skips "rv ejection fraction = 40%" in a measurement list that also gives the LV value."""
+    for m in re.finditer(pattern, text):
+        start = max([0] + [e.end() for e in _CLAUSE_END.finditer(text, 0, m.start())])
+        if exclude and re.search(exclude, text[start:m.start()] + m.group(0)):
+            continue
+        return m
+    return None
 
 
 def make_labels(ev: pd.DataFrame, cfg: dict) -> pd.DataFrame:

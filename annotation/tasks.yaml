@@ -146,7 +146,7 @@ label_audit:
       # it was not done.
       lge_not_done: 'non[- ]?contrast|no (iv )?(gadolinium|contrast)|without (iv )?(gadolinium|contrast)|(gadolinium|contrast|lge|delayed enhancement|late enhancement)( imaging| images| sequences?)? (was |were )?(not|never) (given|administered|performed|obtained|acquired)'
       value_exclude:
-        report_lvef: '\b(rvef|right ventric|echo(cardiogra)?|previous|prior study|tte)\b'
+        report_lvef: '\b(rv|rvef|right ventric|echo(cardiogra)?|previous|prior study|tte)\b'
         report_infarct_size: '\bgrams?\b|\bg\b'
     ecg:
       concepts:
