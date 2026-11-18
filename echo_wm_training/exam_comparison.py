@@ -11,7 +11,7 @@ import pandas as pd
 
 from .exam_resolution import resolve_tte_groups, tte_record_rows_sql
 from .exam_results import LVEDV_PRIORITY
-from .mcp_echo import _cfg, _macro, _rx, parse_lvef
+from .mcp_echo import _cfg, _macro, _rx, parse_lvef, classify_lvef_method
 
 
 def tte_measurement_rows_sql(modality_cfg: dict, *, start: str, end: str) -> str:
@@ -66,8 +66,6 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
     d["group_key"] = "TEST:" + fpk
     d.loc[order.notna(), "group_key"] = "ORD:" + order[order.notna()]
     d.loc[acc.notna(), "group_key"] = "ACC:" + acc[acc.notna()]
-    methods = [(x["method"], re.compile(x["regex"], re.I))
-               for x in results_cfg["method_priority"]]
     rank = {name: idx for idx, name in enumerate(LVEDV_PRIORITY)}
     out = []
     for (pid, dt, key), g in d.groupby(["person_id", "index_date", "group_key"]):
@@ -85,13 +83,11 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
         if not ef.empty:
             # Classify ALL plausible measurements before selecting a preferred
             # method, so a priority change cannot hide conflicting measurements.
-            def ef_rank(label):
-                return next((i for i, (_, rx) in enumerate(methods)
-                             if rx.search(str(label))), len(methods))
-            ef["rank"] = ef.result_label.map(ef_rank)
-            ef["method_group"] = ef["rank"].map(
-                lambda rank: methods[rank][0] if rank < len(methods) else "other"
+            classified = ef.result_label.map(
+                lambda label: classify_lvef_method(label, results_cfg)
             )
+            ef["rank"] = classified.map(lambda value: value[0])
+            ef["method_group"] = classified.map(lambda value: value[2])
             spread_by_method = ef.groupby("method_group")["number"].agg(
                 lambda values: float(values.max() - values.min())
             )
