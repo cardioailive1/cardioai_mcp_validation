@@ -318,6 +318,42 @@ exam-gating from absent numeric names and method/unit rejection.
 Its BigQuery run is pending. **No cohort rebuild or threshold change
 is supported by this intermediate preview.**
 
+### Held LVEDV/LVESV measurement review: unit metadata (2026-11-18)
+
+A subsequent read-only audit of the strict preview split 1,500 saved
+cohort patient-days into **703 selected single-identifier groups**,
+**718 provisional ACC/ORD pairings needing examination-identity
+review**, and **79 other exam/identifier review cases**.
+
+Within the 703 selected patient-days:
+
+| Volume disposition | LVEDV | LVESV |
+|---|---:|---:|
+| Unique consistent, explicit absolute-mL value | 58 | 61 |
+| No recognized, usable numeric result | 191 | 194 |
+| Held for unit or method review | 454 | 448 |
+
+For the **454 held LVEDV cases** a further non-overlapping diagnostic
+found: **24** unit metadata issues only, **11** different method
+values only, **0** isolated same-method conflicts with otherwise
+recognized units, and **419** both unit metadata and numeric
+differences. Thus **443 of the 454** held LVEDV cases have at least
+one in-range measurement with a missing or non-mL unit field.
+This is not a statement that all 443 have *blank* units, nor that
+they are invalid clinical measurements; the combined category may
+also contain within-method disagreement. LVESV's finer-grained
+breakdown was suppressed in compliance with the audit's small-cell
+safeguard.
+
+**Implication:** Do not equate the strict 4.07% preview LVESV
+completeness to source availability. Confirm actual unit codes and
+the unit conventions of each specific Mayo volume result name before
+relaxing this engineering check. A follow-up aggregate-only
+`echo_wm_training.volume_unit_profile` diagnostic has been added to
+separate explicit mL, missing, non-mL and mixed unit metadata *by
+source result name*. Its MCP execution is pending. No cohort
+rebuild, reference promotion or threshold change has occurred.
+
 ### Interpretation, constraints, and decision requests
 
 - **Source absence dominates:** At least 485 index-day patient-days
