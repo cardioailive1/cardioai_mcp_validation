@@ -843,3 +843,31 @@ suppressed per MCP policy before external distribution. **No provisional
 pair establishes one clinical examination**, and no multiple-exam case
 should be promoted automatically. Compare result-count categories
 before the clinical review report; no 90% threshold change.
+
+### Clinical review handoff after LVEDV feasibility audit (2026-11-18)
+
+The aggregate findings across the source, cohort, mapping-gap, and
+22-case examination-topology audits are consolidated in
+`docs/ECHO_EF_CLINICAL_REVIEW.md` under *LVEDV structured-availability
+assessment*. The report records 1,500 saved cohort index-days,
+951 provisional mapped candidate values, 18 additional Mayo-label
+potential values (969 total, not yet clinically approved), and the
+381-patient-day shortfall against the unchanged 90% target. Of the
+41 source-present/noncandidate patient-days, 23 require examination
+identity review; none is automatically approved.
+
+**Before another cohort build or a rule change:** obtain documented
+clinical/study-owner decisions on absolute LVEDV result names and units,
+ACC/ORD exam identity evidence, index-day alignment, whether other
+validated data sources may be used, and whether 90% patient-level
+availability is feasible under the approved study denominator.
+This is a review checkpoint, not a reason to relax thresholds or select
+high-completeness test types retrospectively.
+
+The clinical-review Markdown contains **aggregates and analytical
+interpretation only**, not patient IDs or DICOM/clinical rows. Its
+source-record rates are not examination rates; its technical
+provisional coverage is not clinically validated completeness.
+Keep any patient/exam-level adjudication and small-cell findings
+inside MCP. The latest audit did not write or rebuild any BigQuery
+table.
