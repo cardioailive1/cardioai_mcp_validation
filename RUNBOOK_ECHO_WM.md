@@ -482,6 +482,56 @@ need clinical approval.
 See `docs/ECHO_EF_CLINICAL_REVIEW.md` for the evidence summary and
 clinical sign-off questions. Neither script writes to BigQuery.
 
+### Next-day LVEDV coverage audit (read-only, not a cohort rebuild)
+
+The conventional TTE SQL defaults to strict index-day matching. The
+`day_offset=1` switch is exclusively for investigating tests performed
+the following day; it does **not** change the current reference selection,
+acceptability decisions, or persisted `echo_analytic` rows.
+
+Previously observed in MCP: 664 conservative index-day LVEDV candidates,
+287 index-day patients with LVEDV but excluded because of EF disagreements
+(and no detected LVEDV-specific conflict), and 18 additional patient-days
+from `MC CV LV END DIASTOLIC VOLUME`, each linked to a single-exam
+candidate. The resulting 969 *potential* covered patient-days are not
+approved reference values. We must not assume +1-day tests are the index
+examination merely because they belong to the same patient.
+
+```bash
+python -m pytest tests/test_echo_next_day_lvedv.py tests/test_echo_exam_resolution.py -q
+```
+
+In the existing MCP IPython session with `study`, `eng`, `cohort`,
+`candidates`, and the prior `recovered` 18-row DataFrame:
+
+```python
+from echo_wm_training.next_day_lvedv import (
+    next_day_lvedv_rows_sql, summarize_next_day_lvedv,
+)
+
+next_sql = next_day_lvedv_rows_sql(
+    study["modality"],
+    start=str(study["index_start"]),
+    end=str(study["index_end"]),
+)
+next_day_rows = eng.query(eng.render(next_sql, {}))
+next_day_evidence, next_day_summary = summarize_next_day_lvedv(
+    next_day_rows, cohort, candidates, recovered,
+)
+for label, value in next_day_summary.items():
+    print(f"{label}: {value}")
+```
+
+**Keep** `next_day_rows` and `next_day_evidence` within MCP (they
+contain patient/exam identifiers). Aggregate numbers are evidence only.
+A conservative next-day candidate has precisely one next-day
+`ECHO_TEST_FPK`, a numeric absolute LVEDV of 20–500 mL from one of
+the five candidate result names, and no disagreement among values under
+the *same* result name. This is deliberately conservative and still
+requires clinical examination identity and timing review. A broader
+`next_day_any_valid_lvedv_while_missing` count is an availability
+ceiling in the limited mapped source, not a validated reference.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
