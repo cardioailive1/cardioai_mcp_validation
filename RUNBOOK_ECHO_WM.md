@@ -376,6 +376,56 @@ compare category counts with the previous snapshot of 302 flags:
 subcategory counts are expected; a large shift in the *total number of
 flagged groups* or eligibility warrants investigation before proceeding.
 
+### EF method-pair disagreement ranking (read-only)
+
+After correcting the Mayo 2C, 4C, biplane, and Quinones variant taxonomy,
+the prior 302 EF review flags redistributed to **293 between-method**,
+**8 mixed-spread**, and **1 within-method**. The 293 between-method groups
+are the subject of a separate **read-only** pair diagnostic. This does not
+alter the total-range threshold, the reference policy, or any saved table.
+
+```bash
+python -m pytest tests/test_echo_ef_method_pair_diagnostics.py -q
+```
+
+In a fresh MCP IPython session after running the previous
+`build_unified_echo_diagnostics`, execute the following. It reads only
+eligible TTE-linked measurement rows, and summarizes absolute differences
+between the *median* EF for each diagnostic method variant **within the same
+original ACC or ORD identifier group**. It never compares measurements
+across an unconfirmed ACC/ORD pair.
+
+```python
+from echo_wm_training.exam_comparison import tte_measurement_rows_sql
+from echo_wm_training.ef_method_pair_diagnostics import diagnose_ef_method_pairs
+
+sql = tte_measurement_rows_sql(
+    study["modality"],
+    start=str(study["index_start"]),
+    end=str(study["index_end"]),
+)
+rows = eng.query(eng.render(sql, {}))
+pair_details, pair_summary, source_coverage = diagnose_ef_method_pairs(
+    rows, candidate_exams, study["modality"]["echo"]["mcp"]["results"]
+)
+print("\\nTop method pairs with >10 EF-point median difference:")
+print(pair_summary.head(20).to_string(index=False))
+print("\\nSource coverage:")
+print(source_coverage.to_string(index=False))
+```
+
+`pair_details` is **patient-level confidential data** and must remain in
+MCP. The aggregate summary shows method pairs ranked by number of
+candidate examinations affected, number of original identifier groups,
+median/p90/max absolute EF difference. A single examination can have multiple
+discordant pairs; **sum of pair counts is not the number of unique
+examinations**. `source_coverage.candidates` is the number of groups *in
+scope* from the 293, while `source_groups` and `flagged_pairs` count
+underlying original groups and pair occurrences exceeding the same strict
+10 EF-point review threshold. Small-cell reporting must follow MCP policy.
+The diagnostic also retains pairs not exceeding the threshold in private
+`pair_details` so their presence can be audited locally.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
