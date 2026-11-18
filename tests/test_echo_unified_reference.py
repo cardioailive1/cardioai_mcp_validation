@@ -82,3 +82,55 @@ def test_read_only_baseline_sql_uses_existing_echo_lvef():
     assert "DATEDIFF" in sql
     assert "BETWEEN 0 AND 1" in sql
     assert "WRITE" not in sql.upper()
+
+
+def test_modified_quinones_is_not_biplane_and_large_ef_conflict_is_unresolved():
+    """Regression: 59/13/63/63 was previously reduced to visual EF=13."""
+    import re
+    from echo_wm_training.exam_comparison import _measurement_groups
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    methods = [(x["method"], re.compile(x["regex"], re.I))
+               for x in cfg["method_priority"]]
+    quin_label = "LV_EF_2D_by_mod_Quin | Left Ventricular EF Modified Quinones by 2-D"
+    hits = [name for name, rx in methods if rx.search(quin_label)]
+    assert hits[0] == "modified_quinones"
+    assert "biplane" not in hits
+    base = dict(person_id=11, index_date="2020-01-02",
+                echo_test_fpk="a", exam_datetime="2020-01-02 10:00:00",
+                accession_number="A", order_proc_id=None)
+    labels = [
+        (quin_label, "59"),
+        ("LV_EF_2D_by_vis_est | Left Ventricular EF Visual Estimate by 2-D", "13"),
+        ("LV_EF_2D_by_mod_Quin_Acf | Left Ventricular EF Modified Quinones with Apical Correction Factor by 2-D", "63"),
+        ("MC CV ECHO EJECTION FRACTION | Ejection Fraction", "63"),
+    ]
+    rows = pd.DataFrame([
+        {**base, "result_label": label, "result_name": label,
+         "result_value": value, "metric": "lvef"}
+        for label, value in labels
+    ])
+    selected = _measurement_groups(rows, cfg)
+    assert selected.lvef.iloc[0] == 61.0
+    assert selected.lvef_spread_pp.iloc[0] == 50.0
+    assert bool(selected.lvef_method_disagreement.iloc[0])
+    candidates = unified_exam_candidates(pd.DataFrame([base]), rows, cfg)
+    assert candidates.candidate_status.iloc[0] == "unresolved_method_disagreement"
+    assert pd.isna(candidates.lvef.iloc[0])
+
+
+def test_consistent_modified_quinones_candidate_is_retained():
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    base = dict(person_id=12, index_date="2020-01-02",
+                echo_test_fpk="b", exam_datetime="2020-01-02 10:00:00",
+                accession_number="B", order_proc_id=None)
+    values = pd.DataFrame([
+        {**base, "result_label": label, "result_name": label,
+         "result_value": value, "metric": "lvef"}
+        for label, value in [
+            ("LV_EF_2D_by_mod_Quin", "59"),
+            ("MC CV ECHO EJECTION FRACTION", "60"),
+        ]
+    ])
+    out = unified_exam_candidates(pd.DataFrame([base]), values, cfg)
+    assert out.candidate_status.iloc[0] == "single_exam_candidate"
+    assert out.lvef.iloc[0] == 59
