@@ -36,7 +36,8 @@ def test_pairwise_summary_tracks_each_method_pair_not_independent_patients():
     ])
     detail, summary, coverage = diagnose_ef_method_pairs(measurements, candidates, cfg)
     assert len(detail) == 4
-    assert int(detail.over_threshold.sum()) == 4
+    # The 4C-vs-biplane pair is 5 pp and must not be flagged.
+    assert int(detail.over_threshold.sum()) == 3
     pair = summary.loc[
         (summary.method_a == "single_plane_2c_mod") &
         (summary.method_b == "single_plane_4c_mod")
