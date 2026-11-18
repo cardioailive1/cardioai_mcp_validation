@@ -131,3 +131,71 @@ def diagnose_ef_method_pairs(
             "flagged_pairs": len(current),
         })
     return details, summary, pd.DataFrame(coverage, columns=coverage_cols)
+
+
+def summarize_all_ef_method_pairs(
+    measurement_rows: pd.DataFrame,
+    candidate_exams: pd.DataFrame,
+    results_cfg: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compare all variant pairs, including <=10 pp, in unambiguous TTE groups.
+
+    Include single_exam_candidate and unresolved_method_disagreement only.
+    These statuses are *diagnostic*: not proof of clinical eligibility or
+    ACC/ORD identity. A patient may contribute multiple source-side pairs.
+    Signed differences follow alphabetically sorted method_a - method_b;
+    never interpret a sign without reading these columns.
+
+    Returns (patient-level details for MCP only, aggregate pair summary).
+    No writes, no clinical decisions, no per-patient export.
+    """
+    statuses = {"single_exam_candidate", "unresolved_method_disagreement"}
+    scoped = candidate_exams.loc[
+        candidate_exams["candidate_status"].isin(statuses)
+    ].copy()
+    if scoped.empty:
+        return pd.DataFrame(), pd.DataFrame(columns=[
+            "method_a", "method_b", "candidates", "source_groups",
+            "pair_observations", "over_10pp", "pct_over_10pp",
+            "median_signed_pp", "median_abs_pp", "p90_abs_pp",
+            "method_a_higher", "method_b_higher", "equal",
+        ])
+    # Reuse the validated per-identifier median extraction, ensuring no
+    # measurements are compared across the provisional ACC/ORD pairing.
+    all_categories = tuple(scoped.lvef_disagreement_category.dropna().unique())
+    details, _, _ = diagnose_ef_method_pairs(
+        measurement_rows, scoped, results_cfg,
+        include_categories=all_categories,
+    )
+    summary_cols = [
+        "method_a", "method_b", "candidates", "source_groups",
+        "pair_observations", "over_10pp", "pct_over_10pp",
+        "median_signed_pp", "median_abs_pp", "p90_abs_pp",
+        "method_a_higher", "method_b_higher", "equal",
+    ]
+    if details.empty:
+        return details, pd.DataFrame(columns=summary_cols)
+    details["signed_pp"] = details["ef_a"] - details["ef_b"]
+    summaries = []
+    for (a, b), g in details.groupby(["method_a", "method_b"]):
+        n = len(g)
+        flagged = int(g.over_threshold.sum())
+        summaries.append(dict(
+            method_a=a, method_b=b,
+            candidates=len(g[["person_id", "index_date", "candidate_key"]].drop_duplicates()),
+            source_groups=len(g[["person_id", "index_date", "source_group_key"]].drop_duplicates()),
+            pair_observations=n,
+            over_10pp=flagged,
+            pct_over_10pp=round(100 * flagged / n, 1),
+            median_signed_pp=float(g.signed_pp.median()),
+            median_abs_pp=float(g.difference_pp.median()),
+            p90_abs_pp=float(g.difference_pp.quantile(.9)),
+            method_a_higher=int((g.signed_pp > 0).sum()),
+            method_b_higher=int((g.signed_pp < 0).sum()),
+            equal=int((g.signed_pp == 0).sum()),
+        ))
+    table = (pd.DataFrame(summaries, columns=summary_cols)
+             .sort_values(["pair_observations", "over_10pp"],
+                          ascending=[False, False])
+             .reset_index(drop=True))
+    return details, table
