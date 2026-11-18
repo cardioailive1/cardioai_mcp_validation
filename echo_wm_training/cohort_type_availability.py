@@ -171,14 +171,10 @@ def summarize_cohort_types(
     type_days = (tests.groupby(KEYS + ["test_type"], as_index=False)
                  .agg(source_lvedv=("has_mapped_lvedv", "any"),
                       source_test_records=("echo_test_fpk", "nunique")))
-    type_days = type_days.merge(disposition[KEYS + ["coverage_class"]],
-                                on=KEYS, how="left", validate="many_to_one")
     typed = (type_days.groupby("test_type", as_index=False)
              .agg(patient_days=("person_id", "size"),
                   with_mapped_lvedv=("source_lvedv", "sum"),
-                  source_test_records=("source_test_records", "sum"),
-                  with_provisional_candidate=(
-                      "coverage_class", lambda x: int((x == "provisional_candidate_lvedv").sum()))))
+                  source_test_records=("source_test_records", "sum")))
     typed["without_mapped_lvedv"] = typed.patient_days - typed.with_mapped_lvedv
     typed["availability_pct"] = (
         100 * typed.with_mapped_lvedv / typed.patient_days).round(2)
