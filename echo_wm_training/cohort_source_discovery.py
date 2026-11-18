@@ -200,7 +200,9 @@ def display_safe_coverage(
     if small_cell < 1:
         raise ValueError("small_cell must be positive")
     total = int(coverage.iloc[0].saved_cohort_days)
-    rows = []
+    rows = [dict(measure="saved_cohort_days",
+                 patient_days=(str(total) if total >= small_cell else "suppressed"),
+                 pct=(100.0 if total >= small_cell else None))]
     for col in columns[1:]:
         n = int(coverage.iloc[0][col])
         if not 0 <= n <= total:
