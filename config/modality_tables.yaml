@@ -135,7 +135,7 @@ echo:
     echo_test_columns:                         # CONFIRM column names in the workspace
       note: ECHO_NOTE
       datetime: ECHO_PERFORMED_DTM             # confirmed in MCP FACT_ECHO_TEST view (2026-11-17)
-      link: ACCESSION_NBR                      # key shared with the inventory (accession number or study UID)
+      link: ACCESSION_NUMBER                   # verified FACT_ECHO_TEST field; not a verified DICOM inventory join
       patient_dk: PATIENT_DK                   # add clinic_number: PATIENT_CLINIC_NUMBER if the table carries it
       performed_test_dk: ECHO_PERFORMED_TEST_DK   # -> DIM_ECHO_TEST (MCP 2026-10-28)
       test_key: ECHO_TEST_FPK                  # FACT_ECHO_RESULTS rows -> their echo test (in both views, 2026-11-11)
