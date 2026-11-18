@@ -426,6 +426,62 @@ underlying original groups and pair occurrences exceeding the same strict
 The diagnostic also retains pairs not exceeding the threshold in private
 `pair_details` so their presence can be audited locally.
 
+### Population-wide EF method pair comparison and clinical-review package
+
+The above flagged-only pair summary (823 flagged pair occurrences in 293
+candidate groups) is conditioned on >10 EF-point disagreement and cannot
+estimate overall method bias. A separate read-only summary now includes
+**all** observed variant pairs from the `single_exam_candidate` and
+`unresolved_method_disagreement` groups, regardless of their EF difference.
+Ambiguous/unresolved identifier candidates are excluded from that comparison.
+
+```bash
+python -m pytest tests/test_echo_ef_method_pair_diagnostics.py tests/test_echo_unified_reference.py -q
+```
+
+In a fresh MCP IPython session, this complete code computes the additional
+aggregate pair summary. Results remain unverified until run in MCP:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.unified_reference import build_unified_echo_diagnostics
+from echo_wm_training.exam_comparison import tte_measurement_rows_sql
+from echo_wm_training.ef_method_pair_diagnostics import summarize_all_ef_method_pairs
+
+study = load_study()
+eng = make_engine("bigquery", study)
+start, end = str(study["index_start"]), str(study["index_end"])
+cfg = study["modality"]["echo"]["mcp"]["results"]
+
+candidate_exams, comparison_rows, candidate_summary = build_unified_echo_diagnostics(
+    eng, study["modality"], start=start, end=end, max_seconds=60
+)
+sql = tte_measurement_rows_sql(study["modality"], start=start, end=end)
+measurement_rows = eng.query(eng.render(sql, {}))
+
+all_pair_details, all_pair_summary = summarize_all_ef_method_pairs(
+    measurement_rows, candidate_exams, cfg
+)
+print(all_pair_summary.head(25).to_string(index=False))
+print("Pair observations:", len(all_pair_details))
+print("Distinct candidates with >=2 methods:",
+      len(all_pair_details[["person_id", "index_date", "candidate_key"]].drop_duplicates()))
+```
+
+Only the aggregated summary should be reviewed outside MCP, subject to
+small-cell disclosure rules. `all_pair_details`, `measurement_rows`,
+`candidate_exams`, and `comparison_rows` contain patient/exam identifiers.
+Each pair's direction is `method_a - method_b`; positive values mean
+method A higher. A candidate may contribute more than one pair and,
+for provisional ACC/ORD matching, measurements are compared *separately*
+within each original side. This report is still not a clinically validated
+sample: reference hierarchy, cross-system identity, and +1-day allowance
+need clinical approval.
+
+See `docs/ECHO_EF_CLINICAL_REVIEW.md` for the evidence summary and
+clinical sign-off questions. Neither script writes to BigQuery.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
