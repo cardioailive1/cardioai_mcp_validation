@@ -105,6 +105,35 @@ records (including exams lacking these measurements), verify multi-date
 accessions and the LVEF/LVEDV method definitions, and compare the result
 against the current cohort on a stable sample within MCP.
 
+### Provisional TTE accession/order matching (read-only)
+
+MCP validation found that accession-bearing and order-only same-day TTE records
+frequently occur within 60 seconds, but timestamps are NOT proof that they
+refer to the same clinical examination. The `exam_resolution` diagnostic uses
+all TTE-classified `FACT_ECHO_TEST` records on the index date, not just
+measurement-bearing tests. It groups records by patient/date and accession
+(or `ORDER_PROC_ID` when accession is missing), then identifies candidate
+ACC/ORD pairs with a **mutually unique** match within 60 seconds. Groups
+with competing candidates are explicitly ambiguous. There is **no** automatic
+propagation into LVEF, LVEDV, the DICOM inventory, or the cohort.
+
+```python
+from echo_wm_training.exam_resolution import build_tte_match_diagnostics
+matches = build_tte_match_diagnostics(
+    eng, study["modality"], start=str(study["index_start"]),
+    end=str(study["index_end"]), max_seconds=60
+)
+print(matches.status.value_counts(dropna=False))
+print(matches.groupby("key_type").status.value_counts())
+```
+
+Only report aggregates outside the MCP workspace; `matches` has patient and
+examination identifiers. A provisional matching pair still requires an
+independent clinical linkage validation before using it as reference identity.
+This query currently compares tests on the **index date** only; the cohort's
+one-day LVEF allowance is a separate policy to evaluate before promotion.
+The TTE description regex is provisional and subject to clinical review.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
