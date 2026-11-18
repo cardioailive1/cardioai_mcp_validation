@@ -926,3 +926,75 @@ unredacted `ECHO_NOTE`, `FACT_ECHO_RESULTS` values, patient identifiers
 or accessions. Do not make new mappings, change completeness goals,
 or rebuild `echo_analytic` until the source names and clinical identity
 requirements have been reviewed.
+
+### Findings and read-only follow-up after 2026-11-18 echo-source discovery
+
+MCP output from the first discovery:
+
+- Saved `echo_analytic` denominator: **1,500**; same-day conventional
+  TTE source present: **1,477** (98.47%).
+- Current extracted `echo_report` nonblank: **282** (18.80%).
+- Same-day `FACT_ECHO_TEST.ECHO_NOTE` nonblank: **592** (39.47%);
+  source-note cue counts: wall motion **440**, quality **55**,
+  indication **0**. **Cues are not valid labels**; note overlap with
+  existing reports and OMOP notes has not been measured.
+- Observed structured source test-result names include LVEDV
+  `LV_vol_4C_ed_2D_by_MOD` (942 patient-days with a result row),
+  LVESV `LV_vol_4C_es_2D_by_MOD` (936), and LA-dimension
+  `LA_dim_s_MM` (26) and `LA_dim_es_2D` (13).
+  **A result row is not proof of a numeric/valid, exam-matched value.**
+  LA *volumes* are common but are not substitutes for LA *diameter*.
+- `FACT_ECHO_TEST` has `ECHO_NOTE`, but **no direct height/weight
+  columns** among its current schema fields. `Body_Surface_area`
+  appears among result types but cannot independently fill height and
+  weight.
+- The initial source-wide OMOP title regex `echo|tte|...` also matched
+  unrelated *Letter* titles (the substring `tte`). This has been
+  corrected to a word-bounded `tte` search.
+
+To establish numeric feasibility and candidate report coverage without
+writing a cohort, use the second-pass audit:
+
+```bash
+python -m pytest tests/test_echo_cohort_source_followup.py tests/test_echo_cohort_source_discovery.py -q
+```
+
+Fresh IPython inside MCP:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.cohort_source_followup import run_echo_source_followup
+
+study = load_study()
+eng = make_engine("bigquery", study)
+numeric_counts, la_diameter_units, note_coverage = run_echo_source_followup(eng, study)
+
+print("Numeric result-type coverage (patient-days; read-only):")
+print(numeric_counts.to_string(index=False))
+print("LA diameter source unit names (count-gated):")
+print(la_diameter_units.to_string(index=False))
+print("Existing vs source/OMOP echo-note candidate availability:")
+print(note_coverage.to_string(index=False))
+```
+
+The new note audit checks a *curated* list of observed OMOP echo report
+titles, linked by patient and index date or +1 day, and compares their
+availability with the current extracted report and same-day
+`FACT_ECHO_TEST.ECHO_NOTE`. This join is **provisional patient/date
+linkage**, not an approved exam-specific report choice. Numeric counts
+check parseability; screening ranges for LVEDV and LVESV are provisional.
+LA diameter units must be confirmed before any mm/cm conversion.
+These aggregate screens do **not** select clinical reference measurements.
+
+The displayed output applies conservative primary, complementary and
+within-row difference suppression. MCP's cumulative/disclosure policy
+still applies across reports; do not export patient rows, note text,
+result values, accession keys or unsuppressed small cells.
+
+Next PR only after discovery and clinical review: choose source columns
+and matching policies, preserve ambiguity checks, test against synthetic
+records, then compare a rebuilt cohort to the **unchanged saved baseline**.
+The separate wall-motion endpoint reference is `ref_wma` (from
+`echo_wm_reference`), whereas deck element `wall_motion` derives
+from `echo_report`; treat them as different fields.
