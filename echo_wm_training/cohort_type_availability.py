@@ -82,6 +82,11 @@ volume_tests AS (
              BETWEEN 20 AND 500
          ) > 0 AS has_mapped_absolute_lvedv,
          COUNTIF(
+           ty.{ty['name']} IN ({", ".join("'" + n.replace("'", "''") + "'" for n in LVEDV_PRIORITY)})
+           AND SAFE_CAST(TRIM(CAST(r.{rc['value']} AS STRING)) AS FLOAT64)
+             BETWEEN 20 AND 500
+         ) > 0 AS has_priority_lvedv,
+         COUNTIF(
            ty.{ty['name']} = '{ADDITIONAL_LVEDV_NAME}'
            AND SAFE_CAST(TRIM(CAST(r.{rc['value']} AS STRING)) AS FLOAT64)
              BETWEEN 20 AND 500
@@ -95,7 +100,8 @@ volume_tests AS (
 SELECT t.person_id, t.index_date, t.echo_test_fpk,
        t.test_type, t.record_source,
        COALESCE(v.has_mapped_absolute_lvedv, FALSE) AS has_mapped_lvedv,
-       COALESCE(v.has_mayo_named_lvedv, FALSE) AS has_mayo_lvedv
+       COALESCE(v.has_mayo_named_lvedv, FALSE) AS has_mayo_lvedv,
+       COALESCE(v.has_priority_lvedv, FALSE) AS has_priority_lvedv
 FROM source_tests t
 LEFT JOIN volume_tests v USING (echo_test_fpk)
 """

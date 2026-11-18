@@ -756,3 +756,50 @@ index dates). Type rows whose mapped or unmapped cell is smaller than
 `small_cell` are withheld. Still apply MCP disclosure rules, including
 secondary/complementary suppression when distributing aggregate output.
 Tests are synthetic; BigQuery execution must be verified inside MCP.
+
+### Why source LVEDV was not retained as an examination candidate
+
+Follow the cohort-specific availability audit with a diagnosis of its
+`source_lvedv_not_candidate` patient-days (41 in the latest MCP audit).
+This comparison distinguishes the additionally mapped Mayo result label
+from priority-name measurements, checks the provisional candidate's
+status, and partitions these patient-days into mutually exclusive
+mechanical exclusion reasons. This is **not** automatic recovery or
+clinical approval. The source SQL now provides an explicit
+`has_priority_lvedv` flag to avoid incorrectly treating tests
+containing *both* naming conventions as Mayo-only.
+
+Run in MCP after synchronizing this validation branch:
+
+```bash
+python -m pytest \
+  tests/test_echo_source_candidate_gap.py \
+  tests/test_echo_cohort_type_availability.py -q
+```
+
+Fresh IPython session (all dependencies initialized here):
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.source_candidate_gap import run_source_candidate_gap_audit
+
+study = load_study()
+eng = make_engine("bigquery", study)
+private_detail, reasons, candidate_statuses = run_source_candidate_gap_audit(eng, study)
+
+print("Source LVEDV present but no provisional candidate:", len(private_detail))
+print("Mutually exclusive patient-day exclusion reasons:")
+print(reasons.to_string(index=False))
+print("Diagnostic candidate-group status occurrences:")
+print(candidate_statuses.to_string(index=False))
+```
+
+The patient-day reason totals should sum to **41** for the current
+saved cohort and mapping. Candidate-group status occurrence counts
+may sum to more than 41 because an excluded patient-day can have
+multiple candidate groups. Review reasons before inferring recoverable
+measurements. All row-level patient/exam identifiers stay within MCP.
+Follow cell suppression and complementary suppression policies before
+sharing any small counts outside MCP. Do **not** rebuild
+`echo_analytic` or revise the 90% requirement based on this audit.
