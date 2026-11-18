@@ -998,3 +998,73 @@ records, then compare a rebuilt cohort to the **unchanged saved baseline**.
 The separate wall-motion endpoint reference is `ref_wma` (from
 `echo_wm_reference`), whereas deck element `wall_motion` derives
 from `echo_report`; treat them as different fields.
+
+### Staged, read-only LVEDV/LVESV and ECHO_NOTE extraction preview
+
+Following Sampson's 2026-11-18 review, stage the first two extraction
+improvements **without changing the saved cohort, thresholds, or clinical
+reference**. The original MCP corporate repository target branch is
+`echo-wm-mcp`. Our changes are prepared on GitHub fork
+`galaxog/cardioai_mcp_validation` branch `validation/echo-wm-mcp`;
+merging fork changes into the corporate source repository is a separate
+step from running `git pull --ff-only` within MCP.
+
+`echo_wm_training/cohort_extraction_preview.py` uses the existing
+`resolve_tte_groups` identifier/mutual-match logic. It conservatively
+reports `multiple_exams`, `unresolved_identifier` and
+`provisional_pair_requires_review`, and does not promote the associated
+measurements. It also withholds discordant numeric volume values, unknown
+units, conflicting test reports, and absent source texts. It accepts a
+staged *single unpaired identifier group* and **only** consistent
+absolute-mL LVEDV/LVESV measurements in preliminary numeric ranges.
+
+It separately selects `FACT_ECHO_TEST.ECHO_NOTE` only from that same
+single group. It does **not** yet apply report NLP to produce clinically
+validated wall-motion, image-quality or indication labels, and it does
+not use OMOP patient/date note matches lacking exam-level linkage.
+Those require clinical/source review. This first preview may be
+intentionally more conservative than the earlier 969 potential-LVEDV
+diagnostic, which used different provisional status assumptions.
+
+After merging and pulling code into MCP:
+
+```bash
+python -m pytest tests/test_echo_cohort_extraction_preview.py -q
+```
+
+In a **fresh IPython session in MCP**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.cohort_extraction_preview import run_echo_extraction_preview
+
+study = load_study()
+eng = make_engine("bigquery", study)
+private_detail, completeness_preview, exam_status_summary = (
+    run_echo_extraction_preview(eng, study)
+)
+print("EXAM SELECTION STATUS (disclosure-guarded):")
+print(exam_status_summary.to_string(index=False))
+print("ALL 27 COHORT ELEMENTS — CURRENT VS CONSERVATIVE VOLUME PREVIEW:")
+print(completeness_preview.to_string(index=False))
+print("No cohort, reference, or acceptance-criteria change was made")
+```
+
+**Never print or export `private_detail`**: it contains patient IDs
+and potentially raw `ECHO_NOTE` text. The exposed comparison and status
+reports apply count, complement and small-change suppression. Still
+check MCP's cross-report disclosure policies before sharing.
+Only LVEDV/LVESV can change in the initial 27-element comparison;
+other elements remain at their *existing* observed completeness.
+Do not interpret unchanged `wall_motion` as a test of new report NLP.
+
+When the preview and unit/name/examination policy have been reviewed,
+introduce a dedicated Mayo echo result extractor in
+`cardioai_mcp/extractors.py`, configured from
+`config/cohorts/echo.yaml` / `config/modality_tables.yaml`. Preserve
+source provenance and the conservative resolution gate. Integrate
+the selected exam's report with a separately validated text parsing
+policy. Then compare the locked before/after 27-field reports after
+an explicitly approved rebuild. Do **not** enable the generic placeholder
+`echo.study_table` source or loosen matching to increase coverage.
