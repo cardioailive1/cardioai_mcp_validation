@@ -172,8 +172,8 @@ echo:
       method_priority:                         # PROPOSED (clinical lead confirms): one LVEF per study, first match wins
         # Exact Mayo result names take precedence over descriptive prose. MOD
         # alone does not identify biplane: 2C/4C MOD are single-plane views.
-        - {method: biplane, regex: '(?i)(LV_EF_BP_2D_by_MOD|biplane|bi-plane|simpson|method of discs|\\bbp\\b)'}
-        - {method: 3d, regex: '(?i)(LV_EF_3D|\\b3[- ]?d\\b|three[- ]dimensional)'}
+        - {method: biplane, regex: '(?i)(LV_EF_BP_2D_by_MOD|biplane|bi-plane|simpson|method of discs|\bbp\b)'}
+        - {method: 3d, regex: '(?i)(LV_EF_3D|\b3[- ]?d\b|three[- ]dimensional)'}
         - {method: single_plane, regex: '(?i)(LV_EF_(?:2C|4C)_2D_by_MOD|a4c|a2c|4[- ]?ch|2[- ]?ch|single[- ]plane|monoplane)'}
         # Modified Quinones is not Simpson biplane; this position is PROVISIONAL, subject to clinical sign-off.
         - {method: modified_quinones, regex: '(?i)(mod[_ ]?quin|modified[ _-]*quinones|quinones)'}
