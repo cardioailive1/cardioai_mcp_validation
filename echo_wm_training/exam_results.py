@@ -8,6 +8,7 @@ method priorities before promoting any output to the Phase 2 cohort.
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Optional
 
 import pandas as pd
@@ -95,7 +96,7 @@ def select_exam_references(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFram
     d["index_date"] = pd.to_datetime(d.index_date).dt.date
     d["exam_date"] = pd.to_datetime(d.exam_date).dt.date
     d["accession_number"] = d.accession_number.astype("string").str.strip().replace("", pd.NA)
-    priorities = [(x["method"], __import__("re").compile(x["regex"], __import__("re").I))
+    priorities = [(x["method"], re.compile(x["regex"], re.I))
                   for x in results_cfg["method_priority"]]
 
     def lvef_pick(g: pd.DataFrame):
@@ -138,8 +139,8 @@ def select_exam_references(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFram
             dates = g.exam_date.nunique()
             if pd.isna(accession):
                 status = "missing_accession"
-            elif n_acc > 1:
-                status = "multiple_accessions"
+            elif n_acc > 1 or patient.accession_number.isna().any():
+                status = "multiple_or_missing_accessions"
             elif dates > 1:
                 status = "multi_date_accession"
             else:
