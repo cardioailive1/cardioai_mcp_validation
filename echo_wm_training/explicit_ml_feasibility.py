@@ -127,7 +127,10 @@ def summarize_explicit_ml_feasibility(
         present_safe = all(n == 0 or n >= small_cell
                            for n in (exists, none))
         presence.append({
-            "metric": metric, "selected_patient_days": len(selected),
+            "metric": metric,
+            "selected_patient_days": (
+                str(len(selected)) if len(selected) >= small_cell else "suppressed"
+            ),
             "with_explicit_ml": str(exists) if present_safe else "suppressed",
             "without_explicit_ml": str(none) if present_safe else "suppressed",
         })
