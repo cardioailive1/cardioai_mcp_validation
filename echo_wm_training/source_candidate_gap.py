@@ -46,7 +46,7 @@ def diagnose_source_not_candidate(
         KEYS
     ].copy()
 
-    source_required = {*KEYS, "echo_test_fpk", "has_mapped_lvedv", "has_mayo_lvedv"}
+    source_required = {*KEYS, "echo_test_fpk", "has_mapped_lvedv", "has_mayo_lvedv", "has_priority_lvedv"}
     missing = source_required - set(source_rows.columns)
     if missing:
         raise ValueError(f"Source rows missing columns: {sorted(missing)}")
@@ -57,18 +57,11 @@ def diagnose_source_not_candidate(
     rows = rows.merge(target, on=KEYS, how="inner")
     rows = rows.drop_duplicates(KEYS + ["echo_test_fpk"])
 
-    # Is the only available recognized absolute-volume result the additional
-    # Mayo result name? This name is not in LVEDV_PRIORITY's candidate SQL.
-    rows["has_prior_mapped_name"] = (
-        rows["has_mapped_lvedv"] & ~rows["has_mayo_lvedv"]
-    )
-    # A single source record could contain both Mayo and prioritized names.
-    # For exact classification, the source query must also surface whether
-    # any older priority name has a valid measurement.
-    if "has_priority_lvedv" in source_rows.columns:
-        rows["has_prior_mapped_name"] = rows["has_priority_lvedv"].fillna(False).astype(bool)
+    # Distinguish the additional Mayo name from existing LVEDV_PRIORITY
+    # names, even if both occur in the same ECHO_TEST_FPK record.
+    rows["has_priority_lvedv"] = rows["has_priority_lvedv"].fillna(False).astype(bool)
     source_days = (rows.groupby(KEYS, as_index=False)
-                   .agg(has_priority_lvedv=("has_prior_mapped_name", "any"),
+                   .agg(has_priority_lvedv=("has_priority_lvedv", "any"),
                         has_mayo_lvedv=("has_mayo_lvedv", "any"),
                         source_tests=("echo_test_fpk", "nunique")))
 
