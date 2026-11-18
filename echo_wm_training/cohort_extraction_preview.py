@@ -300,12 +300,18 @@ def suppress_completeness_comparison(
 def suppress_exam_statuses(
     private: pd.DataFrame, *, small_cell: int = 11
 ) -> pd.DataFrame:
-    """Avoid disclosing a small subgroup via the 1,500 total."""
-    totals = private.exam_status.value_counts().rename_axis(
-        "exam_status").reset_index(name="patient_days")
-    if (totals.patient_days.between(1, small_cell - 1)).any():
-        # Complementary suppression: do not show the other statuses
-        # whose counts would reconstruct a small status by subtraction.
+    """Return only a safe binary selected vs needs-review summary.
+
+    Detailed statuses (including rare identifier edge cases) are retained
+    within the private DataFrame and must not be printed or exported.
+    """
+    selected = int(private.exam_status.eq("single_identifier_group").sum())
+    not_selected = len(private) - selected
+    totals = pd.DataFrame([
+        {"exam_status": "single_identifier_group", "patient_days": selected},
+        {"exam_status": "not_selected_for_review", "patient_days": not_selected},
+    ])
+    if 0 < min(selected, not_selected) < small_cell:
         totals["patient_days"] = "suppressed"
     return totals
 
