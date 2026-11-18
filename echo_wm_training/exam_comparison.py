@@ -52,7 +52,8 @@ def _clean_string(series: pd.Series) -> pd.Series:
 
 def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
     """Values per patient/index-date/identifier group without cross-group mixing."""
-    cols = ["person_id", "index_date", "group_key", "lvef", "lvedv"]
+    cols = ["person_id", "index_date", "group_key", "lvef", "lvedv",
+            "lvef_spread_pp", "lvef_method_disagreement"]
     if rows.empty:
         return pd.DataFrame(columns=cols)
     d = rows.copy()
@@ -71,6 +72,11 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
         ef = g[g.metric == "lvef"].copy()
         ef["number"] = ef.result_value.map(parse_lvef)
         ef = ef[ef.number.notna()]
+        # Compare all plausible stored EF values within the same identifier group,
+        # before applying a method priority. Never auto-resolve a large conflict.
+        ef_spread = float(ef.number.max() - ef.number.min()) if len(ef) else None
+        ef_disagreement = (ef_spread is not None and
+                           ef_spread > float(results_cfg.get("lvef_disagreement_threshold_pp", 10)))
         if not ef.empty:
             def ef_rank(label):
                 return next((i for i, (_, rx) in enumerate(methods)
@@ -90,7 +96,9 @@ def _measurement_groups(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
         else:
             lvedv = None
         out.append(dict(person_id=pid, index_date=dt, group_key=key,
-                        lvef=lvef, lvedv=lvedv))
+                        lvef=lvef, lvedv=lvedv,
+                        lvef_spread_pp=ef_spread,
+                        lvef_method_disagreement=bool(ef_disagreement)))
     return pd.DataFrame(out, columns=cols)
 
 
