@@ -348,11 +348,40 @@ safeguard.
 **Implication:** Do not equate the strict 4.07% preview LVESV
 completeness to source availability. Confirm actual unit codes and
 the unit conventions of each specific Mayo volume result name before
-relaxing this engineering check. A follow-up aggregate-only
-`echo_wm_training.volume_unit_profile` diagnostic has been added to
-separate explicit mL, missing, non-mL and mixed unit metadata *by
-source result name*. Its MCP execution is pending. No cohort
-rebuild, reference promotion or threshold change has occurred.
+relaxing this engineering check. The aggregate-only `echo_wm_training.volume_unit_profile`
+diagnostic has now been executed inside MCP. Among the 703 selected
+single-identifier patient-days, method-specific 2D/3D LVEDV results
+(`LV_vol_BP_ed_2D_by_MOD`: 431,
+`LV_vol_4C_ed_2D_by_MOD`: 476,
+`LV_vol_2C_ed_2D_by_MOD`: 432,
+`LV_vol_ed_3D`: 49)
+had **explicit mL** for all in-range numeric results. Their
+LVESV counterparts had 426, 474, 427, and 48 patient-days,
+respectively, also all explicit mL.
+
+In contrast, the Mayo-specific
+`MC CV LV END DIASTOLIC VOLUME` had 443 patient-days with
+numeric in-range results and **missing unit metadata in all 443**.
+`MC CV LV END SYSTOLIC VOLUME` likewise had 439 patient-days
+and **missing unit metadata in all 439**. These are per-result-name
+patient-day counts which overlap, and must not be summed into a
+cohort completeness estimate.
+
+This strongly localizes the metadata problem to the `MC CV`
+result-name family. It does **not** establish that missing units mean
+mL. It also does not prove that these 443/439 cases are the same
+patient-days as those withheld in the strict preview.
+
+A further **read-only, explicit-mL-only** method-feasibility
+scenario has been added in `echo_wm_training.explicit_ml_feasibility`,
+but its results have not yet been run in MCP. It ignores unitless
+Mayo names without inventing units and quantifies the *potential*
+selection of biplane, then 3D, then single-plane measurements when
+only a single consistent value exists within the preferred available
+tier. This is a **hypothetical method hierarchy**, not an approved
+clinical selection or a production cohort change.
+
+No cohort rebuild, reference promotion or threshold change has occurred.
 
 ### Interpretation, constraints, and decision requests
 

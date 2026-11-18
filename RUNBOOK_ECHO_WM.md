@@ -1250,3 +1250,72 @@ names, and whether other trustworthy metadata can certify units.
 Ask the model developer/clinical lead for the approved volume method
 hierarchy. Do not silently fill blank units or collapse
 ACC/ORD pairs based solely on timestamps.
+
+### Explicit-mL-only feasibility after Mayo result-name unit audit (2026-11-18)
+
+The prior MCP source-unit audit found method-specific, explicitly
+labeled mL LVEDV in source result names
+`LV_vol_BP_ed_2D_by_MOD` (431 patient-days),
+`LV_vol_4C_ed_2D_by_MOD` (476),
+`LV_vol_2C_ed_2D_by_MOD` (432),
+and `LV_vol_ed_3D` (49), all within the *703 selected
+single-identifier patient-days*. LVESV counterpart counts were
+426, 474, 427 and 48, all explicitly labeled mL.
+
+Mayo-specific `MC CV LV END DIASTOLIC VOLUME` (443 patient-days)
+and `MC CV LV END SYSTOLIC VOLUME` (439) had **entirely missing
+unit metadata** on numeric, in-range source rows. These result-name
+counts overlap across patient-days. Do not assume a unit for the
+Mayo-specific source names until Mayo confirms their definition.
+
+An additional no-write study
+`echo_wm_training/explicit_ml_feasibility.py` quantifies how many of
+the 703 strictly selected single-identifier patient-days contain
+**at least one numeric, explicitly mL-labeled LVEDV or LVESV**
+without allowing the unitless `MC CV` values. It also reports an
+illustrative source-method ranking:
+biplane > 3D > single-plane (2C and 4C are the same tier). It
+does **not** require biplane results to equal single-plane results,
+does **not** select between discordant 2C/4C values, and **does
+not** change the clinical cohort.
+
+The ranking is an **unapproved sensitivity scenario only**,
+not a new clinical hierarchy or operational extractor.
+Patient-level values stay inside MCP.
+
+After merging the fork's validation branch into the **original
+repository branch `echo-wm-mcp`** and pulling:
+
+```bash
+python -m pytest tests/test_echo_explicit_ml_feasibility.py -q
+```
+
+Fresh IPython:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.explicit_ml_feasibility import run_explicit_ml_feasibility
+
+study = load_study()
+eng = make_engine("bigquery", study)
+presence, priority_scenario = run_explicit_ml_feasibility(eng, study)
+
+print("EXPLICIT-mL AVAILABILITY IN SELECTED EXAM GROUPS")
+print(presence.to_string(index=False))
+print("UNAPPROVED METHOD-PRIORITY SENSITIVITY")
+print(priority_scenario.to_string(index=False))
+```
+
+Counts are grouped per patient/index-day and metric, with primary and
+complementary small-cell safeguards. The second output is wholly
+suppressed by metric when a positive method tier has fewer than
+`study.small_cell` members. Review aggregate results against MCP's
+cumulative disclosure rules before sharing screenshots or numbers.
+
+**Important denominator:** The report is about the 703 conservative
+single-identifier cases, *not* all 1,500 patient-days. The separate
+718 provisional ACC/ORD pairings and 79 other cases remain outside
+this sensitivity scenario. Any eventual extraction rules must also
+address those examination-identity categories with clinical/Mayo
+approval rather than silently promoting them.
