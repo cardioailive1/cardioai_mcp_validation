@@ -283,6 +283,41 @@ rebuild `echo_analytic`, promote a reference, substitute endpoints,
 or change the locked completeness targets based on these exploratory
 counts.
 
+### Conservative measurement/report preview results — 2026-11-18
+
+A subsequent **read-only** trial of a strict Mayo echo source extractor
+(`echo_wm_training/cohort_extraction_preview.py`) showed:
+
+| Selection / field | Output | Interpretation |
+|---|---:|---|
+| Cohort denominator | 1,500 | Unchanged saved `echo_analytic` |
+| One unmatched identifier group | 703 (46.87%) | Passes the strict preview examination identity gate |
+| Not selected for immediate extraction | 797 (53.13%) | Includes provisional ACC/ORD matches and multiple/unresolved groups |
+| LVESV completeness before | 0.00% | Saved cohort field |
+| LVESV completeness in preview | **4.07%** | Strict candidate value filling only, not clinical acceptance |
+| LVEDV before / after | suppressed | Small-cell/cross-report disclosure safeguard |
+
+The current preview **withholds every provisional ACC/ORD pair** until
+identity is independently validated, even when mutually unique within
+60 seconds. It also rejects an entire volume metric if *any* recorded
+value differs across method names, or if a candidate's unit is not
+explicitly mL. These are conservative engineering decisions for an
+interim diagnostic; they **do not establish** that the LVEDV/LVESV
+source is only 4.07% complete, and are not comparable to the
+earlier 969-patient-day potential LVEDV estimate.
+
+Only LVEDV and LVESV are allowed to change in this staged preview.
+The other 25 fields, including `wall_motion`, `clinical_indication`
+and `image_quality`, remain unchanged by design. Raw
+`FACT_ECHO_TEST.ECHO_NOTE` may be selected privately but has not
+been converted into validated clinical labels.
+
+A further read-only barrier-disposition audit was added under
+`echo_wm_training/cohort_preview_diagnostics.py` to distinguish
+exam-gating from absent numeric names and method/unit rejection.
+Its BigQuery run is pending. **No cohort rebuild or threshold change
+is supported by this intermediate preview.**
+
 ### Interpretation, constraints, and decision requests
 
 - **Source absence dominates:** At least 485 index-day patient-days
