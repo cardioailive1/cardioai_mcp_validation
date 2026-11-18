@@ -225,6 +225,35 @@ python -m pytest tests/test_echo_exam_results.py tests/test_echo_exam_comparison
 Then rerun `build_unified_echo_diagnostics` from the preceding section
 and inspect only aggregate candidate statuses and counts in MCP.
 
+### Regression: conventional TTE versus same-day TTE Strain (2026-11-17)
+
+MCP investigation resolved the previous 50 percentage-point discrepancy in the
+saved patient/day LVEF reference. Two distinct `ECHO_TEST_FPK` records existed
+for the same patient/date: a conventional `(TTE) 2D ECHO DOPPLER COLOR AND
+CONTRAST` record with `MC CV ECHO EJECTION FRACTION = 63`, and a separate
+`TTE Strain` record with Modified Quinones 59 and 63 plus a visual estimate
+of 13. The historical patient/date extractor had classified visual 13 ahead
+of those differently named methods and did not enforce conventional exam
+eligibility before choosing EF.
+
+The read-only unified candidate builder now defensively filters eligible
+`ECHO_TEST_FPK` records *before* measurement extraction, even if an upstream
+caller passes unfiltered test/results rows. The SQL-level TTE query already
+excludes `strain`; the Python guard adds regression protection. Two synthetic
+tests exercise this exact dual-record scenario and strain-only input.
+A separate `TTE Strain` measurement cannot overwrite conventional TTE EF
+solely because the index date is identical. This does not determine whether
+the two records clinically describe related imaging procedures.
+
+```bash
+python -m pytest tests/test_echo_exam_resolution.py tests/test_echo_exam_comparison.py tests/test_echo_unified_reference.py -q
+```
+
+This policy remains a **read-only diagnostic**. Existing `echo_lvef` and the
+cohort are untouched. The 302 provisional within-group disagreements remain
+reviewable rather than being accepted or permanently discarded; neither the
+10-point review threshold nor Modified Quinones priority has clinical sign-off.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written

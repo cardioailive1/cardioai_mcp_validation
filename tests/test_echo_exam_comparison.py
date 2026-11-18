@@ -66,3 +66,6 @@ def test_measurement_query_scoped_to_tte_and_fpk():
     assert "ECHO_TEST_FPK" in sql
     assert "LV_vol_BP_ed_2D_by_MOD" in sql
     assert "tte.echo_test_fpk" in sql
+    # Confirm exclusion is inside the TTE CTE before result rows are joined.
+    assert "stress|strain|outside|review|fetal" in sql
+    assert "tt.ECHO_TEST_DESCRIPTION" in sql

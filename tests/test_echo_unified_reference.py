@@ -134,3 +134,53 @@ def test_consistent_modified_quinones_candidate_is_retained():
     out = unified_exam_candidates(pd.DataFrame([base]), values, cfg)
     assert out.candidate_status.iloc[0] == "single_exam_candidate"
     assert out.lvef.iloc[0] == 59
+
+
+def test_same_day_strain_ef_cannot_override_conventional_tte():
+    """MCP discovery: conventional contrast TTE 63%; separate TTE Strain 59/63/13%.
+
+    A patient/date-level classifier could select the visual 13%. Eligible test
+    identity must be checked *before* EF method selection.
+    """
+    from echo_wm_training.exam_resolution import eligible_tte_records
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    tests = pd.DataFrame([
+        dict(person_id=99, index_date="2021-11-30",
+             echo_test_fpk="conventional", exam_datetime="2021-11-30 12:54:00",
+             accession_number="CONV", order_proc_id=None,
+             test_description="(TTE) 2D ECHO DOPPLER COLOR AND CONTRAST"),
+        dict(person_id=99, index_date="2021-11-30",
+             echo_test_fpk="strain", exam_datetime="2021-11-30 12:54:00",
+             accession_number="STRAIN", order_proc_id=None,
+             test_description="TTE Strain"),
+    ])
+    assert eligible_tte_records(tests).echo_test_fpk.tolist() == ["conventional"]
+    def reading(record, name, value):
+        return {**record, "result_name": name,
+                "result_label": name, "result_value": value, "metric": "lvef"}
+    rows = pd.DataFrame([
+        reading(tests.iloc[0].to_dict(), "MC CV ECHO EJECTION FRACTION", "63"),
+        reading(tests.iloc[1].to_dict(), "LV_EF_2D_by_mod_Quin", "59"),
+        reading(tests.iloc[1].to_dict(), "LV_EF_2D_by_mod_Quin_Acf", "63"),
+        reading(tests.iloc[1].to_dict(), "LV_EF_2D_by_vis_est", "13"),
+    ])
+    # Deliberately provide *both* test rows and measurement rows to exercise
+    # the independent safety guard even if a caller bypasses query-side filters.
+    candidate = unified_exam_candidates(tests, rows, cfg)
+    assert len(candidate) == 1
+    assert candidate.lvef.iloc[0] == 63.0
+    assert candidate.candidate_status.iloc[0] == "single_exam_candidate"
+    assert not bool(candidate.lvef_method_disagreement.iloc[0])
+    assert candidate.record_source.iloc[0] == "ACC"
+
+
+def test_strain_only_has_no_eligible_conventional_tte():
+    cfg = load_study()["modality"]["echo"]["mcp"]["results"]
+    strain = dict(person_id=99, index_date="2021-11-30",
+                  echo_test_fpk="strain", exam_datetime="2021-11-30 12:54:00",
+                  accession_number="S", order_proc_id=None,
+                  test_description="TTE Strain")
+    rows = pd.DataFrame([{**strain, "result_name": "LV_EF_2D_by_vis_est",
+                          "result_label": "LV_EF_2D_by_vis_est",
+                          "result_value": "13", "metric": "lvef"}])
+    assert unified_exam_candidates(pd.DataFrame([strain]), rows, cfg).empty

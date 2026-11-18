@@ -6,10 +6,33 @@ No BigQuery tables are written. All identifiers remain inside the MCP workspace.
 from __future__ import annotations
 
 from datetime import date
+import re
 
 import pandas as pd
 
 from .mcp_echo import _cfg, _macro, _t
+
+
+# Keep this predicate aligned with the cohort-scoped TTE SQL below.
+_TTE_INCLUDE = re.compile(r"tte|transthoracic|echocardiogram", re.I)
+_TTE_EXCLUDE = re.compile(r"tee|transesophageal|stress|strain|outside|review|fetal", re.I)
+
+
+def eligible_tte_records(rows: pd.DataFrame) -> pd.DataFrame:
+    """Defensive, record-level TTE eligibility when descriptions are present.
+
+    A same-day TTE Strain test is a different record from a conventional TTE
+    and may not contribute measurements to the selected conventional exam.
+    The BigQuery SQL already applies the same criteria before extraction.
+    Older synthetic callers without descriptions retain their existing input.
+    """
+    if "test_description" not in rows.columns or rows.empty:
+        return rows.copy()
+    names = rows["test_description"].fillna("").astype(str)
+    return rows.loc[
+        names.map(lambda name: bool(_TTE_INCLUDE.search(name))
+                  and not bool(_TTE_EXCLUDE.search(name)))
+    ].copy()
 
 
 def tte_record_rows_sql(modality_cfg: dict, *, start: str, end: str) -> str:
