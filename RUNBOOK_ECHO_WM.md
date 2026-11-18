@@ -1192,3 +1192,61 @@ Apply platform cross-report disclosure rules before sharing results.
 blank unit is mL merely because the result name looks like a volume.
 Follow up with Mayo/developer/clinical reviewer for units, trusted
 method selection and authoritative examination identity.
+
+### Identify unit-metadata omissions by exact volume result name
+
+The 2026-11-18 MCP volume-hold audit found, **within the 703
+single-identifier patient-days**, LVEDV 454 held for unit/method
+review: 24 `unit_metadata_only`, 11 `different_methods_only`,
+zero isolated `same_method_conflict`, and 419
+`unit_and_value_disagreement`. Thus **443/454** of the held LVEDV
+patient-days have at least one in-range measurement whose
+`ECHO_RESULTS_VALUE_UNIT_OF_MEASURE` is absent or not recognized as
+mL. This does *not* establish that all 443 have blank units (some
+could have a different unit), nor whether those source values are
+clinically valid. The four LVESV categories were suppressed by the
+disclosure guard; no numerical breakdown is available for LVESV.
+
+The diagnostic classifies an exact result name's **numeric, in-range
+source rows** within the selected 703 patient-days, grouping by
+patient/index-day/name so duplicate result records cannot inflate the
+patient-day counts. It separates `explicit_ml_only`,
+`missing_only`, `non_ml_only` and `mixed_unit_metadata`.
+Result-name populations can overlap; never sum them to determine
+unique patient-day coverage. The unit categories must not be
+interpreted as a clinically approved conversion or inferred unit.
+
+After merging changes into original MCP source branch `echo-wm-mcp`:
+
+```bash
+python -m pytest tests/test_echo_volume_unit_profile.py -q
+```
+
+Fresh IPython inside the restricted MCP Cloud PC:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.volume_unit_profile import run_volume_unit_profile
+
+study = load_study()
+eng = make_engine("bigquery", study)
+unit_profile = run_volume_unit_profile(eng, study)
+print("VOLUME UNIT METADATA BY EXACT MAYO RESULT NAME")
+print(unit_profile.to_string(index=False))
+```
+
+The output is aggregate only and suppresses *all* counts within each
+result-name group if any category has a positive cell below the
+configured small-cell minimum. As with prior audit outputs,
+cross-report disclosures must be reviewed before sharing outside
+MCP. Do not print/export the internal source rows or numeric values.
+
+**Next implementation gate:** confirm with Mayo's data dictionary/
+Adam which exact result names always represent absolute mL
+(as opposed to indexed, method-specific or converted volumes),
+whether the unit field is intentionally unpopulated for those
+names, and whether other trustworthy metadata can certify units.
+Ask the model developer/clinical lead for the approved volume method
+hierarchy. Do not silently fill blank units or collapse
+ACC/ORD pairs based solely on timestamps.
