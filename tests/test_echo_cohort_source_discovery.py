@@ -70,6 +70,7 @@ def test_coverage_suppression_and_non_disclosive_rates():
         days_with_indication_cue=1500,
     )])
     out = display_safe_coverage(source, small_cell=11).set_index("measure")
+    assert out.loc["saved_cohort_days", "patient_days"] == "1500"
     assert out.loc["days_with_conventional_tte", "patient_days"] == "1477"
     assert out.loc["days_with_source_echo_note", "patient_days"] == "suppressed"
     assert pd.isna(out.loc["days_with_source_echo_note", "pct"])
