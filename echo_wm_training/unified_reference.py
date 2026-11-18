@@ -10,7 +10,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .exam_comparison import _measurement_groups, tte_measurement_rows_sql
-from .exam_resolution import resolve_tte_groups, tte_record_rows_sql
+from .exam_resolution import eligible_tte_records, resolve_tte_groups, tte_record_rows_sql
 from .mcp_echo import _cfg
 
 
@@ -39,8 +39,26 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
             "candidate_exams", "candidate_status"]
     if tte_rows.empty:
         return pd.DataFrame(columns=cols)
-    groups = resolve_tte_groups(tte_rows, max_seconds=max_seconds)
-    values = _measurement_groups(result_rows, results_cfg)
+    # Restrict on the examination RECORD, not just patient and date. This
+    # explicitly prevents same-day TTE Strain EF values from entering a
+    # conventional TTE candidate, even when the caller supplies broad rows.
+    tests = eligible_tte_records(tte_rows)
+    if tests.empty:
+        return pd.DataFrame(columns=cols)
+    # Enforce ECHO_TEST_FPK membership before extracting any measurement.
+    keys = tests[["person_id", "index_date", "echo_test_fpk"]].drop_duplicates().copy()
+    keys["index_date"] = pd.to_datetime(keys.index_date).dt.date
+    keys["echo_test_fpk"] = keys.echo_test_fpk.astype("string").str.strip()
+    measurements = result_rows.copy()
+    if not measurements.empty:
+        measurements["index_date"] = pd.to_datetime(measurements.index_date).dt.date
+        measurements["echo_test_fpk"] = measurements.echo_test_fpk.astype("string").str.strip()
+        measurements = measurements.merge(
+            keys, on=["person_id", "index_date", "echo_test_fpk"],
+            how="inner", validate="many_to_one",
+        )
+    groups = resolve_tte_groups(tests, max_seconds=max_seconds)
+    values = _measurement_groups(measurements, results_cfg)
     lookup = {(r.person_id, r.index_date, r.group_key): r
               for r in values.itertuples(index=False)}
     entries = []
