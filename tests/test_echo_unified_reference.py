@@ -34,8 +34,10 @@ def test_unified_keeps_unmatched_acc_ef_and_matched_order_measurements():
     matched = candidates[candidates.person_id == 1].iloc[0]
     assert matched.record_source == "ACC+ORD"
     assert matched.lvef == 52 and matched.lvedv == 120
+    assert matched.lvef_source == "ORD" and matched.lvedv_source == "ORD"
     acc = candidates[candidates.person_id == 2].iloc[0]
     assert acc.record_source == "ACC" and acc.lvef == 48
+    assert acc.lvef_source == "ACC"
     assert acc.candidate_status == "single_exam_candidate"
     multi = candidates[candidates.person_id == 3]
     assert len(multi) == 2 and set(multi.candidate_status) == {"ambiguous_multiple_exams"}
