@@ -803,3 +803,43 @@ measurements. All row-level patient/exam identifiers stay within MCP.
 Follow cell suppression and complementary suppression policies before
 sharing any small counts outside MCP. Do **not** rebuild
 `echo_analytic` or revise the 90% requirement based on this audit.
+
+### Examination topology for the 22 ambiguous source-LVEDV patient-days
+
+After the 41-case source-to-candidate audit, examine the subset whose
+reason is `multiple_exam_candidates` (22 in the latest MCP run). This
+read-only audit reuses the same 60-second **mutually unique** ACC/ORD
+matching logic used by the unified candidate builder. For each cohort
+patient/index-day it separately counts raw ECHO_TEST_FPK records,
+identifier groups, provisional ACC/ORD pairings, provisional groups
+*after* pairing, and candidate groups retaining a numeric LVEDV.
+
+```bash
+python -m pytest tests/test_echo_ambiguous_lvedv_exams.py -q
+```
+
+Fresh IPython session in MCP (after merging into the MCP source repository):
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.ambiguous_lvedv_exams import run_ambiguous_lvedv_audit
+
+study = load_study()
+eng = make_engine("bigquery", study)
+private_detail, topology, group_statuses = run_ambiguous_lvedv_audit(eng, study)
+
+print("Ambiguous patient-days investigated:", len(private_detail))
+print("Mutually exclusive examination-topology categories:")
+print(topology.to_string(index=False))
+print("ACC/ORD identifier group statuses (NOT patient counts):")
+print(group_statuses.to_string(index=False))
+print("READ-ONLY: no cohort modifications")
+```
+
+`private_detail` contains protected identifiers; keep it within MCP.
+Any smaller aggregate cell may also be disclosive and must be
+suppressed per MCP policy before external distribution. **No provisional
+pair establishes one clinical examination**, and no multiple-exam case
+should be promoted automatically. Compare result-count categories
+before the clinical review report; no 90% threshold change.
