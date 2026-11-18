@@ -35,7 +35,7 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
     """One row per provisional/residual exam group; never silently merge conflicts."""
     cols = ["person_id", "index_date", "group_key", "partner_key", "group_status",
             "record_source", "lvef", "lvedv", "lvef_source", "lvedv_source",
-            "lvef_conflict", "lvedv_conflict",
+            "lvef_conflict", "lvedv_conflict", "lvef_method_disagreement",
             "candidate_exams", "candidate_status"]
     if tte_rows.empty:
         return pd.DataFrame(columns=cols)
@@ -64,6 +64,13 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
             return (float(x) if has_x else float(y) if has_y else None), source, False
         ef, ef_source, ef_conflict = choose("lvef")
         edv, edv_source, edv_conflict = choose("lvedv")
+        ef_method_disagreement = any(
+            bool(x.lvef_method_disagreement)
+            for x in (own, other) if x is not None
+        )
+        # A discrepant method set cannot be silently promoted to a reference.
+        if ef_method_disagreement:
+            ef = None
         entries.append(dict(
             person_id=group.person_id, index_date=group.index_date,
             group_key=group.group_key, partner_key=partner,
@@ -72,6 +79,7 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
             lvef=ef, lvedv=edv, lvef_source=ef_source,
             lvedv_source=edv_source, lvef_conflict=ef_conflict,
             lvedv_conflict=edv_conflict,
+            lvef_method_disagreement=ef_method_disagreement,
         ))
     result = pd.DataFrame(entries)
     result["candidate_exams"] = result.groupby(
@@ -84,6 +92,8 @@ def unified_exam_candidates(tte_rows: pd.DataFrame, result_rows: pd.DataFrame,
     ), "candidate_status"] = "unresolved_identifier"
     result.loc[result.lvef_conflict | result.lvedv_conflict,
                "candidate_status"] = "conflicting_measurements"
+    result.loc[result.lvef_method_disagreement,
+               "candidate_status"] = "unresolved_method_disagreement"
     return result[cols]
 
 
