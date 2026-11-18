@@ -291,6 +291,28 @@ def lvef_rows_sql(modality_cfg: dict, start: Optional[str] = None, end: Optional
     """
 
 
+def classify_lvef_method(label: str, results_cfg: dict) -> Tuple[int, str, str]:
+    """Priority tier, method, diagnostic variant for a combined Mayo label.
+
+    The priority hierarchy remains clinically provisional. Variant distinctions
+    allow same-family EF methods (2C vs 4C, apical correction vs uncorrected)
+    to be audited separately without assigning new priority tiers.
+    """
+    text = str(label or "")
+    priority = results_cfg["method_priority"]
+    rank, method = next(
+        ((i, rule["method"]) for i, rule in enumerate(priority)
+         if re.search(rule["regex"], text, re.I)),
+        (len(priority), "other"),
+    )
+    variant = next(
+        (rule["variant"] for rule in results_cfg.get("lvef_method_variants", [])
+         if re.search(rule["regex"], text, re.I)),
+        method,
+    )
+    return rank, method, variant
+
+
 def lvef_table(rows: pd.DataFrame, results_cfg: dict) -> pd.DataFrame:
     """One LVEF per patient and echo date. Several stored values (biplane, 3-D, visual) -> the first method in
     results.method_priority (proposed; the clinical lead confirms on the sign-off sheet); several values of that
