@@ -146,6 +146,8 @@ GROUP BY 1, 2
 HAVING cohort_patient_days_with_result >= {small_cell}
    AND (cohort_patient_days_with_numeric = 0
         OR cohort_patient_days_with_numeric >= {small_cell})
+   AND (cohort_patient_days_with_result = cohort_patient_days_with_numeric
+        OR cohort_patient_days_with_result - cohort_patient_days_with_numeric >= {small_cell})
 ORDER BY cohort_patient_days_with_result DESC
 """
 
