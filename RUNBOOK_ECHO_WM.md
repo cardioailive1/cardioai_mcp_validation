@@ -159,6 +159,45 @@ only**; it does not address next-day reference eligibility or clinically
 validate test-type/measurement-method rules. Never use these candidate
 measurements in the production cohort before completing those checks.
 
+### Unified ACC/ORD reference coverage versus active LVEF (read-only)
+
+MCP diagnostics confirm that both Mayo catalogs store numeric EF in the same
+percentage scale. The ACC catalog includes `MC CV ECHO EJECTION FRACTION`;
+the ORD catalog includes named LVEF methods. The following diagnostic reads
+**index-day TTE-classified records only** and groups by verified identifier
+or provisional mutually unique ACC/ORD time match. A person with more than
+one unresolved examination candidate is excluded from value comparison.
+
+```bash
+python -m pytest tests/test_echo_exam_resolution.py tests/test_echo_exam_comparison.py tests/test_echo_unified_reference.py -q
+```
+
+```python
+from echo_wm_training.unified_reference import build_unified_echo_diagnostics
+
+candidate_exams, comparison_rows, summary = build_unified_echo_diagnostics(
+    eng, study["modality"],
+    start=str(study["index_start"]), end=str(study["index_end"]),
+    max_seconds=60,
+)
+print(candidate_exams.candidate_status.value_counts(dropna=False))
+print(candidate_exams.lvef_source.value_counts(dropna=False))
+print(summary.to_string(index=False))
+```
+
+The `candidate_exams` and `comparison_rows` DataFrames contain patient and
+examination identifiers and must remain inside the MCP workspace. `summary`
+reports available LVEF/LVEDV, the number with both new and saved LVEF, and
+absolute EF differences for single-exam candidates. It does **not** replace
+`{{work}}.echo_lvef` or modify the saved cohort.
+
+Limitations: the cohort may have no qualifying index-day TTE, so the
+`all_index_dates` row is only the set of indexes represented by extracted TTE
+candidates, not necessarily all 1,500; next-day echo matches are not yet
+evaluated. Provisional ACC/ORD matches require independent clinical review.
+EF/EDV method priorities and measurement equivalence also need clinical
+sign-off. Do not promote these results automatically.
+
 2. **Find echo studies and build the de-identification request.**
    ```bash
    python scripts/deid_request.py --modality echo --dry-run             # counts per step and year; nothing written
