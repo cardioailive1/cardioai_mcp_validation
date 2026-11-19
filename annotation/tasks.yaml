@@ -123,7 +123,9 @@ label_audit:
       post_negation: '\b(not (seen|identified|present|demonstrated|visuali[sz]ed|detected)|(is|are|was|were) absent|absent|(has )?resolved|ruled out)\b'
       pre_uncertain: '\b(possible|possibly|probable|probably|may|might|could|suspicious for|suspected|suggestive of|questionable|equivocal|cannot exclude|can ?not exclude|cannot rule out|consider|versus|vs\.?|r/o|rule out|query)\b'
       post_uncertain: '((cannot|can ?not|could not) be (excluded|ruled out)|not (be )?excluded|(is|are) (possible|suspected|questioned)|\?)'
-      historical: '\b(history of|hx of|h/o|previous|prior history of|previously documented)\b'
+      historical: '\b(history of|hx of|h/o|previous|prior history of|previously documented|(has |have )?replaced(?! by)|in place of)\b'
+      # after the mention: "atrial fibrillation has been replaced by sinus rhythm", "AF no longer present"
+      post_historical: '\b((has been|was|is) replaced|replaced by|no longer (present|seen|evident|noted))\b'
       terminators: '\b(but|however|although|though|except|apart from|aside from|whereas)\b|;'
       pre_window_words: 8
       post_window_words: 6

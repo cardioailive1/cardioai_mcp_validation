@@ -41,10 +41,14 @@ DEFAULT: Dict[str, object] = {
                       r"is (possible|suspected|questioned)|not certain|uncertain)\b|\?)",
     "anywhere_uncertain": r"\b(versus|vs\.?|differential (diagnosis )?(includes?|of)|indeterminate)\b",
     # before the mention: "history of AF", "prior echo showed inferior akinesis"
+    # also serial-ECG wording "sinus rhythm has replaced atrial fibrillation": the mention is the OLD rhythm
+    # (found in the ECG adjudication, 2026-11-19); "... replaced by AF" is the reverse and stays affirmed
     "pre_historical": r"\b(history of|h/o|hx of|known history of|previously (seen|reported|described|noted)|"
+                      r"(has |have |had )?(now )?replaced\b(?!\s+by)|in place of|"
                       r"(prior|previous|referring|outside) (tracing|ecg|ekg|echo|study|cmr|mri) (showed|demonstrated|revealed))\b",
     # after the mention: "thrombus ... was reported on the referring echo", "flutter seen on the prior tracing"
     "post_historical": r"\b(was (previously )?(reported|seen|described|noted)|previously (seen|reported|described|noted)|"
+                       r"(has been|have been|was|is|been) replaced|replaced by|"
                        r"(on|in|from) (the |an? )?(prior|previous|old|earlier|outside|referring) "
                        r"(tracing|ecg|ekg|study|studies|echo|echocardiogram|exam|examination|imaging|cmr|mri|scan))\b",
     # the finding is current despite a comparison: "persists", "still present", "new since", "not present on the
