@@ -111,6 +111,40 @@ def test_primary_and_complement_suppression():
 
 
 
+
+def test_distinct_source_test_detected_even_if_labeled_test_has_mc_cv():
+    day = "2022-03-02"
+    tests = pd.DataFrame([
+        dict(person_id=1, index_date=day, echo_test_fpk="a",
+             exam_datetime=day + " 10:00:00",
+             accession_number="A", order_proc_id=None),
+        dict(person_id=1, index_date=day, echo_test_fpk="b",
+             exam_datetime=day + " 10:00:10",
+             accession_number=None, order_proc_id="O"),
+    ])
+    values = pd.DataFrame([
+        dict(person_id=1, index_date=day, echo_test_fpk="a",
+             result_name=MC, raw_value="120", reported_unit=None),
+        dict(person_id=1, index_date=day, echo_test_fpk="a",
+             result_name=BP, raw_value="122", reported_unit="mL"),
+        dict(person_id=1, index_date=day, echo_test_fpk="b",
+             result_name=MC, raw_value="121", reported_unit=None),
+    ])
+    overlap, provisional = summarize_volume_record_topology(
+        tests, values, small_cell=1
+    )
+    row = overlap.loc[
+        overlap.metric.eq("lv_end_diastolic_volume")
+        & overlap.period.eq("2019-2023")
+    ].iloc[0]
+    assert row.explicit_ml_other_test_patient_days == "1"
+    row2 = provisional.loc[
+        provisional.metric.eq("lv_end_diastolic_volume")
+        & provisional.period.eq("2019-2023")
+    ].iloc[0]
+    assert row2.provisional_acc_ord_pair_with_ml_days == "1"
+
+
 def test_cross_report_suppression_prevents_inferring_small_unpaired_subset():
     t, v = [], []
     for pid in range(1, 71):
