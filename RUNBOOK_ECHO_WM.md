@@ -1319,3 +1319,79 @@ single-identifier cases, *not* all 1,500 patient-days. The separate
 this sensitivity scenario. Any eventual extraction rules must also
 address those examination-identity categories with clinical/Mayo
 approval rather than silently promoting them.
+
+### Outcome of explicit-mL-only feasibility and next ACC/ORD pairing screen (2026-11-18)
+
+The new source-method sensitivity ran successfully in MCP. Among
+**703** conservative `single_identifier_group` patient/index-days:
+
+| Selected preferred source tier | LVEDV | LVESV |
+|---|---:|---:|
+| Biplane candidate | 431 | 426 |
+| 3D candidate | 21 | 21 |
+| Single-plane candidate | 42 | 44 |
+| Conflicting top-tier values | 0 | 0 |
+| No explicit-mL numeric volume in range | 209 | 212 |
+| **At least one explicit-mL preferred-tier candidate** | **494** | **491** |
+
+This is **70.27%/69.84% of the 703 selected** but only
+**32.93%/32.73% of the full 1,500** because the staged examination
+identity gate excludes 797 other index days. Neither count is an
+approved clinical completeness result. The hypothetical hierarchy
+(biplane > 3D > single plane) must receive clinical review before
+being applied in production. The source-unit investigation also
+showed the two `MC CV` volume results have empty unit metadata;
+they are **not** assumed to be mL here.
+
+The previous preview disposition was:
+- `single_identifier_group`: 703 patient/index-days
+- `provisional_pair_requires_review`: 718 patient/index-days
+- all other exam/identifier review: 79 patient/index-days
+
+The next **read-only** audit asks whether any of the 718 provisional
+ACC/ORD patient-days have exactly **one reciprocal** ACC/ORD pair
+and **no competing examination group**, and what the explicit-mL
+source-data availability would be *if* that pair eventually were
+adjudicated as one exam. The audit refuses a pair plus any additional
+identifier group, multiple pairs, nonreciprocal pair and any conflicting
+highest-tier measurement.
+
+The source grouping is from `resolve_tte_groups` with the same
+mutually unique 60-second rule already used. Being a reciprocal
+60-second pair is **not** evidence of clinical identity, and **no**
+pair is merged into a clinical reference or written to BigQuery.
+
+After merging the fork branch `validation/echo-wm-mcp` into the
+original MCP repo branch `echo-wm-mcp` and pulling:
+
+```bash
+python -m pytest tests/test_echo_provisional_pair_feasibility.py -q
+```
+
+Fresh IPython **inside MCP**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.provisional_pair_feasibility import (
+    run_provisional_pair_feasibility,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+pair_topology, pair_volume_scenarios = run_provisional_pair_feasibility(
+    eng, study
+)
+print("PROVISIONAL ACC/ORD PAIR TOPOLOGY — NO CLINICAL PROMOTION")
+print(pair_topology.to_string(index=False))
+print("EXPLICIT-mL CANDIDATES IN SOLE PROVISIONAL PAIRS")
+print(pair_volume_scenarios.to_string(index=False))
+```
+
+The denominators differ: pair topology covers the 718 provisional
+pair-withheld patient-days, while pair-volume scenarios cover *only*
+the mutually unique sole pair subset. Count-gated suppression is
+applied, but consult MCP cumulative-disclosure policy before
+sharing aggregates. Follow up with Mayo/clinical leadership on the
+identity of paired records and method priorities before any
+production cohort rebuild.
