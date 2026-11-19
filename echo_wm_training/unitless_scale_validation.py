@@ -196,7 +196,7 @@ def compare_unitless_with_labeled_ml(
             )
             coverage.append({
                 "metric": metric, "period": period,
-                "unitless_mc_cv_patient_days": all_count,
+                "unambiguous_unitless_mc_cv_patient_days": all_count,
                 "paired_same_test_fpk_patient_days": yes_count,
                 "no_paired_test_fpk_patient_days": no_count,
             })
