@@ -1515,3 +1515,81 @@ in the restricted Mayo Cloud PC. Do not modify
 clinical method-selection hierarchy based on a matching ratio.
 Ask Adam whether the source result-type metadata/documents can
 authoritatively establish the expected unit or source convention.
+
+
+### Outcome: no exact ECHO_TEST_FPK unitless-to-mL matches; investigate cross-record topology (2026-11-19)
+
+The 2026-11-19 read-only MCP run of
+`run_unitless_scale_validation` had **zero co-occurring unitless MC CV
+and explicitly mL-labeled results on the exact same
+`ECHO_TEST_FPK`**, for both LVEDV and LVESV in both time periods.
+
+| Source result family | 2012–2018 unambiguous unitless patient-days | 2019–2023 unambiguous unitless patient-days | Same-FPK comparator |
+|---|---:|---:|---:|
+| MC CV LV end-diastolic volume | 46 | 400 | 0 in both periods |
+| MC CV LV end-systolic volume | 46 | 397 | 0 in both periods |
+
+The printed ratio rows were all `suppressed` in the initial code
+because the reporting helper treated an empty sample as a
+small group. This was a *reporting issue*, not a data-disclosure
+suppression of actual ratios. The helper now shows
+`patient_days=0` and `not_applicable` quantiles/percentages
+for a genuinely empty comparison group. Ratios cannot establish
+mL units because no exact-test comparisons exist.
+
+The next read-only module `echo_wm_training/volume_record_topology.py`
+checks how often a unitless result and an explicitly mL-labeled
+result for the same metric occur on **different
+`ECHO_TEST_FPK`s on the same cohort/index day**. It separately
+flags a **provisional reciprocal ACC/ORD group match** between
+those source tests. It deliberately does **not** compare values
+across those records or imply those tests are one clinical
+examination. Its patient-day outputs apply joint
+primary/complementary suppression across both tables; when a
+small cell can be inferred from their difference, all cells for
+that metric/period are suppressed. Even these counts need
+MCP cumulative-release review before sharing.
+
+After merging the fork validation branch into the original
+`echo-wm-mcp` branch, run synthetic tests **inside MCP**:
+
+~~~bash
+python -m pytest -q \
+  tests/test_echo_unitless_scale_validation.py \
+  tests/test_echo_volume_record_topology.py
+~~~
+
+Fresh IPython in MCP:
+
+~~~python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.volume_record_topology import (
+    run_volume_record_topology,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+cross_record_overlap, provisional_pair_overlap = (
+    run_volume_record_topology(eng, study)
+)
+
+print("UNITLESS MC CV VS EXPLICIT-mL ON DIFFERENT SOURCE TESTS")
+print(cross_record_overlap.to_string(index=False))
+
+print("RECIPROCAL ACC/ORD CANDIDATES — NOT EXAM IDENTITY")
+print(provisional_pair_overlap.to_string(index=False))
+~~~
+
+This new script has not yet been run on MCP patient data.
+The source records and their numeric values remain inside MCP.
+Do not send patient-level output, use results to assign the
+unit of MC CV values, change the approved cohort selection,
+or collapse ACC/ORD records based only on time proximity.
+
+**For Adam:** Ask where `ENCOUNTER_NUMBER` is stored, and
+whether any source accession↔order crosswalk / report provenance
+can prove two echo test records correspond to the *same exam*.
+A common encounter can include multiple independent exams and
+does not by itself validate record identity.

@@ -510,21 +510,39 @@ the sparser OMOP transformations when OMOP is not required.
 Clinical method choice should be reviewed with the
 **Advisor Network / study clinical lead**, not inferred by code.
 
-**Unitless source test:** The two `MC CV LV END ... VOLUME`
-result names still have blank unit metadata in the previously
-screened results. A new **read-only** diagnostic
-`echo_wm_training.unitless_scale_validation` compares a unitless
-value against explicitly mL-labeled numeric results **only
-within the same ECHO_TEST_FPK**, by period and technique. It
-reports disclosure-guarded ratio quartiles and broad agreement
-bands, not any patient-level values. The query has not yet
-been run in MCP; **no conclusion about the implied unit is
-currently supported**. Agreement in scale would support further
-confirmation, not authorize automatic mL inference.
+**Unitless source test — MCP results 2026-11-19:**
+The read-only `echo_wm_training.unitless_scale_validation` audit
+found the following cohort-index-day source availability by period:
 
-**Next technical checkpoints:** Validate source metadata with
-Adam in the scheduled Term Finder walkthrough; run the
-exact-test unit-scale diagnostic; inspect encounter-number
-cardinality and period-stratified source availability on
-the unchanged saved cohort; seek clinical sign-off for method
-selection before any promoted source values.
+| Unitless source metric | Period | Unambiguous unitless MC CV patient-days | Explicit-mL comparator on the **same ECHO_TEST_FPK** |
+|---|---|---:|---:|
+| LVEDV | 2012–2018 | 46 | 0 |
+| LVEDV | 2019–2023 | 400 | 0 |
+| LVESV | 2012–2018 | 46 | 0 |
+| LVESV | 2019–2023 | 397 | 0 |
+
+**There were no same-test comparison pairs** and therefore no
+ratios, quartiles or agreement statistics to interpret. The first
+implementation displayed all ratio rows as `suppressed` even for
+empty samples; that reporting issue was corrected so a subsequent
+run will show **0** observations and **not_applicable** ratios.
+These source-level counts use all conventional same-day TTE tests
+in the saved cohort, **not** only the 703 strictly selected cases,
+and are not accepted clinical coverage. We cannot conclude that
+unitless source values are in mL, nor that they have a different
+scale.
+
+The next read-only `echo_wm_training.volume_record_topology`
+audit checks whether these source result families occur on
+**distinct ECHO_TEST_FPK records within a patient/index-day**, and
+whether the associated accession/order groups form merely a
+**provisional reciprocal match**. That audit does not compare
+raw measurements across different tests, approve an ACC/ORD pair
+or change `echo_analytic`. Its MCP run is pending.
+
+**Next technical checkpoints:** Validate the result-type
+descriptions and source metadata with Adam in the scheduled
+Term Finder walkthrough; run the cross-record topology audit;
+check the source-schema location and cardinality of
+`ENCOUNTER_NUMBER`; seek clinical sign-off for method selection
+before promoting any reference or changing cohort extraction.
