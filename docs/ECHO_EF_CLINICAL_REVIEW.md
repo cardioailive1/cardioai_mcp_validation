@@ -570,3 +570,39 @@ source-schema linkage columns, and establish one-to-one exam
 identity before interpreting cross-record values. Obtain clinical
 sign-off for method selection before promoting any reference
 or changing cohort extraction.
+
+
+### Mayo encounter/source-linkage schema confirmed in MCP (2026-11-19)
+
+An INFORMATION_SCHEMA-only metadata audit confirmed the following
+**existing source columns** (exact spelling):
+
+| Source table | Columns relevant to echo source identity |
+|---|---|
+| `FACT_ECHO_TEST` | `ECHO_TEST_FPK`, `PATIENT_DK`, `ENCOUNTER_NUMBER`, `ORDER_PROC_ID`, `ACCESSION_NUMBER`, `ECHO_PERFORMED_DTM` |
+| `FACT_ECHO_RESULTS` | `ECHO_TEST_FPK`, `PATIENT_DK`, `ENCOUNTER_NUMBER`, `ORDER_PROC_ID`, `ECHO_RESULT_VALUE`, `ECHO_RESULTS_VALUE_UNIT_OF_MEASURE` |
+| `FACT_CLINICAL_DOCUMENTS` | `PATIENT_DK`, `ENCOUNTER_NUMBER`, `ORDER_NUMBER`, `CLINICAL_DOCUMENT_TITLE`, `CLINICAL_DOCUMENT_TEXT` |
+| `FACT_FLOWSHEETS` | `PATIENT_DK`, `ENCOUNTER_NBR`, `FLOWSHEET_ASSESSMENT_DTM`, `FLOWSHEET_RESULT_TXT`, `FLOWSHEET_UNIT_OF_MEASURE_TXT` |
+| `FACT_ENCOUNTERS` | `PATIENT_DK`, `EHR_ENCOUNTER_NUMBER`, `BILLING_ENCOUNTER_NUMBER`, `VISIT_NUMBER` |
+
+The schema reveals **potential join keys, not confirmed relationships**.
+In particular, `FACT_FLOWSHEETS.ENCOUNTER_NBR` and
+`FACT_ECHO_TEST.ENCOUNTER_NUMBER` have different names and have **not**
+been proven to use the same identifier namespace. Similarly,
+`FACT_ENCOUNTERS` has several encounter identifier types.
+
+A new read-only `echo_wm_training.encounter_volume_linkage` audit
+checks the **same patient/index-day and distinct ECHO_TEST_FPK** source
+records for exact nonblank order/accession matches, shared encounter,
+missing linkage, conflicting nonblank encounters and multiple possible
+test pairs. Results are mutually exclusive, threshold-gated aggregates.
+A shared encounter is insufficient by itself to establish clinical
+exam identity; no values are automatically compared or assigned
+to the cohort. MCP execution of this new audit is pending.
+
+With Adam, confirm how `FACT_ECHO_TEST.ENCOUNTER_NUMBER` and
+`FACT_ECHO_RESULTS.ENCOUNTER_NUMBER` are populated, whether
+`ORDER_PROC_ID` can provide an authoritative test-level crosswalk,
+which `FACT_ENCOUNTERS` identifier corresponds to those values,
+and how flowsheet/document encounter keys map. Confirm the exact
+source key before attempting an echo-time vitals or report join.
