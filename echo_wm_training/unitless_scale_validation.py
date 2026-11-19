@@ -10,6 +10,7 @@ in private MCP memory. Return only disclosure-guarded aggregate results.
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from .cohort_extraction_preview import (
@@ -132,7 +133,7 @@ def compare_unitless_with_labeled_ml(
             mapping[comparator_name] = (metric, method)
     v = v.loc[v.result_name.isin(mapping)].copy()
     v["number"] = pd.to_numeric(v.raw_value, errors="coerce")
-    v = v.loc[v.number.notna() & v.number.gt(0)].copy()
+    v = v.loc[np.isfinite(v.number) & v.number.gt(0)].copy()
     v["period"] = v.index_date.map(_period)
     v = v.loc[v.period.notna()].copy()
     v["metric"] = v.result_name.map(lambda name: mapping[name][0])
