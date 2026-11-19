@@ -484,3 +484,47 @@ Do not overwrite `echo_lvef`, update the analytic cohort, or lock/promote
 new reference values solely on the aggregate agreement rate. Keep
 patient-level diagnosis, outlier review, and per-examination outputs inside
 MCP. No individual patient or accession data may leave that environment.
+
+
+### Mayo support guidance received 2026-11-19; exact-test unit-scale screen pending
+
+Mayo support recommends the **Term Finder** from
+`My_First_Query.ipynb`, with broad result-description searches:
+`end%diastolic`, `end%systolic`, and `left%dimension`, rather
+than only previously screened exact `ECHO_TEST_RESULT_NAME` values.
+Their cardiology results are centralized in `FACT_ECHO_RESULTS`
+across contributing systems, but Mayo reports greater format
+consistency in the **Epic-era 2019+ records**. This is a
+source-format consideration, **not approval** to restrict the
+pre-existing study window or reselect the 1,500-person cohort.
+
+Other newly identified source avenues are:
+`ENCOUNTER_NUMBER` for an echo's originating encounter (an
+encounter is **not automatically a unique echo exam**);
+`FACT_CLINICAL_DOCUMENTS` and titles such as `Echo Report Text`
+for earlier narrative reports; `FACT_ECHO_TEST.ECHO_NOTE`
+for newer reports; and `FACT_FLOWSHEETS` for height/weight,
+preferably same-encounter, otherwise nearest dated values.
+Mayo recommends native FACT/DIM cardiology sources rather than
+the sparser OMOP transformations when OMOP is not required.
+Clinical method choice should be reviewed with the
+**Advisor Network / study clinical lead**, not inferred by code.
+
+**Unitless source test:** The two `MC CV LV END ... VOLUME`
+result names still have blank unit metadata in the previously
+screened results. A new **read-only** diagnostic
+`echo_wm_training.unitless_scale_validation` compares a unitless
+value against explicitly mL-labeled numeric results **only
+within the same ECHO_TEST_FPK**, by period and technique. It
+reports disclosure-guarded ratio quartiles and broad agreement
+bands, not any patient-level values. The query has not yet
+been run in MCP; **no conclusion about the implied unit is
+currently supported**. Agreement in scale would support further
+confirmation, not authorize automatic mL inference.
+
+**Next technical checkpoints:** Validate source metadata with
+Adam in the scheduled Term Finder walkthrough; run the
+exact-test unit-scale diagnostic; inspect encounter-number
+cardinality and period-stratified source availability on
+the unchanged saved cohort; seek clinical sign-off for method
+selection before any promoted source values.
