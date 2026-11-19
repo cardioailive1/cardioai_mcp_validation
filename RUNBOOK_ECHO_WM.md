@@ -1593,3 +1593,85 @@ whether any source accession↔order crosswalk / report provenance
 can prove two echo test records correspond to the *same exam*.
 A common encounter can include multiple independent exams and
 does not by itself validate record identity.
+
+
+### Outcome of cross-record Mayo MC CV versus explicitly-mL test topology (2026-11-19)
+
+The read-only `run_volume_record_topology` MCP audit completed. For
+**2019–2023**, among the saved cohort's conventional same-day TTE
+source-test patient-days:
+
+| Metric | Unitless MC CV result patient-days | Explicit-mL volume on a **different** ECHO_TEST_FPK on same patient/index-day | No different-FPK explicit-mL source |
+|---|---:|---:|---:|
+| LVEDV | 400 | 385 | 15 |
+| LVESV | 397 | 382 | 15 |
+
+For both metrics, **0** of these 2019–2023 patient-days had an
+explicit-mL source record linked to the unitless source record
+by our *provisional reciprocal ACC/ORD matching algorithm*.
+Pre-2019 detailed cells are suppressed and cannot be inferred.
+
+Thus the majority of the newer unitless MC CV patient-days have
+a separate source-test record with a named explicit-mL volume, but
+**that is NOT evidence they are the same clinical echo examination**.
+The different-FPK co-occurrence alone cannot verify the numeric
+unit of the unitless values, and the absence of a 60-second reciprocal
+pair does not prove they are separate exams. Do not compare or use
+their numerical measurements as a pair until provenance is established.
+
+The previous `run_unitless_scale_validation` displayed ratio
+statistics as suppressed when its true exact-test pair count was
+**zero**; it now returns `patient_days=0` and
+`not_applicable` ratio statistics for empty comparisons. The new
+presentation fix has not yet been rerun in MCP.
+
+#### Identify authoritative encounter and source-exam linkage columns
+
+Mayo advised checking `ENCOUNTER_NUMBER` and using its native FACT/DIM
+sources. Before guessing the location of that field or building an
+encounter join, query the published **metadata only**. This returns
+table names, column names and data types from the Mayo source schema,
+including echo, encounter, clinical documents and flowsheets.
+It reads no patient data and does not modify any cohort data.
+
+After merging the fork's validation branch into the original
+`echo-wm-mcp` branch, run:
+
+~~~bash
+python -m pytest -q \
+  tests/test_echo_unitless_scale_validation.py \
+  tests/test_echo_volume_record_topology.py \
+  tests/test_echo_encounter_schema_discovery.py
+~~~
+
+Fresh IPython, inside MCP:
+
+~~~python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.encounter_schema_discovery import (
+    run_encounter_schema_discovery,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+source_keys = run_encounter_schema_discovery(eng, study)
+print("MAYO FACT/DIM ENCOUNTER AND SOURCE LINKAGE COLUMNS")
+print(source_keys.to_string(index=False))
+~~~
+
+The metadata query uses native BigQuery
+`INFORMATION_SCHEMA.COLUMNS` rather than the Spark-to-GoogleSQL
+transpiler. If metadata permissions or object naming differ in
+a workspace, ask Adam to use the Term Finder and Schema Visualizer
+rather than guessing from error messages. This table is metadata,
+not clinical results, but still follow platform sharing restrictions.
+
+**Next question:** Which source table and column actually supplies
+`ENCOUNTER_NUMBER` to the echo tests, and does joining on encounter
+plus reliable exam-specific identifiers yield a one-to-one echo
+study mapping? An encounter may contain multiple echoes, so
+same-encounter agreement alone does NOT establish the same exam.
+Do not use patient/date or encounter-only joins to populate clinical
+reference measurements or clinical reports without adjudication.
