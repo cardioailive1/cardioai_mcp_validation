@@ -1745,3 +1745,71 @@ print(encounter_signals.to_string(index=False))
 **No clinical-unit inference or cohort update** is authorized
 by this diagnostic. A source test may share an encounter with
 several separately performed echocardiograms.
+
+### Source-key consistency check after 2019+ cross-record encounter conflicts (2026-11-19)
+
+The latest read-only Mayo echo encounter-linkage audit classified
+**385/400** unitless LVEDV patient/index-days and **382/397**
+unitless LVESV patient/index-days in **2019–2023** as having
+an explicit-mL measurement on a *different* `ECHO_TEST_FPK`
+with **conflicting nonblank `FACT_ECHO_TEST.ENCOUNTER_NUMBER`**.
+The remaining **15** patient-days per metric had no qualifying
+explicit-mL other-test record. No pair had identical order/accession
+or encounter fields; no multiple-pair ambiguity occurred under this
+audit's screening rules. Pre-2019 detailed values remain suppressed.
+These are source record observations, not clinically adjudicated
+study identity, and not confirmation of a numeric measurement unit.
+
+Before another attempt to match two different tests, compare their
+**internal source field consistency**: `FACT_ECHO_RESULTS` has
+`ENCOUNTER_NUMBER` and `ORDER_PROC_ID` on each result row,
+alongside the fields on `FACT_ECHO_TEST`. The read-only
+`echo_wm_training.echo_result_key_consistency` diagnostic
+checks source TEST-vs-RESULT relationships *within the exact
+same ECHO_TEST_FPK*, partitioned by time period, metric, and
+unitless MC CV versus explicit-mL family.
+
+Output categories per key are `equal_nonblank`,
+`unequal_nonblank`, `both_missing`, `only_one_missing` and
+`mixed_evidence`; patient/index-days containing multiple
+statuses are deliberately classified as mixed rather than
+preferring a convenient row. No numerical ratio or clinical
+exam linkage is inferred.
+
+After merging the fork branch into the original MCP checkout:
+
+```bash
+python -m pytest -q tests/test_echo_result_key_consistency.py
+```
+
+Then in a **fresh MCP IPython session**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.echo_result_key_consistency import (
+    run_source_echo_key_consistency,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+source_consistency = run_source_echo_key_consistency(eng, study)
+
+print("TEST VS RESULT SOURCE ENCOUNTER/ORDER FIELDS — SAME FPK")
+print(source_consistency.to_string(index=False))
+```
+
+The output is only category/count aggregates; all patient IDs,
+accessions, order identifiers, encounter numbers and result
+values stay in MCP. Each metric/period/family/key partition is
+wholly suppressed if any positive category is below the configured
+small-cell minimum. Cross-report subtraction risks still require
+MCP disclosure review. The diagnostic and synthetic tests
+have not yet been executed in the restricted Cloud PC.
+
+Do **not** overwrite `echo_analytic`, infer a unit for the
+`MC CV` family, or treat same-day different-FPK results
+as the same clinical echo until Mayo defines the source
+relationships and the study's clinical reviewers approve a
+selection policy.
