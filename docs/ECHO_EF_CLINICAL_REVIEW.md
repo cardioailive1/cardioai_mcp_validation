@@ -606,3 +606,49 @@ With Adam, confirm how `FACT_ECHO_TEST.ENCOUNTER_NUMBER` and
 which `FACT_ENCOUNTERS` identifier corresponds to those values,
 and how flowsheet/document encounter keys map. Confirm the exact
 source key before attempting an echo-time vitals or report join.
+
+
+### Verified separate-test encounter disagreement: 2019–2023 (2026-11-19)
+
+A subsequent read-only `run_encounter_volume_linkage` audit of
+the unchanged saved echo cohort found that **all** 2019–2023
+patient/index-days containing both a unitless `MC CV` volume and
+an explicit-mL volume on **two different `ECHO_TEST_FPK`s**
+were classified as having **different nonblank
+`FACT_ECHO_TEST.ENCOUNTER_NUMBER` values**.
+
+| Source-record classification | LVEDV | LVESV |
+|---|---:|---:|
+| Unitless MC CV without another explicit-mL source test | 15 | 15 |
+| Exactly one different-FPK explicit-mL test; **conflicting encounters** | **385** | **382** |
+| Multiple possible source-test pairs | 0 | 0 |
+| Shared order or accession | 0 | 0 |
+| Shared encounter only | 0 | 0 |
+| No shared identifiers / missing encounter evidence | 0 | 0 |
+
+Pre-2019 detail was **suppressed**. This is a strong source-record
+**provenance difference**, not proof of two separate clinical
+examinations and **not** evidence of numerical unit equivalence.
+It remains unsafe to numerically compare those values as the
+same examination without an authoritative source crosswalk.
+
+Both `FACT_ECHO_TEST` and `FACT_ECHO_RESULTS` carry
+`ENCOUNTER_NUMBER` and `ORDER_PROC_ID`. Before interpreting
+different echo-test encounter numbers, a follow-up read-only
+`echo_wm_training.echo_result_key_consistency` audit will check
+whether the TEST and RESULTS attributes agree on the **same
+`ECHO_TEST_FPK`**, separately for unitless MC CV versus
+explicit-mL source families, and before/after 2019.
+
+The cross-source identifiers are not to be inferred by date
+proximity. A genuine same-FPK field mismatch would suggest
+source ETL/identifier translation, whereas same-FPK agreement
+with different-FPK conflicts would strengthen the evidence of
+distinct source records, without proving separate clinical exams.
+The new follow-up code is committed but has **not yet run in MCP**.
+
+**Question for Adam:** Why are the `MC CV` and
+`LV_vol_*` result families associated with systematically
+different encounters despite appearing on the same patient/index-day?
+Are they generated through different clinical workflows or ETL
+sources, and is there a source-defined crosswalk between them?
