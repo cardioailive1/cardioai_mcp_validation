@@ -1675,3 +1675,73 @@ study mapping? An encounter may contain multiple echoes, so
 same-encounter agreement alone does NOT establish the same exam.
 Do not use patient/date or encounter-only joins to populate clinical
 reference measurements or clinical reports without adjudication.
+
+
+### Follow-up to metadata discovery: direct echo encounter/order/accession signals (2026-11-19)
+
+MCP INFORMATION_SCHEMA confirmed these exact source fields:
+- `FACT_ECHO_TEST`: `ECHO_TEST_FPK`, `ENCOUNTER_NUMBER`,
+  `ORDER_PROC_ID`, `ACCESSION_NUMBER`, `ECHO_PERFORMED_DTM`.
+- `FACT_ECHO_RESULTS`: `ECHO_TEST_FPK`, `ENCOUNTER_NUMBER`,
+  `ORDER_PROC_ID`, `ECHO_RESULT_VALUE`,
+  `ECHO_RESULTS_VALUE_UNIT_OF_MEASURE`.
+- `FACT_CLINICAL_DOCUMENTS`: `ENCOUNTER_NUMBER`,
+  `ORDER_NUMBER`, `CLINICAL_DOCUMENT_TITLE`.
+- `FACT_FLOWSHEETS`: `ENCOUNTER_NBR` (not
+  `ENCOUNTER_NUMBER`), assessment datetime, result text and unit text.
+- `FACT_ENCOUNTERS`: `EHR_ENCOUNTER_NUMBER`,
+  `BILLING_ENCOUNTER_NUMBER`, `VISIT_NUMBER`.
+
+The fact that both source datasets contain encounter-like strings
+**does not confirm their values use identical namespaces**.
+Ask Adam to validate any attempted FACT_ENCOUNTERS/FLOWSHEETS
+crosswalk; keep `PATIENT_DK` aligned and verify join cardinality.
+
+The new **read-only** audit
+`echo_wm_training/encounter_volume_linkage.py` attaches
+`FACT_ECHO_TEST.ENCOUNTER_NUMBER` to previously scoped
+conventional echo tests (no cohort writes). Its unitless
+MC CV versus explicit-mL **different-test** candidate
+classification per patient/index-day/metric is exclusively:
+no separate test with mL, multiple possible test pairs, one
+pair sharing order/accession, one sharing only a nonblank
+encounter, one with contradictory nonblank encounters, or
+one without shared identifiers. A true shared order/accession
+may be better evidence than a matching encounter, but none
+alone constitutes adjudicated exam identity. If a unique pair
+has different nonblank encounters, it is explicitly flagged
+as a source-linkage conflict.
+
+The output suppresses the entire metric/period partition
+when any positive category cell is smaller than
+`study.small_cell`. Multiple published result tables still
+need cumulative disclosure review; no patient-level identifiers,
+test IDs, result values or note text may be exported.
+
+After merging the validation branch into the original MCP
+`echo-wm-mcp` branch, run:
+
+~~~bash
+python -m pytest -q tests/test_echo_encounter_volume_linkage.py
+~~~
+
+Fresh IPython inside MCP:
+
+~~~python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.encounter_volume_linkage import (
+    run_encounter_volume_linkage,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+encounter_signals = run_encounter_volume_linkage(eng, study)
+print("MAYO ECHO UNIT-SOURCE RECORD LINKAGE SIGNALS")
+print(encounter_signals.to_string(index=False))
+~~~
+
+**No clinical-unit inference or cohort update** is authorized
+by this diagnostic. A source test may share an encounter with
+several separately performed echocardiograms.
