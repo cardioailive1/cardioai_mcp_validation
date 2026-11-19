@@ -149,15 +149,27 @@ def summarize_volume_record_topology(
             ]
             n = len(sub)
             yes = int(sub.other_test_ml.sum())
-            a, b, c = _protect_complement(n, yes, small_cell)
+            reciprocal = int(sub.provisional_pair_with_ml.sum())
+            if reciprocal > yes:
+                raise ValueError("Reciprocal match cannot exceed cross-record co-occurrence")
+            # These tables will be shown together. If reciprocal is a
+            # subset of other-test co-occurrence, releasing both exact
+            # totals could reveal a small (other-test MINUS reciprocal)
+            # group even when each standalone table seems safe.
+            joint = (n, yes, n - yes, reciprocal, n - reciprocal,
+                     yes - reciprocal)
+            if any(0 < x < small_cell for x in joint):
+                a, b, c = ("suppressed",) * 3
+                x, y, z = ("suppressed",) * 3
+            else:
+                a, b, c = _protect_complement(n, yes, small_cell)
+                x, y, z = _protect_complement(n, reciprocal, small_cell)
             cooccur.append({
                 "metric": metric, "period": period,
                 "unitless_mc_cv_patient_days": a,
                 "explicit_ml_other_test_patient_days": b,
                 "no_explicit_ml_other_test_patient_days": c,
             })
-            reciprocal = int(sub.provisional_pair_with_ml.sum())
-            x, y, z = _protect_complement(n, reciprocal, small_cell)
             pairs.append({
                 "metric": metric, "period": period,
                 "unitless_mc_cv_patient_days": x,
