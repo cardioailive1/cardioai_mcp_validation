@@ -540,9 +540,33 @@ whether the associated accession/order groups form merely a
 raw measurements across different tests, approve an ACC/ORD pair
 or change `echo_analytic`. Its MCP run is pending.
 
-**Next technical checkpoints:** Validate the result-type
-descriptions and source metadata with Adam in the scheduled
-Term Finder walkthrough; run the cross-record topology audit;
-check the source-schema location and cardinality of
-`ENCOUNTER_NUMBER`; seek clinical sign-off for method selection
-before promoting any reference or changing cohort extraction.
+**Subsequent cross-record topology result (MCP, 2026-11-19):**
+Among 2019–2023 patient/index-days with an unambiguous
+unitless MC CV LVEDV result, **385/400** (96.25%) had a
+numeric explicit-mL LVEDV on **another ECHO_TEST_FPK** on
+the same patient/index-day. For LVESV, this was **382/397**
+(96.22%). In both analyses, **zero** unitless/explicit-mL
+cross-record pairs met the provisional reciprocal ACC/ORD
+matching rule. The corresponding pre-2019 detailed cells
+were suppressed. These are *co-present source records*,
+**not** verified duplicate studies or clinical measurement pairs.
+
+This explains why the exact-FPK scale check produced no ratios:
+the two source result families commonly reside on different test
+keys. It provides **no basis** for comparing their numeric values
+or interpreting the unitless family as mL without a verified
+exam identity crosswalk and source-unit definition.
+
+A next read-only module `echo_wm_training.encounter_schema_discovery`
+will enumerate the exact source table/column names and types
+related to `ENCOUNTER_NUMBER`, echo tests, reports and flowsheets
+via BigQuery INFORMATION_SCHEMA. This metadata query has **not
+yet been executed in MCP**; its output will guide an
+exam-identity/cardinality audit without assuming a field location.
+
+**Next technical checkpoints:** Validate result names and source
+metadata with Adam's Term Finder walkthrough, inspect the actual
+source-schema linkage columns, and establish one-to-one exam
+identity before interpreting cross-record values. Obtain clinical
+sign-off for method selection before promoting any reference
+or changing cohort extraction.
