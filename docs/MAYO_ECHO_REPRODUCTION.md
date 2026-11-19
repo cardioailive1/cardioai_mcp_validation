@@ -263,6 +263,83 @@ coverage caveats**. Clinical choices (e.g., acceptable
 method priority or changing a protocol threshold) remain with
 the study owner.
 
+## Appendix A. Assemble a minimal support ZIP inside the Cloud PC
+
+First merge this reproduction guide into the original repository's
+`echo-wm-mcp` branch and update the Cloud PC checkout. Use the actual
+`requirements.txt` **currently in the Cloud PC**; do not let
+`git archive` silently replace it with the older committed file.
+Inspect/sanitize the requirements file before packaging if it contains
+private indexes, credentials, internal endpoints, or environment-specific
+secrets.
+
+From the original repository root:
+
+~~~bash
+git switch echo-wm-mcp
+git rev-parse HEAD
+
+# Copy the modified, active Cloud PC requirements for the handoff.
+cp requirements.txt requirements-cloudpc.txt
+
+# Include the narrow source/config/test dependency chain and the guide.
+git archive --format=zip --output=../mayo_echo_support_code.zip HEAD \
+  docs/MAYO_ECHO_REPRODUCTION.md \
+  docs/ECHO_EF_CLINICAL_REVIEW.md \
+  config/cohorts/echo.yaml \
+  config/study.yaml \
+  config/concept_sets.yaml \
+  config/modality_tables.yaml \
+  cardioai_mcp/__init__.py \
+  cardioai_mcp/config.py \
+  cardioai_mcp/engine.py \
+  cardioai_mcp/qc.py \
+  cardioai_mcp/extractors.py \
+  cardioai_mcp/builder.py \
+  cardioai_mcp/pipeline.py \
+  cardioai_mcp/concepts.py \
+  cardioai_mcp/deid.py \
+  echo_wm_training/__init__.py \
+  echo_wm_training/mcp_echo.py \
+  echo_wm_training/labels.py \
+  echo_wm_training/runtime/__init__.py \
+  echo_wm_training/runtime/segments.py \
+  echo_wm_training/exam_resolution.py \
+  echo_wm_training/cohort_source_discovery.py \
+  echo_wm_training/cohort_source_followup.py \
+  echo_wm_training/cohort_extraction_preview.py \
+  echo_wm_training/volume_unit_profile.py \
+  echo_wm_training/explicit_ml_feasibility.py \
+  echo_wm_training/provisional_pair_feasibility.py \
+  mri_training/__init__.py \
+  mri_training/mcp_imaging.py \
+  mri_training/io.py \
+  mri_training/runtime/__init__.py \
+  mri_training/runtime/preprocess.py \
+  tests/test_echo_cohort_source_discovery.py \
+  tests/test_echo_cohort_source_followup.py \
+  tests/test_echo_cohort_extraction_preview.py \
+  tests/test_echo_volume_unit_profile.py \
+  tests/test_echo_explicit_ml_feasibility.py \
+  tests/test_echo_provisional_pair_feasibility.py
+
+# Add the actual Cloud PC dependency file (not the committed copy).
+zip -j ../mayo_echo_support_code.zip requirements-cloudpc.txt
+
+# Verify that the archive contains the guide and the active requirements.
+unzip -l ../mayo_echo_support_code.zip
+~~~
+
+This deliberately omits the rest of the private repository, raw
+data exports, and the older committed `requirements.txt`. The
+selected modules import a small number of MRI/echo utility modules;
+those code-only import dependencies are included above. If the
+environment or archive changes, run the synthetic tests after
+extracting to verify that the subset is self-contained. No
+MCP clinical data belongs in the ZIP. An approved disclosure review
+is still required for the clinical-review Markdown and any
+additional screenshots or aggregate exports.
+
 ## 5. Privacy and stop conditions
 
 - All runs are **read-only** against the saved cohort and source
