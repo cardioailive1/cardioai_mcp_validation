@@ -110,6 +110,49 @@ def test_primary_and_complement_suppression():
         assert all(value == "0" for value in zero_row.iloc[2:])
 
 
+
+def test_cross_report_suppression_prevents_inferring_small_unpaired_subset():
+    t, v = [], []
+    for pid in range(1, 71):
+        date = "2022-03-01"
+        t.append({
+            "person_id": pid, "index_date": date,
+            "echo_test_fpk": f"mc{pid}", "exam_datetime": date + " 10:00:00",
+            "accession_number": f"A{pid}", "order_proc_id": None,
+        })
+        v.append({
+            "person_id": pid, "index_date": date,
+            "echo_test_fpk": f"mc{pid}", "result_name": MC,
+            "raw_value": "120", "reported_unit": None,
+        })
+        if pid <= 45:
+            t.append({
+                "person_id": pid, "index_date": date,
+                "echo_test_fpk": f"ml{pid}",
+                "exam_datetime": date + (
+                    " 10:00:10" if pid <= 40 else " 14:00:00"
+                ),
+                "accession_number": None, "order_proc_id": f"O{pid}",
+            })
+            v.append({
+                "person_id": pid, "index_date": date,
+                "echo_test_fpk": f"ml{pid}", "result_name": BP,
+                "raw_value": "121", "reported_unit": "mL",
+            })
+    # Individually safe: n=70, other-FPK mL=45, provisional match=40.
+    # Together they reveal exactly five cases without a reciprocal match.
+    # Both tables must suppress to prevent the subtraction.
+    cooccur, reciprocal = summarize_volume_record_topology(
+        pd.DataFrame(t), pd.DataFrame(v), small_cell=11
+    )
+    for output in (cooccur, reciprocal):
+        row = output.loc[
+            output.metric.eq("lv_end_diastolic_volume")
+            & output.period.eq("2019-2023")
+        ].iloc[0]
+        assert all(value == "suppressed" for value in row.iloc[2:])
+
+
 def test_missing_identifier_and_measurement_fields_rejected():
     tests, volumes = _data()
     with pytest.raises(ValueError, match="Missing ECHO_TEST_FPK"):
