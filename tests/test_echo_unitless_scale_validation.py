@@ -98,11 +98,11 @@ def test_evidence_of_scale_requires_large_enough_unambiguous_sample():
     assert r.median_mc_over_ml == "1.250"
     assert r.pct_within_10pct == "50.0"
     assert r.pct_within_25pct == "50.0"
-    # Different period/metric combinations remain suppressed.
-    assert (ratios.loc[
-        ratios.period.eq("2012-2018"),
-        "patient_days"
-    ] == "suppressed").all()
+    # With no observations, the sample count is exactly zero, not
+    # disclosure-suppressed. Percentages and quantiles are inapplicable.
+    absent = ratios.loc[ratios.period.eq("2012-2018")]
+    assert (absent.patient_days == "0").all()
+    assert (absent.median_mc_over_ml == "not_applicable").all()
 
 
 def test_complementary_disclosure_suppresses_full_comparison():
