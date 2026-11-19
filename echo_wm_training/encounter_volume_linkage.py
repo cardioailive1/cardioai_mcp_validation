@@ -24,6 +24,7 @@ _CATEGORIES = (
     "multiple_possible_test_pairs",
     "unique_shared_order_or_accession",
     "unique_shared_encounter_only",
+    "unique_conflicting_encounters",
     "unique_without_shared_identifiers",
 )
 
@@ -76,6 +77,13 @@ def _classify_pair(
         ma["accession_number"] is not None
         and ma["accession_number"] == mb["accession_number"]
     )
+    # A contradictory nonblank encounter is a provenance conflict
+    # even when an order or accession happens to match. Do not
+    # interpret it as a confirming identity signal.
+    if (ma["encounter_number"] is not None
+        and mb["encounter_number"] is not None
+        and ma["encounter_number"] != mb["encounter_number"]):
+        return "unique_conflicting_encounters"
     if shared_order or shared_accession:
         return "unique_shared_order_or_accession"
     shared_encounter = (
