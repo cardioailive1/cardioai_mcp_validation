@@ -69,7 +69,7 @@ def test_pairs_only_same_exact_test_and_separates_periods():
         & ratios.period.eq("2019-2023")
         & ratios.comparator.eq("biplane_2d")
     ].iloc[0]
-    assert r.patient_days == "suppressed"  # one unambiguous FPK < default 11?
+    assert r.patient_days == "1"  # only t2, not the two t7 source records
     assert "person_id" not in summary and "echo_test_fpk" not in ratios
 
 
