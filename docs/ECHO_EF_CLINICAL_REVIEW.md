@@ -372,13 +372,44 @@ result-name family. It does **not** establish that missing units mean
 mL. It also does not prove that these 443/439 cases are the same
 patient-days as those withheld in the strict preview.
 
-A further **read-only, explicit-mL-only** method-feasibility
-scenario has been added in `echo_wm_training.explicit_ml_feasibility`,
-but its results have not yet been run in MCP. It ignores unitless
-Mayo names without inventing units and quantifies the *potential*
-selection of biplane, then 3D, then single-plane measurements when
-only a single consistent value exists within the preferred available
-tier. This is a **hypothetical method hierarchy**, not an approved
+The further **read-only, explicit-mL-only** method-feasibility
+scenario (`echo_wm_training.explicit_ml_feasibility`) was run inside
+MCP. Within 703 conservatively selected single-identifier groups,
+it found **494** patient-days with an LVEDV explicit-mL candidate
+(**431** biplane, **21** 3D, **42** single-plane; **209** without
+explicit mL), and **491** with an LVESV candidate (**426** biplane,
+**21** 3D, **44** single-plane; **212** without explicit mL).
+The hypothetical method hierarchy produced **zero** conflicts
+within the preferred available tier for either measurement.
+
+These candidate counts represent **70.27% LVEDV** and **69.84%
+LVESV** among 703 selected examinations, or **32.93%** and
+**32.73%** of the unchanged 1,500 patient-day cohort, respectively.
+They are not approved clinical reference completeness. The
+apparent improvement over the strict 58/61 preview is due to
+testing explicit-mL measurements under a per-method sensitivity
+hierarchy rather than rejecting all different method values.
+
+The other **718** patient/index-days with provisional ACC/ORD
+pairing remain withheld, alongside 79 other identity/exam
+review cases. The read-only `provisional_pair_feasibility` audit
+has **now been run in MCP**. Both the sole-pair versus additional-group
+topology and the explicit-mL candidate/noncandidate breakdown
+were reported as **suppressed** under the configured small-cell and
+complementary disclosure safeguards. These outputs cannot be
+interpreted as either zero availability or a numeric count of
+recoverable pairs. Do not infer the suppressed cells by subtraction
+from the previously published 718 patient-day denominator.
+
+No pair was automatically approved, merged, or promoted. A reviewer
+authorized inside MCP may inspect the examination-level evidence
+without exporting identifiers, source values, or disclosive
+subgroup counts. The next operational dependency is a documented
+rule for establishing ACC/ORD exam identity independently of
+a nearby timestamp, and a clinically agreed measurement-method
+selection hierarchy.
+
+This is a **hypothetical method hierarchy**, not an approved
 clinical selection or a production cohort change.
 
 No cohort rebuild, reference promotion or threshold change has occurred.
