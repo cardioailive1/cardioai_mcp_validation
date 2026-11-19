@@ -174,7 +174,11 @@ def summarize_encounter_volume_linkage(
     d = pd.DataFrame(valid, columns=_EXAM_KEYS + ["metric", "family"])
     lookup = {
         tuple(getattr(record, k) for k in _EXAM_KEYS): {
-            name: getattr(record, name)
+            # Pandas may represent missing values as NaN even after
+            # Series.map(_nonblank). A NaN is not None, and NaN !=
+            # a real encounter ID, so leaving it unnormalized here
+            # incorrectly classifies a missing encounter as a conflict.
+            name: _nonblank(getattr(record, name))
             for name in ("encounter_number", "order_proc_id", "accession_number")
         }
         for record in t.itertuples(index=False)
