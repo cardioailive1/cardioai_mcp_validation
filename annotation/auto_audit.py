@@ -46,6 +46,7 @@ class AutoAuditor:
         self.pre_unc = re.compile(g["pre_uncertain"], re.I)
         self.post_unc = re.compile(g["post_uncertain"], re.I)
         self.hist = re.compile(g["historical"], re.I)
+        self.post_hist = re.compile(g["post_historical"], re.I) if g.get("post_historical") else None
         self.term = re.compile(g["terminators"], re.I)
         self.pre_words, self.post_words = int(g.get("pre_window_words", 8)), int(g.get("post_window_words", 6))
         self.concepts = {k: re.compile(v, re.I) for k, v in self.m["concepts"].items()}
@@ -72,7 +73,7 @@ class AutoAuditor:
             return "uncertain"                      # 'cannot be excluded' must win over 'excluded'
         if self.pre_neg.search(before) or self.post_neg.search(after):
             return "negated"
-        if self.hist.search(before):
+        if self.hist.search(before) or (self.post_hist is not None and self.post_hist.search(after)):
             return "historical"
         return "affirmed"
 

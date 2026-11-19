@@ -105,3 +105,24 @@ def test_mri_mayo_delayed_enhancement_wording():
     assert y["infarct"] == 1 and y["nonischemic_lge"] == 0
     z = r("Mid-wall delayed myocardial enhancement in the inferolateral wall.")
     assert z["nonischemic_lge"] == 1 and z["infarct"] == 0
+
+
+def test_serial_ecg_rhythm_replacement():
+    """ECG adjudication (2026-11-19): "sinus rhythm has replaced atrial fibrillation" means the tracing is sinus.
+    The training rule and the automatic auditor must both read it as no AF; the reverse wording stays AF."""
+    import re
+    from annotation.auto_audit import AutoAuditor
+    from cardioai_mcp.report_context import Context
+    ctx, aa = Context({}), AutoAuditor("ecg")
+    af = re.compile(r"(?i)(atrial fibrillation|atrial flutter|\bafib\b|\ba-fib\b)")
+    cases = {"Sinus rhythm has replaced atrial fibrillation. Otherwise normal ECG.": 0,
+             "When compared with ECG of 01-JAN-2020, sinus rhythm has replaced atrial flutter.": 0,
+             "Atrial fibrillation has been replaced by sinus rhythm.": 0,
+             "Atrial fibrillation is no longer present.": 0,
+             "Atrial fibrillation has replaced sinus rhythm.": 1,
+             "Sinus rhythm replaced by atrial fibrillation.": 1,
+             "Atrial fibrillation has replaced atrial flutter.": 1,
+             "Atrial fibrillation with rapid ventricular response.": 1}
+    for text, want in cases.items():
+        assert ctx.label(text, af) == want, text
+        assert aa.read(text)["af"] == want, text
