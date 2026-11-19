@@ -392,10 +392,22 @@ hierarchy rather than rejecting all different method values.
 
 The other **718** patient/index-days with provisional ACC/ORD
 pairing remain withheld, alongside 79 other identity/exam
-review cases. The next read-only `provisional_pair_feasibility`
-audit will distinguish sole reciprocal ACC/ORD pairs from
-pairs with other examinations and examine conditional volume
-availability. No pair will be automatically promoted.
+review cases. The read-only `provisional_pair_feasibility` audit
+has **now been run in MCP**. Both the sole-pair versus additional-group
+topology and the explicit-mL candidate/noncandidate breakdown
+were reported as **suppressed** under the configured small-cell and
+complementary disclosure safeguards. These outputs cannot be
+interpreted as either zero availability or a numeric count of
+recoverable pairs. Do not infer the suppressed cells by subtraction
+from the previously published 718 patient-day denominator.
+
+No pair was automatically approved, merged, or promoted. A reviewer
+authorized inside MCP may inspect the examination-level evidence
+without exporting identifiers, source values, or disclosive
+subgroup counts. The next operational dependency is a documented
+rule for establishing ACC/ORD exam identity independently of
+a nearby timestamp, and a clinically agreed measurement-method
+selection hierarchy.
 
 This is a **hypothetical method hierarchy**, not an approved
 clinical selection or a production cohort change.
