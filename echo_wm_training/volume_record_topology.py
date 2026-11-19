@@ -114,21 +114,24 @@ def summarize_volume_record_topology(
             chunk.family.eq("explicit_ml"), "echo_test_fpk"
         ])
         # Exact-test co-occurrence was separately examined; this diagnostic
-        # intentionally asks about OTHER test records only.
-        counterparts = explicit - mc
-        has_other = bool(counterparts)
+        # intentionally asks about OTHER test records only. A source test
+        # may contain both families, so compare each distinct FPK pair
+        # instead of removing every MC-bearing FPK from explicit candidates.
+        record_pairs = [
+            (mc_test, ml_test)
+            for mc_test in mc for ml_test in explicit
+            if mc_test != ml_test
+        ]
+        has_other = bool(record_pairs)
         provisional = False
-        for mc_test in mc:
+        for mc_test, ml_test in record_pairs:
             a = group_by_test.get((pid, day, mc_test))
-            if a is None or a[1] != "provisional_mutual_match":
-                continue
-            for ml_test in counterparts:
-                b = group_by_test.get((pid, day, ml_test))
-                if (b is not None and b[1] == "provisional_mutual_match"
-                    and a[2] == b[0] and b[2] == a[0]):
-                    provisional = True
-                    break
-            if provisional:
+            b = group_by_test.get((pid, day, ml_test))
+            if (a is not None and b is not None
+                and a[1] == "provisional_mutual_match"
+                and b[1] == "provisional_mutual_match"
+                and a[2] == b[0] and b[2] == a[0]):
+                provisional = True
                 break
         period = _period(day)
         if period is not None:
