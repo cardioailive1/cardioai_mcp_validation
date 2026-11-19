@@ -78,6 +78,24 @@ def test_identity_signals_are_exclusive_and_not_assumed_clinical_joins():
     assert "person_id" not in out and "echo_test_fpk" not in out
 
 
+
+@pytest.mark.parametrize("missing_encounter", [None, float("nan"), pd.NA, ""])
+def test_missing_encounter_never_counts_as_conflicting(missing_encounter):
+    tests, volumes = _fixtures()
+    # The explicit-mL source record for patient 6 has no encounter link.
+    # pandas 2.x / 3.x may represent that as None, NaN or pd.NA.
+    tests.loc[tests.echo_test_fpk.eq("x6"), "encounter_number"] = (
+        missing_encounter
+    )
+    out = summarize_encounter_volume_linkage(tests, volumes, small_cell=1)
+    current = out.loc[
+        out.metric.eq("lv_end_diastolic_volume")
+        & out.period.eq("2019-2023")
+    ].set_index("linkage_category").patient_days
+    assert current["unique_conflicting_encounters"] == "1"
+    assert current["unique_without_shared_identifiers"] == "1"
+
+
 def test_small_positive_category_suppresses_complete_partition():
     t, v = _fixtures()
     out = summarize_encounter_volume_linkage(t, v, small_cell=11)
