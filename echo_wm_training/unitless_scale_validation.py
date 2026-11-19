@@ -63,6 +63,15 @@ def _protected_comparison(
 ) -> dict[str, str]:
     """Gate ALL comparison fields when any positive near/far cell is small."""
     n = len(rows)
+    if n == 0:
+        return {
+            "patient_days": "0",
+            "median_mc_over_ml": "not_applicable",
+            "p25_mc_over_ml": "not_applicable",
+            "p75_mc_over_ml": "not_applicable",
+            "pct_within_10pct": "not_applicable",
+            "pct_within_25pct": "not_applicable",
+        }
     near10 = int(rows["within_10pct"].sum())
     near25 = int(rows["within_25pct"].sum())
     if (n < small_cell or any(
