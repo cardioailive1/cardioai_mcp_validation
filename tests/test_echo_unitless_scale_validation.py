@@ -58,10 +58,10 @@ def test_pairs_only_same_exact_test_and_separates_periods():
     )
     s = summary.set_index(["metric", "period"])
     old = s.loc[("lv_end_diastolic_volume", "2012-2018")]
-    assert old.unitless_mc_cv_patient_days == "1"
+    assert old.unambiguous_unitless_mc_cv_patient_days == "1"
     assert old.paired_same_test_fpk_patient_days == "1"
     current = s.loc[("lv_end_diastolic_volume", "2019-2023")]
-    assert current.unitless_mc_cv_patient_days == "4"  # 2, 3, 4, 7
+    assert current.unambiguous_unitless_mc_cv_patient_days == "4"  # 2, 3, 4, 7
     assert current.paired_same_test_fpk_patient_days == "2"  # 2, 7
     assert current.no_paired_test_fpk_patient_days == "2"
     r = ratios[
@@ -86,7 +86,7 @@ def test_evidence_of_scale_requires_large_enough_unambiguous_sample():
     main = summary.set_index(["metric", "period"]).loc[
         ("lv_end_diastolic_volume", "2019-2023")
     ]
-    assert main.unitless_mc_cv_patient_days == "50"
+    assert main.unambiguous_unitless_mc_cv_patient_days == "50"
     assert main.paired_same_test_fpk_patient_days == "50"
     assert main.no_paired_test_fpk_patient_days == "0"
     r = ratios.loc[
