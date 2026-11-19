@@ -1395,3 +1395,42 @@ applied, but consult MCP cumulative-disclosure policy before
 sharing aggregates. Follow up with Mayo/clinical leadership on the
 identity of paired records and method priorities before any
 production cohort rebuild.
+
+### Result of the sole ACC/ORD pairing audit (2026-11-18)
+
+The MCP run of `run_provisional_pair_feasibility` completed. Its
+`pair_topology` table (sole reciprocal ACC/ORD pair versus
+pair with additional identifier groups) and both LVEDV and LVESV
+`pair_volume_scenarios` tables returned **suppressed** for all
+category counts. This is due to the primary/complementary disclosure
+rules; **suppressed is neither zero nor an estimate**. We cannot
+derive a numeric count of sole pairs or additional explicit-mL
+candidates from the released output. The previously established
+**718** patient/index-days with any provisional pairing remain
+withheld from clinical reference selection.
+
+Do **not** weaken suppression or reconstruct a small complementary
+cell using the known 718 denominator. Authorized examination-level
+review and disclosure decisions must take place within MCP.
+If an aggregate will be sent to Mayo or the model developer,
+obtain platform-approved disclosure clearance rather than
+using a more revealing query.
+
+**Clinical/technical sign-off needed before extraction changes:**
+1. Authoritative way to link ACC and ORD records to one clinical
+   examination (identifier crosswalk, order/accession linkage,
+   report provenance); timestamp proximity alone is not sufficient.
+2. Approved method hierarchy for absolute LVEDV/LVESV: the
+   biplane > 3D > single-plane ordering was a *hypothetical
+   feasibility scenario*, not clinical policy.
+3. Whether the unitless `MC CV LV END DIASTOLIC VOLUME` and
+   `MC CV LV END SYSTOLIC VOLUME` source results are documented
+   as absolute mL. Until answered, do not infer units or use
+   them for automatic selection.
+4. Exam/report selection and handling of multiple exams, conflicting
+   within-method values, source-system differences and missing
+   index-day echo notes.
+
+Keep `echo_analytic` unchanged, retain the 90% individual
+volume-completeness requirement, and treat the existing
+27-element before/after report as a dry-run comparison.
