@@ -1434,3 +1434,84 @@ using a more revealing query.
 Keep `echo_analytic` unchanged, retain the 90% individual
 volume-completeness requirement, and treat the existing
 27-element before/after report as a dry-run comparison.
+
+
+### Assess whether unitless Mayo MC CV volumes use the same scale as explicit mL (2026-11-19)
+
+Following Mayo's reply, a source-name with blank
+`ECHO_RESULTS_VALUE_UNIT_OF_MEASURE` **does not necessarily imply mL**,
+even where its numeric magnitude looks physiologically reasonable. Mayo
+recommended broader result-description searches in Term Finder (to be
+reviewed with Adam), and cautioned that source formatting is more
+consistent from **2019 onward**.
+
+A read-only audit `echo_wm_training.unitless_scale_validation` now
+checks two hypotheses independently:
+
+1. Does a unitless `MC CV LV END DIASTOLIC VOLUME` or
+   `MC CV LV END SYSTOLIC VOLUME` co-occur with an **explicit-mL**
+   2D biplane/4C/2C or 3D volume on the **same
+   `person_id` + `index_date` + `ECHO_TEST_FPK`**?
+   Never infer this link from an encounter, timestamp, accession, or
+   pairing of two distinct tests.
+2. Within exact-test co-occurrences, what is the **ratio of
+   unitless-to-explicit-mL numeric values** by comparison method
+   and 2012–2018 versus 2019–2023? A median near one and broad
+   agreement would support a hypothesis of the same *scale*, but
+   different clinical measurement methods need not agree exactly.
+   This is not proof of units, and must not be used to autoassign mL.
+
+Only one distinct positive numeric value per result name/test is
+eligible; conflicting duplicates are excluded. Unitless MC CV rows
+must have empty unit metadata and comparison rows must explicitly
+say mL and pass the existing volume screening ranges. The results
+contain **no raw values or identifiers**, and suppress whole comparison
+rows when their counts (or 10%/25% near/far partitions) are smaller
+than the required cell threshold. Review **cumulative cross-report
+disclosure** before sharing.
+
+The previous 443 LVEDV / 439 LVESV source-unit counts came from
+**703 selected single-identifier examinations**. This new exact-FPK
+audit samples every cohort-scoped same-day conventional TTE source
+test and reports only **unambiguous numeric MC CV** groups by
+period; its denominator and meaning are therefore different.
+An exact-FPK comparison is strong source-record evidence but not
+proof that the examination was clinically selected as the index
+exam, and the 2019+ split does not change the cohort.
+
+After integrating fork validation commits into the original
+`echo-wm-mcp` branch:
+
+~~~bash
+python -m pytest tests/test_echo_unitless_scale_validation.py -q
+~~~
+
+Fresh IPython **inside MCP**:
+
+~~~python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.unitless_scale_validation import (
+    run_unitless_scale_validation,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+unitless_coverage, unitless_scale = run_unitless_scale_validation(
+    eng, study
+)
+
+print("UNAMBIGUOUS UNITLESS MC CV VOLUME COVERAGE BY PERIOD")
+print(unitless_coverage.to_string(index=False))
+
+print("EXACT-ECHO-TEST UNIT SCALE COMPARISONS")
+print(unitless_scale.to_string(index=False))
+~~~
+
+**Pending:** these tests and diagnostic have not yet been executed
+in the restricted Mayo Cloud PC. Do not modify
+`echo_analytic`, the volume unit conversion policy, or the
+clinical method-selection hierarchy based on a matching ratio.
+Ask Adam whether the source result-type metadata/documents can
+authoritatively establish the expected unit or source convention.
