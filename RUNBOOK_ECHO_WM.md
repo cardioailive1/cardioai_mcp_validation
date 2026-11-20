@@ -1813,3 +1813,38 @@ Do **not** overwrite `echo_analytic`, infer a unit for the
 as the same clinical echo until Mayo defines the source
 relationships and the study's clinical reviewers approve a
 selection policy.
+
+
+### Confirmed test/result source key agreement; stop treating mismatch as ETL issue (2026-11-19)
+
+The same-`ECHO_TEST_FPK` identifier audit
+`run_source_echo_key_consistency` completed in MCP.
+The `ENCOUNTER_NUMBER` and `ORDER_PROC_ID` values in
+`FACT_ECHO_TEST` and `FACT_ECHO_RESULTS` were equal and
+nonblank across **all** observed records, grouped at distinct
+patient/index-day level, for both unitless `MC CV` and
+explicit-mL result families:
+
+| Period | Unitless LVEDV | Unitless LVESV | Explicit-mL LVEDV | Explicit-mL LVESV |
+|---|---:|---:|---:|---:|
+| 2012–2018 | 46 | 46 | 531 | 526 |
+| 2019–2023 | 400 | 397 | 443 | 441 |
+
+No mismatched, missing, or mixed key comparison cases were
+observed in any family/metric/era. The encounter and order
+checks cover the same patient-days; do not sum them.
+
+The prior test-to-test topology audit still found conflicting
+`FACT_ECHO_TEST.ENCOUNTER_NUMBER` on different-FPK
+unitless-versus-explicit-mL source tests for **385 LVEDV** and
+**382 LVESV** patient/index-days in 2019–2023. Their
+test/result internal consistency does **not** establish that
+cross-FPK source records refer to the same clinical exam.
+
+Do not assign mL units to `MC CV` values, perform
+a patient/date-only cross-exam comparison, or alter
+`echo_analytic` / its thresholds. The next step is Mayo
+confirmation of the workflows and authoritative study/order
+join keys and clinical-method priority. The known-unit
+structured volume candidates can be investigated independently
+after establishing intended exam identity.
