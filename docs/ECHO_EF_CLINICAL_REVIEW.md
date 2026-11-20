@@ -652,3 +652,50 @@ The new follow-up code is committed but has **not yet run in MCP**.
 different encounters despite appearing on the same patient/index-day?
 Are they generated through different clinical workflows or ETL
 sources, and is there a source-defined crosswalk between them?
+
+
+### Same-FPK Mayo test versus result identifier audit completed (2026-11-19)
+
+The read-only `echo_wm_training.echo_result_key_consistency` diagnostic
+completed in the restricted MCP workspace. For each named result
+family, the `FACT_ECHO_TEST` versus `FACT_ECHO_RESULTS`
+`ENCOUNTER_NUMBER` comparison and the `ORDER_PROC_ID`
+comparison were **equal and nonblank across all observed
+patient/index-days** in both study eras:
+
+| Result family | Period | LVEDV patient-days | LVESV patient-days |
+|---|---|---:|---:|
+| unitless `MC CV` | 2012–2018 | 46 | 46 |
+| unitless `MC CV` | 2019–2023 | 400 | 397 |
+| explicitly labeled mL | 2012–2018 | 531 | 526 |
+| explicitly labeled mL | 2019–2023 | 443 | 441 |
+
+Each patient-day is counted **once per family/metric/period**; the
+encounter and order counts cover the *same* patient-days, so should
+not be added. For all eight populations, no unequal nonblank
+identifiers, both-missing identifiers, one-missing identifiers,
+or mixed identifier evidence was observed.
+
+**Interpretation:** No same-`ECHO_TEST_FPK` key discrepancy was
+found between `FACT_ECHO_TEST` and `FACT_ECHO_RESULTS`.
+This supports internal consistency of Mayo's test/result linkage
+and suggests that the previously observed cross-record encounter
+disagreements are not caused by a mismatched identifier field
+between the source test and its own results. However, it
+**does not prove** that two distinct-FPK records represent
+two independent clinical exams, nor establish an implied
+unit for `MC CV` volume results.
+
+**Clinical extraction implication:** Explicitly labeled mL source
+volume results can be investigated independently of the
+unitless `MC CV` values. The blocking issue is selecting the
+correct source clinical examination and clinically approved
+measurement method, not a demonstrated test/result key mismatch.
+No cohort, clinical value or protocol threshold was changed.
+
+**Question for Adam:** Why can source tests for the two volume
+families coexist on one patient/index-day but have distinct
+`ECHO_TEST_FPK` and `ENCOUNTER_NUMBER` values even though each
+test/result pair agrees internally? Is there a source-defined
+crosswalk or workflow distinction, and which test corresponds
+to the intended clinical echo examination?
