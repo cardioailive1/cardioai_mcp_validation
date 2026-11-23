@@ -2242,3 +2242,76 @@ the new code has **not yet been executed in MCP**.
 The original `report_style="detailed"` remains available
 and unchanged in selection logic, although its small
 categories can cause an all-suppressed output.
+
+
+### Combined EIMS feasibility outcome and independent Epic vitals row discovery (2026-11-23)
+
+The privacy-protected combined 2012–2023 EIMS source-specific
+test audit completed in MCP for the unchanged 1,500
+patient/index-day cohort:
+
+- **1,404** patient-days have exactly one EIMS TTE source
+  test `ECHO_TEST_FPK` (not necessarily the approved
+  clinical index examination); **96** have no unique
+  EIMS source test.
+- From the 1,404 source-test candidates, **964 LVEDV**
+  and **955 LVESV** patient-days have explicit-mL
+  measurements with the provisional measurement-method
+  feasibility rule; **440** and **449**, respectively,
+  had no candidate or preferred-tier conflict.
+- This corresponds to **64.3% LVEDV** and **63.7% LVESV**
+  of the whole cohort, versus the 90% target of 1,350.
+  Even if the 96 remaining patient-days all became
+  eligible, this particular recognized-result/method
+  scenario stays below 90%. Further result-name
+  discovery or clinical eligibility changes require
+  approved investigation, not silent relaxation.
+
+The next independent completeness opportunity is
+height and weight from Epic's `FACT_FLOWSHEETS`.
+Mayo explicitly confirmed the within-Epic encounter
+relationship among echo, flowsheet and encounter source
+tables, but no row names or height/weight unit
+conventions have yet been approved.
+
+**First inspect nonpatient row metadata only** using
+`echo_wm_training.epic_flowsheet_row_discovery`.
+It queries `DIM_FLOWSHEET_ROW_NAME` for candidate
+height, weight, stature and related row labels and
+codes. It does **not** query patient vital values,
+`FACT_FLOWSHEETS` or the cohort.
+
+After merging the validation branch into the original
+MCP `echo-wm-mcp` branch:
+
+```bash
+git pull --ff-only
+python -m pytest -q tests/test_echo_epic_flowsheet_row_discovery.py
+```
+
+Then inside **fresh IPython**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.epic_flowsheet_row_discovery import (
+    run_epic_flowsheet_row_discovery,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+vital_rows = run_epic_flowsheet_row_discovery(eng, study)
+print("MAYO FLOWSHEET HEIGHT/WEIGHT ROW LABELS (NO PATIENT DATA)")
+print(vital_rows.to_string(index=False))
+```
+
+The synthetic tests and MCP metadata query have **not**
+yet been run. After inspecting the candidate row names,
+implement a separate read-only cohort-scoped feasibility
+check, joining on verified patient identity **and** matching
+Epic encounter fields, with checks for multiple echo tests
+per encounter, duplicate vital measurements, units and time.
+Do not assume a flowsheet presence flag is an accepted
+height/weight measurement or alter the existing source
+window/required completeness thresholds without approval.
