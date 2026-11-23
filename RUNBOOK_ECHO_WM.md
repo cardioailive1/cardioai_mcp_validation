@@ -2167,3 +2167,78 @@ clinical completeness, alter volume units, copy source values,
 or rebuild the saved cohort from its results. The follow-up
 Epic `FACT_FLOWSHEETS` height/weight audit can proceed
 independently once this exam-source feasibility is understood.
+
+
+### EIMS eligibility detailed categories fully suppressed; compact all-era alternative (2026-11-23)
+
+In MCP, `run_eims_volume_eligibility(eng, study)` completed
+successfully but **all** 2012–2018 and 2019–2023
+exam-topology and volume-availability cells were `suppressed`.
+This is the expected effect of *joint complementary
+suppression* when a positive small cell appears anywhere
+in that period's five exam-status categories or three
+metric-status categories. It is **not evidence of zero EIMS
+source examination or missing explicit-mL measurements**.
+
+A new `report_style="compact"` mode reuses *identical*
+EIMS source rows, strict single-EIMS-FPK gating, same-test
+`ROW_SOURCE_ID=12315` verification on both test and
+result, explicit-mL requirement, and hypothetical
+method-priority conflict checks. It changes only the
+**summary**, combining 2012–2023 and returning:
+
+1. `exactly_one_eims_test` vs `other_or_ambiguous`
+   for all saved cohort patient/index-days; days with another
+   non-EIMS source test are **included in the single-EIMS
+   source-FPK candidate**, but remain **clinically unapproved**
+   until the intended examination is confirmed.
+2. Within those single-EIMS-FPK days, two categories per
+   metric: `explicit_ml_candidate` and
+   `no_candidate_or_preferred_tier_conflict`.
+   The latter deliberately combines no usable value and
+   intra-tier conflicting measurements.
+
+If any positive category in either table is below the
+configured small-cell minimum, **all cells in both compact
+tables** are `suppressed`. A compact result may still be
+unsafe to release alongside previous result tables; check
+MCP cumulative disclosure rules before transmission.
+Do not relax the threshold, reveal private patient/record
+detail, or assume the all-era candidate count means
+clinical eligibility.
+
+After merging the fork's validation changes into original
+MCP `echo-wm-mcp`, run:
+
+```bash
+git pull --ff-only
+python -m pytest -q tests/test_echo_eims_volume_eligibility.py
+```
+
+In **fresh IPython**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.eims_volume_eligibility import (
+    run_eims_volume_eligibility,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+compact_exams, compact_volumes = run_eims_volume_eligibility(
+    eng, study, report_style="compact"
+)
+
+print("EIMS SINGLE-SOURCE-FPK CANDIDATES — 2012–2023 COMBINED")
+print(compact_exams.to_string(index=False))
+print("EIMS EXPLICIT-mL FEASIBILITY — NOT CLINICALLY APPROVED")
+print(compact_volumes.to_string(index=False))
+```
+
+Synthetic tests for the compact mode are committed and
+the new code has **not yet been executed in MCP**.
+The original `report_style="detailed"` remains available
+and unchanged in selection logic, although its small
+categories can cause an all-suppressed output.
