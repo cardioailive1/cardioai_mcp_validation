@@ -747,3 +747,50 @@ cardinality checks and clinical time-window decisions.
 **Decision state:** Preserve `echo_analytic`, its volume unit policy,
 and all study requirements. Source-system provenance, source-unit
 validation, and clinical selection remain separate approvals.
+
+
+### ROW_SOURCE_ID result: volume-source families use different recorded origins (2026-11-23)
+
+The read-only `run_volume_source_provenance` audit completed in MCP.
+Both `FACT_ECHO_TEST` and `FACT_ECHO_RESULTS` expose
+`ROW_SOURCE_ID`, and the extracted result/test origin IDs agreed
+within the observed candidate volume source records.
+
+| Volume candidate source family | ROW_SOURCE_ID | LVEDV 2012–2018 | LVEDV 2019–2023 | LVESV 2012–2018 | LVESV 2019–2023 |
+|---|---|---:|---:|---:|---:|
+| Unitless `MC CV LV END ... VOLUME` | `47918` | 46 | 400 | 46 | 397 |
+| Explicit-mL `LV_vol_*` methods | `12315` | 531 | 443 | 526 | 441 |
+
+Counts are distinct **patient/index-days with numeric source-result
+candidates** per family and period, not clinical completeness
+percentages, and populations can overlap. The named-source
+patterns cannot be used as substitutes for source-system provenance,
+per Mayo's November 20 guidance.
+
+**Conclusion:** The candidate families are associated with
+different recorded origin identifiers. Neither `47918` nor
+`12315` has yet been translated to a verified human-readable
+source-system name or workflow. In the published schema,
+`FACT_ECHO_TEST` has `SOURCE_SYSTEM_DK` and
+`SOURCE_SYSTEM_KEY`, `FACT_ECHO_RESULTS` has
+`SOURCE_SYSTEM_KEY`, and `DIM_SOURCE_SYSTEM` has
+`SOURCE_SYSTEM_DK`, `SOURCE_SYSTEM_NAME`, and associated
+descriptive fields. **ROW_SOURCE_ID is not assumed to be
+SOURCE_SYSTEM_DK**; those are different column concepts until
+confirmed by the source documentation.
+
+A read-only `echo_wm_training.source_system_bridge` audit has
+been added to report the test/result ROW_SOURCE_ID alongside the
+separately recorded source-system DK/KEY values. It resolves a
+human-readable `DIM_SOURCE_SYSTEM` name **only through the
+test SOURCE_SYSTEM_DK**, with checks for ambiguous dimension keys
+and count-gated reporting. No patient, test ID, or measurement
+values are exported. The audit and synthetic tests have not yet
+run in MCP. Cross-report disclosure review remains required.
+
+**Next question for Mayo:** What actual source systems correspond
+to `ROW_SOURCE_ID=47918` and `12315`, and how, if at all,
+do their `SOURCE_SYSTEM_KEY` values map into
+`DIM_SOURCE_SYSTEM`? This mapping describes provenance, not
+clinical exam equivalence. Distinct encounters still must not be
+collapsed without explicit exam-level source evidence.
