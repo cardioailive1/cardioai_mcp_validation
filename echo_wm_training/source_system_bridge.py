@@ -4,8 +4,10 @@ FACT_ECHO_TEST and FACT_ECHO_RESULTS expose ROW_SOURCE_ID but also
 SOURCE_SYSTEM_DK/KEY. DIM_SOURCE_SYSTEM has names/descriptions keyed by DK.
 The numerical ROW_SOURCE_ID is NOT assumed to equal SOURCE_SYSTEM_DK.
 
-Inspect aligned keys and attach a dimension name ONLY by a matching,
-unique FACT_ECHO_TEST.SOURCE_SYSTEM_DK -> DIM_SOURCE_SYSTEM.SOURCE_SYSTEM_DK.
+Summarize only stable source provenance (test/result ROW_SOURCE_ID and
+test SOURCE_SYSTEM_DK), not high-cardinality SOURCE_SYSTEM_KEY values,
+which fragmented previous results into effectively one row per patient-day.
+Attach a dimension name ONLY through the TEST's actual SOURCE_SYSTEM_DK.
 Do not use source IDs, common dates, or source names as an exam crosswalk.
 All clinical rows and identifiers remain inside the restricted Mayo PC.
 """
@@ -22,9 +24,7 @@ from .unitless_scale_validation import (
 )
 
 _KEY_COLUMNS = (
-    "test_row_source_id", "result_row_source_id",
-    "test_source_system_dk", "test_source_system_key",
-    "result_source_system_key",
+    "test_row_source_id", "result_row_source_id", "test_source_system_dk",
 )
 _FAMILY_ORDER = ("mc_cv_unitless", "explicit_ml")
 _RESULT_COLUMNS = ("metric", "period", "family", *_KEY_COLUMNS,
@@ -54,9 +54,7 @@ SELECT tte.person_id, tte.index_date, tte.echo_test_fpk,
        CAST(x.ECHO_RESULTS_VALUE_UNIT_OF_MEASURE AS STRING) AS reported_unit,
        CAST(t.ROW_SOURCE_ID AS STRING) AS test_row_source_id,
        CAST(x.ROW_SOURCE_ID AS STRING) AS result_row_source_id,
-       CAST(t.SOURCE_SYSTEM_DK AS STRING) AS test_source_system_dk,
-       CAST(t.SOURCE_SYSTEM_KEY AS STRING) AS test_source_system_key,
-       CAST(x.SOURCE_SYSTEM_KEY AS STRING) AS result_source_system_key
+       CAST(t.SOURCE_SYSTEM_DK AS STRING) AS test_source_system_dk
 FROM tte
 JOIN {_t(c, "echo_test_table")} t
   ON CAST(t.{e['test_key']} AS STRING) = tte.echo_test_fpk
@@ -92,12 +90,16 @@ def summarize_source_system_bridge(
     source_dim: pd.DataFrame,
     *, small_cell: int = 11,
 ) -> pd.DataFrame:
-    """One source-key tuple per patient-day/metric/family; suppress small cells.
+    """One stable provenance tuple per patient-day/metric/family.
 
-    A patient/day with more than one key tuple is MULTIPLE_KEY_TUPLES,
-    not arbitrarily assigned one source name. Exact source dimension
-    lookup is by DK only; if a DK maps to multiple names it is flagged,
-    and no guessed mapping to ROW_SOURCE_ID is performed.
+    Distinct per-record source-system keys are intentionally excluded:
+    those long values can vary across results within the same source
+    system, leading to hundreds of disclosive suppressed rows.
+    If a patient-day has multiple *stable* origin combinations,
+    classify it as MULTIPLE_PROVENANCES rather than selecting one.
+    Resolve the source-system name using only the TEST source DK.
+    Whole-partition suppression protects small primary/complementary
+    groups. Cumulative disclosure review is still required.
     """
     if small_cell < 1:
         raise ValueError("small_cell must be positive")
@@ -154,7 +156,7 @@ def summarize_source_system_bridge(
             index=False, name=None
         ))
         if len(tuples) != 1:
-            code = ("MULTIPLE_KEY_TUPLES",) * len(_KEY_COLUMNS)
+            code = ("MULTIPLE_PROVENANCES",) * len(_KEY_COLUMNS)
             name = "not_applicable"
         else:
             code = next(iter(tuples))

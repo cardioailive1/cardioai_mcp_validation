@@ -2003,3 +2003,56 @@ patient/test identifiers within MCP.
 The synthetic tests and real query are **not yet executed in MCP**.
 The production cohort and its clinical requirements remain
 unchanged.
+
+
+### Compact ROW_SOURCE_ID/DK bridge after high-cardinality key fragmentation (2026-11-23)
+
+The first bridge result was difficult to read and all counts
+appeared `suppressed` because individual long
+`SOURCE_SYSTEM_KEY` values were included as grouping dimensions.
+Those identifiers can vary per source record and are **not**
+useful as source-system categories. The displayed MC CV 2019+
+rows consistently showed `ROW_SOURCE_ID=47918`,
+`SOURCE_SYSTEM_DK=47918`, and resolved name **Epic**.
+That is evidence of Mayo's recorded provenance on those rows,
+not proof that the unitless measurements are in mL.
+
+The code now **excludes both long SOURCE_SYSTEM_KEY fields**
+from the query and summary. It groups distinct patient/index-days
+by the stable test/result ROW_SOURCE_ID values, test
+SOURCE_SYSTEM_DK, and dimension-derived source-system name,
+with `MULTIPLE_PROVENANCES` for a patient-day with more than one
+such combination. Primary/complementary small-cell suppression
+is still applied to each metric/era/family partition.
+
+After merging the latest fork commit into the original MCP
+`echo-wm-mcp` branch, run:
+
+```bash
+python -m pytest -q tests/test_echo_source_system_bridge.py
+```
+
+In a **fresh IPython session** within MCP:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.source_system_bridge import run_source_system_bridge
+
+study = load_study()
+eng = make_engine("bigquery", study)
+bridge = run_source_system_bridge(eng, study)
+
+print(bridge.to_string(index=False))
+```
+
+Expected **output columns** (with no long per-record keys):
+
+`metric`, `period`, `family`, `test_row_source_id`,
+`result_row_source_id`, `test_source_system_dk`,
+`test_source_system_name`, `patient_days`.
+
+The corrected MCP output and synthetic tests have **not yet
+been executed**. Do not use screenshot fragments of the old
+table as provenance-count evidence, and obtain cumulative
+disclosure clearance before sending any new aggregates outside MCP.
