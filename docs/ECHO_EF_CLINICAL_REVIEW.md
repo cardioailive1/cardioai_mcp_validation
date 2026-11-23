@@ -827,3 +827,52 @@ inside MCP. Do not interpret the previous hundreds of
 `suppressed` rows as either zero source coverage or separate
 examinations. The baseline cohort, thresholds, and unit inference
 policy remain unchanged.
+
+
+### Source-system names resolved through DIM_SOURCE_SYSTEM (MCP, 2026-11-23)
+
+After removing high-cardinality per-record `SOURCE_SYSTEM_KEY` values
+from the grouping, the corrected read-only
+`run_source_system_bridge` returned the following compact result.
+For both result families, the FACT_ECHO_TEST and FACT_ECHO_RESULTS
+`ROW_SOURCE_ID` values matched each other and the test
+`SOURCE_SYSTEM_DK`, and the latter resolved through
+`DIM_SOURCE_SYSTEM.SOURCE_SYSTEM_DK`:
+
+| Source result family | Source ID | DIM_SOURCE_SYSTEM name | 2012–2018 LVEDV | 2012–2018 LVESV | 2019–2023 LVEDV | 2019–2023 LVESV |
+|---|---|---|---:|---:|---:|---:|
+| Unitless `MC CV LV END ... VOLUME` | `47918` | **Epic** | 46 | 46 | 400 | 397 |
+| Explicit-mL `LV_vol_*` | `12315` | **EIMS** | 531 | 526 | 443 | 441 |
+
+Counts are **patient/index-days with screened candidate source results**
+within the existing saved cohort, not validated completeness.
+They can overlap across source systems and are not additive.
+The new compact output contained one source-system combination per
+reported metric/period/family; no high-cardinality source-key
+fragmentation remained.
+
+**Interpretation:** The two result-name families originate in
+different recorded Mayo source systems (Epic and EIMS).
+This explains the distinct source identifiers observed earlier;
+it provides context for, but **does not prove the meaning of**,
+their differing `ECHO_TEST_FPK` and `ENCOUNTER_NUMBER` values.
+The same patient can have more than one clinical echo on the same
+day, and records from two source systems cannot be assumed to
+describe the same exam without a verified exam-level crosswalk.
+
+**Engineering decision:** The EIMS family already provides
+explicit-mL volume candidates and can be independently evaluated
+using conservative examination eligibility, source-exam counts,
+and advisor-approved measurement method rules. Keep the Epic
+`MC CV` family separate until an advisor validates the intended
+absolute volume unit and clinical suitability. Do not infer units
+from magnitude, compare cross-source patient/date values as a
+paired exam, promote candidates, change thresholds or rebuild
+`echo_analytic` without review.
+
+**Useful question for Mayo/advisors:** For this specific echo
+validation, which clinical examination source(s)—Epic, EIMS or
+both—are considered authoritative for the index TTE, and how are
+two records verified as the *same* exam across systems? Which
+explicit-mL methods should be preferred when more than one
+is available on an eligible study?
