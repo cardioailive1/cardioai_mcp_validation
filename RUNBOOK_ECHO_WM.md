@@ -1940,3 +1940,66 @@ a result-name prefix as the source system.
 **Pending:** The new synthetic tests and actual source audit
 have not yet run in MCP. The saved `echo_analytic` cohort
 and study thresholds have not changed.
+
+
+### Observed ROW_SOURCE_ID split and source-system name resolution (2026-11-23)
+
+MCP `run_volume_source_provenance` found the two previously
+identified LVEDV/LVESV source-result families carried **different
+`ROW_SOURCE_ID` values**, consistently across both study eras:
+
+- Unitless `MC CV` volume source results: `47918`;
+  2012–2018 LVEDV/LVESV patient-days **46/46**,
+  2019–2023 **400/397**.
+- Explicit-mL `LV_vol_*` results: `12315`;
+  2012–2018 **531/526**,
+  2019–2023 **443/441**.
+
+The two source tables have `ROW_SOURCE_ID`. The schema also
+shows `FACT_ECHO_TEST.SOURCE_SYSTEM_DK` and
+`FACT_ECHO_TEST.SOURCE_SYSTEM_KEY`, plus
+`FACT_ECHO_RESULTS.SOURCE_SYSTEM_KEY`. The lookup table
+`DIM_SOURCE_SYSTEM` has `SOURCE_SYSTEM_DK`, names, site,
+code and descriptions. Do **not** assume that a
+`ROW_SOURCE_ID` equals the dimension `SOURCE_SYSTEM_DK`.
+Source-provenance identity does not prove two exams are
+interchangeable or establish mL units for the unitless family.
+
+To resolve the source descriptions only where a verified
+**test SOURCE_SYSTEM_DK → DIM_SOURCE_SYSTEM.SOURCE_SYSTEM_DK**
+relationship exists, run the new read-only source key bridge.
+
+After merging fork `validation/echo-wm-mcp` into original
+MCP `echo-wm-mcp` and pulling:
+
+```bash
+python -m pytest -q tests/test_echo_source_system_bridge.py
+```
+
+Fresh IPython in Mayo Cloud PC:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.source_system_bridge import run_source_system_bridge
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+bridge = run_source_system_bridge(eng, study)
+print("MAYO VOLUME ORIGINS AND SOURCE SYSTEM KEYS")
+print(bridge.to_string(index=False))
+```
+
+Each patient/index-day contributes at most one source-key tuple to
+its metric/period/family partition. Days with multiple different
+key combinations are tagged `MULTIPLE_KEY_TUPLES`; missing
+or ambiguous source dimension matches are reported as such,
+not silently resolved. The output uses full-partition suppression
+when a positive category falls below the small-cell threshold.
+Review combined disclosures alongside prior reports and keep raw
+patient/test identifiers within MCP.
+
+The synthetic tests and real query are **not yet executed in MCP**.
+The production cohort and its clinical requirements remain
+unchanged.
