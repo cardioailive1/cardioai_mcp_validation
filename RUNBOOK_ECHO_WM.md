@@ -2056,3 +2056,114 @@ The corrected MCP output and synthetic tests have **not yet
 been executed**. Do not use screenshot fragments of the old
 table as provenance-count evidence, and obtain cumulative
 disclosure clearance before sending any new aggregates outside MCP.
+
+
+### Final source-system bridge result: Epic versus EIMS (MCP, 2026-11-23)
+
+The corrected compact `run_source_system_bridge` completed and
+resolved the volume source families through `DIM_SOURCE_SYSTEM`:
+
+| Source family | ROW_SOURCE_ID | SOURCE_SYSTEM_DK | Source system | LVEDV 2012–2018 | LVEDV 2019–2023 | LVESV 2012–2018 | LVESV 2019–2023 |
+|---|---|---|---|---:|---:|---:|---:|
+| Unitless MC CV | 47918 | 47918 | **Epic** | 46 | 400 | 46 | 397 |
+| Explicit-mL LV_vol_* | 12315 | 12315 | **EIMS** | 531 | 443 | 526 | 441 |
+
+FACT_ECHO_TEST and FACT_ECHO_RESULTS reported matching
+`ROW_SOURCE_ID` values within each family; the source
+`SOURCE_SYSTEM_DK` resolved to the table's named source
+system. There were no high-cardinality source-key rows in
+this corrected output. All figures represent screened source
+measurement presence by cohort patient/index-day, **not**
+validated clinical completeness.
+
+**Source identification resolved.** Mayo guidance and our
+previous audits still do not establish that different-FPK,
+different-encounter Epic/EIMS records on the same patient-day
+are the same clinical exam. Keep source records distinct.
+The EIMS explicit-mL source can be studied independently,
+subject to conservative index-exam selection and clinical
+method hierarchy approval. The unitless Epic MC CV source
+remains unapproved for implicit mL assignment.
+
+For the next round, prefer read-only **source-specific
+clinical exam eligibility** and the separately confirmed
+Epic encounter-matched `FACT_FLOWSHEETS` height/weight
+investigation. Preserve the original saved cohort and
+thresholds. Ask Mayo/advisors which EIMS and Epic
+clinical studies should represent the index examination and
+whether there is an approved cross-system exam crosswalk.
+
+
+### EIMS source-specific LVEDV/LVESV exam eligibility feasibility (2026-11-23)
+
+MCP confirmed that EIMS (ROW_SOURCE_ID **12315**) supplies the
+explicit-mL `LV_vol_*` source results and Epic
+(ROW_SOURCE_ID **47918**) supplies the unitless `MC CV`
+source results. The first follow-up is now a read-only,
+**source-specific EIMS feasibility** audit. It does **not**
+select new index exams or write to `echo_analytic`.
+
+Module: `echo_wm_training/eims_volume_eligibility.py`.
+
+Scope and safeguards:
+- Reuses the existing saved cohort's index dates and existing
+  conventional-TTE exam predicate. Does **not** change study
+  period, study size, TTE eligibility, or clinical requirements.
+- Requires `FACT_ECHO_TEST.ROW_SOURCE_ID=12315` **and**
+  `FACT_ECHO_RESULTS.ROW_SOURCE_ID=12315` on the **same
+  `ECHO_TEST_FPK`**. Unit metadata must explicitly be mL;
+  any unitless Epic result is excluded.
+- Exam topology categories: no conventional TTE, no EIMS TTE,
+  multiple EIMS test FPKs, exactly one EIMS source FPK without
+  other same-day source tests, and exactly one EIMS FPK with
+  other same-day source tests.
+- For patient-days with exactly one EIMS FPK, counts LVEDV/ESV
+  explicit-mL candidates, conflicts at the hypothetical
+  preferred method tier, or missing explicit mL. Biplane → 3D
+  → single-plane is a **feasibility sensitivity scenario**,
+  not a clinical-approved source method priority.
+- EIMS with another same-day source test is **not treated
+  as selected clinical examination**. Even an EIMS-only
+  source test is a *candidate* requiring clinical exam approval.
+  Multiple EIMS FPK days are held rather than combined.
+- The two aggregate tables use **joint** primary/complementary
+  suppression by period when any exam or method category has
+  a positive count below `study.small_cell`. Prior released
+  summaries must also be considered under MCP's cumulative
+  disclosure policy.
+
+After merging the validation branch into original
+`echo-wm-mcp`:
+
+```bash
+git pull --ff-only
+python -m pytest -q tests/test_echo_eims_volume_eligibility.py
+```
+
+Then in **fresh MCP IPython**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.eims_volume_eligibility import (
+    run_eims_volume_eligibility,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+eims_exam_topology, eims_ml_candidates = run_eims_volume_eligibility(
+    eng, study
+)
+print("EIMS SAME-DAY TTE SOURCE TEST ELIGIBILITY")
+print(eims_exam_topology.to_string(index=False))
+print("EIMS SOLE-TEST EXPLICIT-mL FEASIBILITY — NOT PROMOTED")
+print(eims_ml_candidates.to_string(index=False))
+```
+
+The diagnostic and synthetic tests are committed but have not
+yet been executed in MCP. Do not claim this scenario satisfies
+clinical completeness, alter volume units, copy source values,
+or rebuild the saved cohort from its results. The follow-up
+Epic `FACT_FLOWSHEETS` height/weight audit can proceed
+independently once this exam-source feasibility is understood.

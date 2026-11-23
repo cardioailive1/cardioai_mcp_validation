@@ -827,3 +827,89 @@ inside MCP. Do not interpret the previous hundreds of
 `suppressed` rows as either zero source coverage or separate
 examinations. The baseline cohort, thresholds, and unit inference
 policy remain unchanged.
+
+
+### Source-system names resolved through DIM_SOURCE_SYSTEM (MCP, 2026-11-23)
+
+After removing high-cardinality per-record `SOURCE_SYSTEM_KEY` values
+from the grouping, the corrected read-only
+`run_source_system_bridge` returned the following compact result.
+For both result families, the FACT_ECHO_TEST and FACT_ECHO_RESULTS
+`ROW_SOURCE_ID` values matched each other and the test
+`SOURCE_SYSTEM_DK`, and the latter resolved through
+`DIM_SOURCE_SYSTEM.SOURCE_SYSTEM_DK`:
+
+| Source result family | Source ID | DIM_SOURCE_SYSTEM name | 2012–2018 LVEDV | 2012–2018 LVESV | 2019–2023 LVEDV | 2019–2023 LVESV |
+|---|---|---|---:|---:|---:|---:|
+| Unitless `MC CV LV END ... VOLUME` | `47918` | **Epic** | 46 | 46 | 400 | 397 |
+| Explicit-mL `LV_vol_*` | `12315` | **EIMS** | 531 | 526 | 443 | 441 |
+
+Counts are **patient/index-days with screened candidate source results**
+within the existing saved cohort, not validated completeness.
+They can overlap across source systems and are not additive.
+The new compact output contained one source-system combination per
+reported metric/period/family; no high-cardinality source-key
+fragmentation remained.
+
+**Interpretation:** The two result-name families originate in
+different recorded Mayo source systems (Epic and EIMS).
+This explains the distinct source identifiers observed earlier;
+it provides context for, but **does not prove the meaning of**,
+their differing `ECHO_TEST_FPK` and `ENCOUNTER_NUMBER` values.
+The same patient can have more than one clinical echo on the same
+day, and records from two source systems cannot be assumed to
+describe the same exam without a verified exam-level crosswalk.
+
+**Engineering decision:** The EIMS family already provides
+explicit-mL volume candidates and can be independently evaluated
+using conservative examination eligibility, source-exam counts,
+and advisor-approved measurement method rules. Keep the Epic
+`MC CV` family separate until an advisor validates the intended
+absolute volume unit and clinical suitability. Do not infer units
+from magnitude, compare cross-source patient/date values as a
+paired exam, promote candidates, change thresholds or rebuild
+`echo_analytic` without review.
+
+**Useful question for Mayo/advisors:** For this specific echo
+validation, which clinical examination source(s)—Epic, EIMS or
+both—are considered authoritative for the index TTE, and how are
+two records verified as the *same* exam across systems? Which
+explicit-mL methods should be preferred when more than one
+is available on an eligible study?
+
+
+### EIMS-only candidate exam and explicit-mL volume feasibility — pending MCP (2026-11-23)
+
+With the volume sources now independently established as
+**EIMS (12315)** and **Epic (47918)**, the next technical
+checkpoint is a source-constrained feasibility check, not a
+production extractor update. The new read-only module
+`echo_wm_training.eims_volume_eligibility` investigates,
+on the unchanged `echo_analytic` cohort:
+
+1. How many patient/index-days have no conventional TTE,
+   no EIMS TTE, multiple different EIMS `ECHO_TEST_FPK`
+   values, one EIMS test with no other source test on the
+   index date, or one EIMS test alongside another-source TTE?
+2. For index-days with exactly **one EIMS ECHO_TEST_FPK**,
+   how often are LVEDV and LVESV numeric results available
+   with explicit **mL units**, with *both* source test and
+   source result `ROW_SOURCE_ID=12315` on the same FPK?
+3. How often does the existing hypothetical measurement
+   method sensitivity (biplane, then 3D, then single-plane)
+   have a candidate, preferred-tier conflict, or no explicit
+   mL? This is **not an approved clinical method hierarchy**.
+
+The diagnostic never promotes volume values and does not
+assume an EIMS study on the same day as an Epic study is the
+selected clinical echo. Separate clinical exams are possible.
+Multi-EIMS-FPK days are held; only summary counts are returned,
+with joint complementary suppression across topology and
+measurement tables for each time period. The code and synthetic
+tests have **not yet run inside MCP**.
+
+A separate source-specific Epic encounter-matched
+`FACT_FLOWSHEETS` height/weight feasibility assessment
+remains the next independent workstream after this audit.
+The saved cohort, validation thresholds, and source-unit
+policy are unchanged.
