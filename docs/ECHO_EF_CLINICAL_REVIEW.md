@@ -794,3 +794,36 @@ do their `SOURCE_SYSTEM_KEY` values map into
 `DIM_SOURCE_SYSTEM`? This mapping describes provenance, not
 clinical exam equivalence. Distinct encounters still must not be
 collapsed without explicit exam-level source evidence.
+
+
+### ROW_SOURCE_ID mapping output and high-cardinality reporting correction (2026-11-23)
+
+The first MCP execution of `source_system_bridge` produced an
+unmanageably long, mostly `suppressed` table: although the displayed
+2019–2023 unitless MC CV LVEDV rows consistently carried
+`ROW_SOURCE_ID=47918` and `test_source_system_dk=47918`,
+their `test_source_system_name` resolved to **Epic** and their
+`SOURCE_SYSTEM_KEY` strings varied per source record. Because the
+initial diagnostic grouped by both long source-system keys, it
+fragmented observations into very small counts. **These rows do not
+demonstrate hundreds of different source systems** or permit
+patient-level numerical inferences. The visible screenshots only
+establish the displayed **MC CV** mapping to Epic; the compact
+result for the explicit-mL family has not yet been verified.
+
+The diagnostic has been corrected to report **only stable source
+provenance** (test/result `ROW_SOURCE_ID`, test
+`SOURCE_SYSTEM_DK`, dimension-resolved name) and a distinct
+patient/index-day count. It intentionally omits source-system
+per-record hashes from its public output and SQL projection.
+When multiple *stable* source combinations exist on a
+patient/index-day, it reports `MULTIPLE_PROVENANCES`. It
+suppresses whole metric/period/family partitions when any
+positive category count is below the small-cell threshold.
+Cumulative disclosure review is still required.
+
+**Pending:** Run synthetic tests and the compact diagnostic again
+inside MCP. Do not interpret the previous hundreds of
+`suppressed` rows as either zero source coverage or separate
+examinations. The baseline cohort, thresholds, and unit inference
+policy remain unchanged.
