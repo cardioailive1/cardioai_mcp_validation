@@ -1813,3 +1813,130 @@ Do **not** overwrite `echo_analytic`, infer a unit for the
 as the same clinical echo until Mayo defines the source
 relationships and the study's clinical reviewers approve a
 selection policy.
+
+
+### Confirmed test/result source key agreement; stop treating mismatch as ETL issue (2026-11-19)
+
+The same-`ECHO_TEST_FPK` identifier audit
+`run_source_echo_key_consistency` completed in MCP.
+The `ENCOUNTER_NUMBER` and `ORDER_PROC_ID` values in
+`FACT_ECHO_TEST` and `FACT_ECHO_RESULTS` were equal and
+nonblank across **all** observed records, grouped at distinct
+patient/index-day level, for both unitless `MC CV` and
+explicit-mL result families:
+
+| Period | Unitless LVEDV | Unitless LVESV | Explicit-mL LVEDV | Explicit-mL LVESV |
+|---|---:|---:|---:|---:|
+| 2012–2018 | 46 | 46 | 531 | 526 |
+| 2019–2023 | 400 | 397 | 443 | 441 |
+
+No mismatched, missing, or mixed key comparison cases were
+observed in any family/metric/era. The encounter and order
+checks cover the same patient-days; do not sum them.
+
+The prior test-to-test topology audit still found conflicting
+`FACT_ECHO_TEST.ENCOUNTER_NUMBER` on different-FPK
+unitless-versus-explicit-mL source tests for **385 LVEDV** and
+**382 LVESV** patient/index-days in 2019–2023. Their
+test/result internal consistency does **not** establish that
+cross-FPK source records refer to the same clinical exam.
+
+Do not assign mL units to `MC CV` values, perform
+a patient/date-only cross-exam comparison, or alter
+`echo_analytic` / its thresholds. The next step is Mayo
+confirmation of the workflows and authoritative study/order
+join keys and clinical-method priority. The known-unit
+structured volume candidates can be investigated independently
+after establishing intended exam identity.
+
+
+### After Adam's November 20 guidance: inspect ROW_SOURCE_ID before any cross-test source assumptions
+
+Mayo clarified that `ROW_SOURCE_ID`, not `MC CV` or
+`LV_vol_*` naming prefixes, identifies **source-system provenance**.
+He also confirmed that a patient can have separate echo
+examinations in separate encounters on the same day. Therefore,
+the 385/382 2019+ different-FPK, conflicting-encounter
+patient-days **must not be joined just by patient/index-date**.
+A source-system code alone is *not* a crosswalk between two exams.
+
+Mayo considers the missing-unit `MC CV` volume values likely mL
+based on their magnitudes, but recommended advisor review;
+**do not automatically infer units** until source/clinical approval.
+
+For Epic data only, Mayo also confirmed the conditional encounter
+relationship:
+
+```
+FACT_ECHO_TEST.ENCOUNTER_NUMBER
+    = FACT_FLOWSHEETS.ENCOUNTER_NBR
+    = FACT_ENCOUNTERS.EHR_ENCOUNTER_NUMBER
+```
+
+These values match when the measurements occurred in the **same
+encounter**. Any future vital-sign study must join on patient
+identity as well, check encounter uniqueness and flow row-name
+metadata/units, and handle repeated height/weight readings.
+This is not automatically valid for non-Epic or older sources.
+
+#### Read-only source-system provenance audit
+
+New `echo_wm_training/row_source_provenance.py`:
+
+1. Uses native BigQuery `INFORMATION_SCHEMA.COLUMNS` to
+   discover whether `ROW_SOURCE_ID` is available on
+   `FACT_ECHO_TEST` and/or `FACT_ECHO_RESULTS`. It also
+   inspects source-lookup-table metadata without assuming the
+   meaning of any numeric/source code.
+2. Only if a source column exists, joins source tests/results
+   on `ECHO_TEST_FPK` within the existing saved cohort and
+   reports source-code patient/index-day counts separately for
+   the unitless `MC CV` and explicit-mL `LV_vol_*` families,
+   split into 2012–2018 and 2019–2023.
+3. If more than one source ID is found on a patient-day within
+   one metric/family, reports `MULTIPLE_SOURCE_IDS` rather
+   than selecting one. When test vs result source IDs disagree,
+   reports `TEST_RESULT_SOURCE_DIFFER` (which may reflect
+   source-lineage layers rather than an error).
+4. Uses primary/complementary suppression when any positive
+   source-code category has fewer than `study.small_cell`
+   patient-days. Cross-report disclosure review is still required
+   before exporting to Mayo or other audiences.
+
+After merging fork branch `validation/echo-wm-mcp` into the
+original repository's `echo-wm-mcp` and pulling:
+
+```bash
+python -m pytest -q tests/test_echo_row_source_provenance.py
+```
+
+In a **fresh IPython session** inside MCP:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.row_source_provenance import (
+    run_volume_source_provenance,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+source_metadata, source_counts = run_volume_source_provenance(eng, study)
+
+print("MAYO ROW_SOURCE_ID METADATA")
+print(source_metadata.to_string(index=False))
+
+print("VOLUME RESULT FAMILIES BY ROW_SOURCE_ID — AGGREGATE ONLY")
+print(source_counts.to_string(index=False))
+```
+
+If `source_counts` is empty, the two echo source views have
+no visible `ROW_SOURCE_ID` column; inspect the returned schema
+and ask Adam which available object carries the source
+relationship. Do **not** invent a substitute or silently use
+a result-name prefix as the source system.
+
+**Pending:** The new synthetic tests and actual source audit
+have not yet run in MCP. The saved `echo_analytic` cohort
+and study thresholds have not changed.
