@@ -2056,3 +2056,39 @@ The corrected MCP output and synthetic tests have **not yet
 been executed**. Do not use screenshot fragments of the old
 table as provenance-count evidence, and obtain cumulative
 disclosure clearance before sending any new aggregates outside MCP.
+
+
+### Final source-system bridge result: Epic versus EIMS (MCP, 2026-11-23)
+
+The corrected compact `run_source_system_bridge` completed and
+resolved the volume source families through `DIM_SOURCE_SYSTEM`:
+
+| Source family | ROW_SOURCE_ID | SOURCE_SYSTEM_DK | Source system | LVEDV 2012–2018 | LVEDV 2019–2023 | LVESV 2012–2018 | LVESV 2019–2023 |
+|---|---|---|---|---:|---:|---:|---:|
+| Unitless MC CV | 47918 | 47918 | **Epic** | 46 | 400 | 46 | 397 |
+| Explicit-mL LV_vol_* | 12315 | 12315 | **EIMS** | 531 | 443 | 526 | 441 |
+
+FACT_ECHO_TEST and FACT_ECHO_RESULTS reported matching
+`ROW_SOURCE_ID` values within each family; the source
+`SOURCE_SYSTEM_DK` resolved to the table's named source
+system. There were no high-cardinality source-key rows in
+this corrected output. All figures represent screened source
+measurement presence by cohort patient/index-day, **not**
+validated clinical completeness.
+
+**Source identification resolved.** Mayo guidance and our
+previous audits still do not establish that different-FPK,
+different-encounter Epic/EIMS records on the same patient-day
+are the same clinical exam. Keep source records distinct.
+The EIMS explicit-mL source can be studied independently,
+subject to conservative index-exam selection and clinical
+method hierarchy approval. The unitless Epic MC CV source
+remains unapproved for implicit mL assignment.
+
+For the next round, prefer read-only **source-specific
+clinical exam eligibility** and the separately confirmed
+Epic encounter-matched `FACT_FLOWSHEETS` height/weight
+investigation. Preserve the original saved cohort and
+thresholds. Ask Mayo/advisors which EIMS and Epic
+clinical studies should represent the index examination and
+whether there is an approved cross-system exam crosswalk.
