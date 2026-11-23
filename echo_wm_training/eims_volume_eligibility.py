@@ -63,6 +63,7 @@ def summarize_eims_volume_eligibility(
     source_results: pd.DataFrame,
     *,
     small_cell: int = 11,
+    report_style: str = "detailed",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (index-day test topology, EIMS explicit-mL method feasibility).
 
@@ -78,6 +79,8 @@ def summarize_eims_volume_eligibility(
     """
     if small_cell < 1:
         raise ValueError("small_cell must be positive")
+    if report_style not in ("detailed", "compact"):
+        raise ValueError("report_style must be 'detailed' or 'compact'")
     if not set(_KEYS).issubset(cohort) or not set(_TEST_KEYS + ["test_row_source_id"]).issubset(tests):
         raise ValueError("Missing saved-cohort keys or EIMS source test fields")
     need_v = set(_TEST_KEYS + ["test_row_source_id", "result_row_source_id",
@@ -174,6 +177,62 @@ def summarize_eims_volume_eligibility(
             )
             metric_counts[(period, metric, label)] += 1
 
+    # Privacy-preserving fallback when per-period detailed categories
+    # contain < small_cell patient-days. The compact mode collapses both
+    # date eras and reports just two mutually exclusive categories per
+    # question. It uses the SAME exam and volume screening rules above.
+    # This is not permission to release new aggregates alongside prior
+    # detailed publications without cumulative-disclosure review.
+    if report_style == "compact":
+        n_single = sum(
+            topology_counts[(p, status)]
+            for p in _PERIODS
+            for status in ("single_eims_test_only",
+                           "single_eims_test_other_source_present")
+        )
+        n_other = sum(topology_counts.values()) - n_single
+        categories = [n_single, n_other]
+        candidate_counts = {}
+        for metric in _METRICS:
+            yes = sum(
+                metric_counts[(p, metric, "explicit_ml_candidate")]
+                for p in _PERIODS
+            )
+            no = sum(
+                metric_counts[(p, metric, "no_explicit_ml")]
+                + metric_counts[(p, metric, "preferred_tier_conflict")]
+                for p in _PERIODS
+            )
+            if yes + no != n_single:
+                raise ValueError("Compact candidate counts do not reconcile")
+            candidate_counts[metric] = (yes, no)
+            categories.extend((yes, no))
+
+        if sum(topology_counts.values()) != sum(
+            1 for day in c.itertuples(index=False)
+            if _period(day.index_date) in _PERIODS
+        ):
+            raise ValueError("Compact cohort denominator did not reconcile")
+        hide = any(0 < count < small_cell for count in categories)
+        safe = lambda n: "suppressed" if hide else str(n)
+        exams = pd.DataFrame([
+            {"source_test_category": "exactly_one_eims_test",
+             "patient_days": safe(n_single)},
+            {"source_test_category": "other_or_ambiguous",
+             "patient_days": safe(n_other)},
+        ])
+        volume = pd.DataFrame([
+            {"metric": metric, "availability_category": status,
+             "sole_eims_fpk_patient_days": safe(count)}
+            for metric in _METRICS
+            for status, count in zip(
+                ("explicit_ml_candidate",
+                 "no_candidate_or_preferred_tier_conflict"),
+                candidate_counts[metric]
+            )
+        ])
+        return exams, volume
+
     exams, volume = [], []
     for period in _PERIODS:
         exam_vals = [topology_counts[(period, s)] for s in _TOPOLOGY]
@@ -208,8 +267,16 @@ def summarize_eims_volume_eligibility(
     return pd.DataFrame(exams), pd.DataFrame(volume)
 
 
-def run_eims_volume_eligibility(eng, study: dict):
-    """MCP-only: no writes or raw-ID export, only disclosure-gated counts."""
+def run_eims_volume_eligibility(
+    eng, study: dict, *, report_style: str = "detailed"
+):
+    """MCP-only: no writes or raw-ID export, only disclosure-gated counts.
+
+    Use report_style='compact' when small cells suppress the detailed
+    periods. The 2012–2023 combined reporting mode is only a coarser
+    aggregate of identical source-examination screening; it is not a
+    broadened eligibility criterion or a clinical approval.
+    """
     start, end = str(study["index_start"]), str(study["index_end"])
     cohort = eng.read_table("echo_analytic")
     tests = eng.query(eims_test_source_sql(
@@ -220,4 +287,5 @@ def run_eims_volume_eligibility(eng, study: dict):
     ))
     return summarize_eims_volume_eligibility(
         cohort, tests, volume, small_cell=int(study.get("small_cell", 11)),
+        report_style=report_style,
     )

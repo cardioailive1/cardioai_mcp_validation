@@ -913,3 +913,36 @@ A separate source-specific Epic encounter-matched
 remains the next independent workstream after this audit.
 The saved cohort, validation thresholds, and source-unit
 policy are unchanged.
+
+
+### EIMS eligibility audit: all detailed cells suppressed (MCP, 2026-11-23)
+
+The first EIMS-only, same-`ECHO_TEST_FPK` volume eligibility
+audit ran successfully. Its source-test topology
+(5 categories by era) and its LVEDV/LVESV explicit-mL
+availability (3 categories by era and metric) were **entirely
+suppressed** under the joint `small_cell=11` protection.
+No underlying candidate counts can be inferred from the
+suppression labels. This does not contradict the independent
+source-result availability figures; those describe a
+different eligibility question.
+
+A more compact read-only reporting mode,
+`run_eims_volume_eligibility(..., report_style="compact")`,
+is committed but **has not yet been run in MCP**. It
+combines 2012–2023 and asks only how many cohort
+patient/index-days contain exactly one EIMS
+`ECHO_TEST_FPK` versus none/multiple, and among the
+single-FPK days, how many have an explicit-mL candidate
+versus no eligible candidate or preferred-tier conflict.
+It uses the *same* source-specific clinical-exam
+screening, units, and candidate-tier sensitivity rules
+and suppresses both tables jointly if any category is small.
+Cumulative disclosure checks still apply.
+
+**Critical distinction:** Exactly one EIMS source test is a
+*feasibility* criterion, not an approved index clinical
+examination; there may be another Epic TTE that day. No
+source systems or examination records have been merged,
+no units assigned to Epic MC CV, and the saved
+`echo_analytic` cohort has not been modified.

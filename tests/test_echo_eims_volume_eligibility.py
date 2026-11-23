@@ -155,6 +155,87 @@ def test_inconsistent_source_identifiers_fail_closed():
         summarize_eims_volume_eligibility(c, repeated_conflict, v, small_cell=1)
 
 
+
+
+def test_compact_all_era_rollup_keeps_exam_and_method_rules():
+    c, t, v = _fixtures()
+    exam, methods = summarize_eims_volume_eligibility(
+        c, t, v, small_cell=1, report_style="compact"
+    )
+    assert set(exam.columns) == {"source_test_category", "patient_days"}
+    assert exam.set_index("source_test_category").patient_days.to_dict() == {
+        "exactly_one_eims_test": "4",
+        "other_or_ambiguous": "3",
+    }
+    edv = methods.loc[
+        methods.metric.eq("lv_end_diastolic_volume")
+    ].set_index("availability_category").sole_eims_fpk_patient_days
+    assert edv.to_dict() == {
+        "explicit_ml_candidate": "2",
+        "no_candidate_or_preferred_tier_conflict": "2",
+    }
+    esv = methods.loc[
+        methods.metric.eq("lv_end_systolic_volume")
+    ].set_index("availability_category").sole_eims_fpk_patient_days
+    assert esv.to_dict() == {
+        "explicit_ml_candidate": "1",
+        "no_candidate_or_preferred_tier_conflict": "3",
+    }
+    assert "period" not in exam
+    assert "period" not in methods
+    assert "person_id" not in exam
+    assert "echo_test_fpk" not in methods
+
+
+def test_compact_rollup_joint_complementary_suppression_and_invalid_style():
+    c, t, v = _fixtures()
+    exam, methods = summarize_eims_volume_eligibility(
+        c, t, v, small_cell=3, report_style="compact"
+    )
+    # EDV has 2 qualifying method candidates, so hide BOTH entire
+    # tables to protect complements and the known cohort denominator.
+    assert (exam.patient_days == "suppressed").all()
+    assert (methods.sole_eims_fpk_patient_days == "suppressed").all()
+    with pytest.raises(ValueError, match="report_style"):
+        summarize_eims_volume_eligibility(
+            c, t, v, small_cell=1, report_style="unknown"
+        )
+
+
+def test_compact_rollup_reconciles_two_eras_without_exposing_period_cells():
+    c, t, v = _fixtures()
+    # Include a patient/index-day in the historical period; patient 8
+    # has one EIMS test with explicit mL candidate for both volumes.
+    day = "2018-04-18"
+    c = pd.concat([c, pd.DataFrame([{
+        "person_id": 8, "index_date": day
+    }])], ignore_index=True)
+    t = pd.concat([t, pd.DataFrame([{
+        "person_id": 8, "index_date": day,
+        "echo_test_fpk": "e8", "test_row_source_id": "12315",
+    }])], ignore_index=True)
+    v = pd.concat([v, pd.DataFrame([
+        {
+            "person_id": 8, "index_date": day, "echo_test_fpk": "e8",
+            "result_name": method, "raw_value": value,
+            "reported_unit": "mL", "test_row_source_id": "12315",
+            "result_row_source_id": "12315",
+        }
+        for method, value in [(EDV_BP, "110"), (ESV_BP, "44")]
+    ])], ignore_index=True)
+    exam, methods = summarize_eims_volume_eligibility(
+        c, t, v, small_cell=1, report_style="compact"
+    )
+    assert exam.set_index("source_test_category").patient_days.loc[
+        "exactly_one_eims_test"
+    ] == "5"
+    edv = methods.loc[
+        methods.metric.eq("lv_end_diastolic_volume")
+        & methods.availability_category.eq("explicit_ml_candidate")
+    ]
+    assert edv.sole_eims_fpk_patient_days.iloc[0] == "3"
+
+
 def test_must_use_real_eims_source_ids_and_read_only_sql():
     query = eims_test_source_sql(
         load_study()["modality"],
