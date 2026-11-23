@@ -13,9 +13,8 @@ MC = "MC CV LV END DIASTOLIC VOLUME"
 BP = "LV_vol_BP_ed_2D_by_MOD"
 
 
-def _row(pid, *, result_name=MC, unit=None, test_id="t", 
-         row_source="47918", test_source="47918", test_dk="dkA",
-         test_key="keyA", result_key="keyR"):
+def _row(pid, *, result_name=MC, unit=None, test_id="t",
+         row_source="47918", test_source="47918", test_dk="dkA"):
     return dict(
         person_id=pid, index_date="2021-01-02",
         echo_test_fpk=f"{test_id}{pid}", result_name=result_name,
@@ -23,8 +22,6 @@ def _row(pid, *, result_name=MC, unit=None, test_id="t",
         test_row_source_id=test_source,
         result_row_source_id=row_source,
         test_source_system_dk=test_dk,
-        test_source_system_key=test_key,
-        result_source_system_key=result_key,
     )
 
 
@@ -61,7 +58,7 @@ def test_source_system_lookup_uses_test_system_dk_not_row_source():
     assert by_id.loc["12315", "test_source_system_name"] == (
         "UNKNOWN_DIMENSION_DK"
     )
-    assert "MULTIPLE_KEY_TUPLES" in set(mc.result_row_source_id)
+    assert "MULTIPLE_PROVENANCES" in set(mc.result_row_source_id)
     ml = summary.loc[summary.family.eq("explicit_ml")
                      & summary.metric.eq("lv_end_diastolic_volume")]
     assert ml.loc[ml.result_row_source_id.eq("12315"),
@@ -107,6 +104,53 @@ def test_source_system_dimension_must_not_infer_other_keys():
     assert group.test_source_system_name.iloc[0] == "AMBIGUOUS_DIMENSION_DK"
 
 
+
+def test_different_long_record_keys_do_not_fragment_one_origin():
+    # A source may assign a distinct source-system KEY for each echo
+    # or result even when the stable ROW_SOURCE_ID and DK are identical.
+    # These keys must not appear in the public aggregate or split counts.
+    data = pd.DataFrame([
+        {**_row(pid),
+         "test_source_system_key": f"record-test-{pid:05d}",
+         "result_source_system_key": f"result-record-{pid:05d}"}
+        for pid in range(1, 41)
+    ])
+    result = summarize_source_system_bridge(
+        data, _dimension(), small_cell=11
+    )
+    matches = result.loc[
+        result.metric.eq("lv_end_diastolic_volume")
+        & result.period.eq("2019-2023")
+        & result.family.eq("mc_cv_unitless")
+    ]
+    assert len(matches) == 1
+    assert matches.iloc[0].patient_days == "40"
+    assert matches.iloc[0].test_source_system_name == "Echo Interface A"
+    assert "test_source_system_key" not in result.columns
+    assert "result_source_system_key" not in result.columns
+    assert "MULTIPLE_PROVENANCES" not in set(matches.result_row_source_id)
+
+
+def test_distinct_stable_source_systems_are_not_collapsed():
+    data = pd.DataFrame([
+        _row(1), _row(1, test_id="other", row_source="12315",
+                      test_source="12315", test_dk="dkB"),
+        _row(2),
+    ])
+    result = summarize_source_system_bridge(
+        data, _dimension(), small_cell=1
+    )
+    matches = result.loc[
+        result.metric.eq("lv_end_diastolic_volume")
+        & result.period.eq("2019-2023")
+        & result.family.eq("mc_cv_unitless")
+    ]
+    assert matches.set_index("result_row_source_id").patient_days.to_dict() == {
+        "MULTIPLE_PROVENANCES": "1",
+        "47918": "1",
+    }
+
+
 def test_sql_includes_exact_provenance_keys_and_uses_read_only_select():
     study = load_study()
     query = source_system_bridge_rows_sql(
@@ -114,10 +158,11 @@ def test_sql_includes_exact_provenance_keys_and_uses_read_only_select():
     )
     for expected in (
         "t.ROW_SOURCE_ID", "x.ROW_SOURCE_ID",
-        "t.SOURCE_SYSTEM_DK", "t.SOURCE_SYSTEM_KEY",
-        "x.SOURCE_SYSTEM_KEY", "ECHO_TEST_FPK",
+        "t.SOURCE_SYSTEM_DK", "ECHO_TEST_FPK",
     ):
         assert expected in query
+    assert "t.SOURCE_SYSTEM_KEY" not in query
+    assert "x.SOURCE_SYSTEM_KEY" not in query
     dsql = source_system_dimension_sql(study["modality"])
     assert "DIM_SOURCE_SYSTEM" in dsql
     assert "SOURCE_SYSTEM_NAME" in dsql
