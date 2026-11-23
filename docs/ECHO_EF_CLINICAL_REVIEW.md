@@ -876,3 +876,40 @@ both—are considered authoritative for the index TTE, and how are
 two records verified as the *same* exam across systems? Which
 explicit-mL methods should be preferred when more than one
 is available on an eligible study?
+
+
+### EIMS-only candidate exam and explicit-mL volume feasibility — pending MCP (2026-11-23)
+
+With the volume sources now independently established as
+**EIMS (12315)** and **Epic (47918)**, the next technical
+checkpoint is a source-constrained feasibility check, not a
+production extractor update. The new read-only module
+`echo_wm_training.eims_volume_eligibility` investigates,
+on the unchanged `echo_analytic` cohort:
+
+1. How many patient/index-days have no conventional TTE,
+   no EIMS TTE, multiple different EIMS `ECHO_TEST_FPK`
+   values, one EIMS test with no other source test on the
+   index date, or one EIMS test alongside another-source TTE?
+2. For index-days with exactly **one EIMS ECHO_TEST_FPK**,
+   how often are LVEDV and LVESV numeric results available
+   with explicit **mL units**, with *both* source test and
+   source result `ROW_SOURCE_ID=12315` on the same FPK?
+3. How often does the existing hypothetical measurement
+   method sensitivity (biplane, then 3D, then single-plane)
+   have a candidate, preferred-tier conflict, or no explicit
+   mL? This is **not an approved clinical method hierarchy**.
+
+The diagnostic never promotes volume values and does not
+assume an EIMS study on the same day as an Epic study is the
+selected clinical echo. Separate clinical exams are possible.
+Multi-EIMS-FPK days are held; only summary counts are returned,
+with joint complementary suppression across topology and
+measurement tables for each time period. The code and synthetic
+tests have **not yet run inside MCP**.
+
+A separate source-specific Epic encounter-matched
+`FACT_FLOWSHEETS` height/weight feasibility assessment
+remains the next independent workstream after this audit.
+The saved cohort, validation thresholds, and source-unit
+policy are unchanged.
