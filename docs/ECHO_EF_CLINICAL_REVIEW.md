@@ -946,3 +946,59 @@ examination; there may be another Epic TTE that day. No
 source systems or examination records have been merged,
 no units assigned to Epic MC CV, and the saved
 `echo_analytic` cohort has not been modified.
+
+
+### EIMS explicit-mL candidate eligibility — combined cohort result (MCP, 2026-11-23)
+
+The privacy-protected `run_eims_volume_eligibility(...,
+report_style="compact")` completed for the unchanged 1,500
+patient/index-day cohort:
+
+| All-period screen | Distinct patient/index-days |
+|---|---:|
+| Exactly one EIMS `ECHO_TEST_FPK` on index day | **1,404** |
+| No / multiple EIMS source tests | **96** |
+| Explicit-mL LVEDV candidate within sole EIMS test | **964** |
+| No LVEDV candidate or preferred-method-tier conflict | **440** |
+| Explicit-mL LVESV candidate within sole EIMS test | **955** |
+| No LVESV candidate or preferred-method-tier conflict | **449** |
+
+The LVEDV/LVESV candidates represent 64.3%/63.7% of
+the **full** 1,500-person cohort, and 68.7%/68.0% of
+the 1,404 single-EIMS-source-test days. The study's 90%
+target corresponds to 1,350 patients. Even if all 96
+currently no/multiple EIMS source-test cases could be
+adjudicated and provided measurements, this *specific*
+recognized-result, provisional-method scenario yields
+at most 1,060 LVEDV and 1,051 LVESV candidates, below
+the target. This is not a proof that the full Mayo dataset
+cannot contain more candidate result names or usable
+measurements after authorized clinical review.
+
+**Important:** An index-day with exactly one EIMS
+source test can ALSO contain an Epic TTE. The audit
+does not establish which was the study's clinical
+index exam. The provisional biplane → 3D → single
+plane hierarchy is unapproved. No source values,
+clinical units, saved cohort, or requirements changed.
+
+### Next independent discovery: Epic flowsheet height and weight
+
+Mayo confirmed conditional Epic encounter mapping:
+`FACT_ECHO_TEST.ENCOUNTER_NUMBER` =
+`FACT_FLOWSHEETS.ENCOUNTER_NBR` =
+`FACT_ENCOUNTERS.EHR_ENCOUNTER_NUMBER` for records
+captured in the same encounter. We will not assume
+the same join for EIMS or pre-Epic systems.
+
+A new nonpatient, metadata-only
+`echo_wm_training.epic_flowsheet_row_discovery`
+module examines `DIM_FLOWSHEET_ROW_NAME` for candidate
+height, weight and stature row codes/descriptions.
+It does NOT pull any `FACT_FLOWSHEETS` clinical
+values, patient/encounter identifiers or cohort rows.
+Following the dictionary review, we can design
+an Epic encounter-scoped, read-only audit with
+verified row names, units, patient identity and
+duplicate-vital safeguards. The discovery code and
+synthetic tests have not yet executed inside MCP.
