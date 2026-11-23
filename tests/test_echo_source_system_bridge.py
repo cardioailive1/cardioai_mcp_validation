@@ -94,10 +94,16 @@ def test_source_system_dimension_must_not_infer_other_keys():
     result = summarize_source_system_bridge(
         pd.DataFrame([_row(1)]), dim, small_cell=1
     )
+    # The summary also includes a 2012–2018 NO_OBSERVATIONS row
+    # with source_system_name='not_applicable'. Test the populated
+    # 2021-era row, not the first row across both periods.
     group = result.loc[
         result.metric.eq("lv_end_diastolic_volume")
+        & result.period.eq("2019-2023")
         & result.family.eq("mc_cv_unitless")
     ]
+    assert len(group) == 1
+    assert group.patient_days.iloc[0] == "1"
     assert group.test_source_system_name.iloc[0] == "AMBIGUOUS_DIMENSION_DK"
 
 
