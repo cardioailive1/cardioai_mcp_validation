@@ -699,3 +699,51 @@ families coexist on one patient/index-day but have distinct
 test/result pair agrees internally? Is there a source-defined
 crosswalk or workflow distinction, and which test corresponds
 to the intended clinical echo examination?
+
+
+### Mayo follow-up and November 20 walkthrough: ROW_SOURCE_ID and Epic encounters
+
+Mayo's latest written follow-up, composed during the November 20
+walkthrough, clarifies several earlier data-provenance questions:
+
+- **Source system** must be investigated through `ROW_SOURCE_ID`,
+  **not inferred from the `MC CV` or `LV_vol_*` prefix**.
+  The prefix's meaning has not been authoritatively established.
+- The same patient can have **separate encounters and separate echo
+  studies on the same date** (for example, a repeat examination
+  later in the day). Consequently, the different nonblank encounter
+  identifiers previously observed between the unitless and labeled
+  volume families must **not** be collapsed into one exam on date
+  proximity alone.
+- Mayo's assessment from observed numerical magnitudes is that the
+  `MC CV LV END ... VOLUME` results **appear to be mL**, but Mayo
+  explicitly suggested consulting a clinical advisor. This is
+  **not a formal source unit definition or permission to infer units
+  in production**.
+- For **Epic-system encounters**, Mayo confirms the mapping
+  `FACT_ECHO_TEST.ENCOUNTER_NUMBER` =
+  `FACT_FLOWSHEETS.ENCOUNTER_NBR` =
+  `FACT_ENCOUNTERS.EHR_ENCOUNTER_NUMBER` **when information was
+  captured in the same encounter**. Match patient identity too,
+  check encounter cardinality and duplicates, and do not assume
+  the same equality holds for every historical source.
+- Wall motion, image quality and clinical-indication sources
+  remain open for further data exploration. The clinical
+  measurement-method hierarchy remains a decision for the
+  study's advisors, not the Mayo data-engineering support team.
+
+**Engineering follow-up:** A new *read-only*
+`echo_wm_training.row_source_provenance` module first looks for
+`ROW_SOURCE_ID` in Mayo source-table metadata; if present on
+`FACT_ECHO_TEST` and/or `FACT_ECHO_RESULTS`, it generates
+privacy-gated patient-day counts for each candidate LVEDV/LVESV
+source-code/family, separately for pre-2019 and 2019–2023.
+It does not automatically translate source IDs into clinical
+study relationships. This diagnostic has not yet been executed
+inside MCP. A dedicated Epic same-encounter
+`FACT_FLOWSHEETS` vital-sign study can follow with
+cardinality checks and clinical time-window decisions.
+
+**Decision state:** Preserve `echo_analytic`, its volume unit policy,
+and all study requirements. Source-system provenance, source-unit
+validation, and clinical selection remain separate approvals.
