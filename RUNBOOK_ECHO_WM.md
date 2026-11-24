@@ -2399,3 +2399,94 @@ Do not modify the locked cohort or validation references
 without an authorized change. The 90% target is not
 met by the currently recognized 964 LVEDV / 955 LVESV
 source candidates, so document that shortfall explicitly.
+
+
+### Epic flowsheet height/weight — same-encounter 2019–2023 candidate audit (2026-11-24)
+
+The EIMS-first LVEDV/LVESV staging preview reproduced **LVESV 63.67%**
+completeness (955/1,500); LVEDV baseline/after remain **SUPPRESSED**
+under cross-report small-cell disclosure. The staged volume values
+are *not* yet clinically approved for a saved-cohort write.
+
+The next independent completeness gap is height (93.87% current) and
+weight (93.60% current). Mayo's Nov 20 source guidance confirmed that,
+**for Epic**, the following are the same encounter namespace:
+\`FACT_ECHO_TEST.ENCOUNTER_NUMBER\`,
+\`FACT_FLOWSHEETS.ENCOUNTER_NBR\`,
+\`FACT_ENCOUNTERS.EHR_ENCOUNTER_NUMBER\`.
+
+New module: \`echo_wm_training/epic_flowsheet_feasibility.py\`.
+
+- Uses the **unchanged saved cohort** and its existing conventional
+  TTE classification, narrowed for the first source audit to
+  2019–2023 (the consistent Epic era). This *does not redefine*
+  the full 2012–2023 cohort or its 95% height/weight targets.
+- Accepts only days with **exactly one Epic (ROW_SOURCE_ID=47918)
+  conventional-TTE test FPK**, a nonblank single source patient
+  identifier, and one nonblank source encounter number.
+- Joins **FACT_FLOWSHEETS.PATIENT_DK** to that exact Epic test
+  **PATIENT_DK**, and **ENCOUNTER_NBR** to the test
+  **ENCOUNTER_NUMBER**; restricts candidate flowsheet
+  **ASSESSMENT_DTM** to the same index date. No patient/date-only
+  fallback and no use of EIMS encounter IDs.
+- Screens only rows whose Mayo \`DIM_FLOWSHEET_ROW_NAME\` descriptions
+  or codes contain possible height/stature or weight terms.
+  It checks whether \`FLOWSHEET_RESULT_TXT\` is positive numeric
+  text, **but does not consider that a validated height or weight**.
+  Units, exact codes, duplicate readings, ordering by assessment
+  timestamp, and clinically acceptable windows still need review.
+- SQL aggregates results *inside BigQuery* and returns only one
+  cohort summary row to Python; no per-patient values or result
+  strings leave the query. It includes counts of potential numeric
+  height/weight on a single Epic encounter, plus overlaps with
+  currently missing cohort height/weight.
+- The summary applies primary/complementary suppression to
+  nested count partitions, including the overlaps with baseline
+  missingness. If a positive count or natural complement is smaller
+  than \`small_cell\`, **all reported counts are suppressed**.
+  Prior publicly released completeness figures must be considered
+  in cumulative disclosure review.
+
+After merging the fork changes into the original \`echo-wm-mcp\`
+branch and pulling:
+
+\`\`\`bash
+git pull --ff-only
+python -m pytest -q \
+  tests/test_echo_epic_flowsheet_row_discovery.py \
+  tests/test_echo_epic_flowsheet_feasibility.py
+\`\`\`
+
+**Fresh IPython within Mayo Cloud PC**, first review the
+nonpatient candidate row dictionary and then the cohort-level
+same-encounter audit:
+
+\`\`\`python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.epic_flowsheet_row_discovery import (
+    run_epic_flowsheet_row_discovery,
+)
+from echo_wm_training.epic_flowsheet_feasibility import (
+    run_epic_flowsheet_feasibility,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+dictionary = run_epic_flowsheet_row_discovery(eng, study)
+print("MAYO HEIGHT/WEIGHT ROW DESCRIPTIONS (NONPATIENT METADATA)")
+print(dictionary.to_string(index=False))
+
+safe_counts = run_epic_flowsheet_feasibility(eng, study)
+print("EPIC SAME-ENCOUNTER NUMERIC VITAL SOURCE FEASIBILITY — NOT CLINICALLY VALIDATED")
+print(safe_counts.to_string(index=False))
+\`\`\`
+
+No source values are returned by the summary query. The metadata
+labels may include derived/administrative entries: do not use them
+for clinical extraction until candidate codes and units are reviewed
+and any ambiguous duplicate measurements are reconciled by an
+approved policy. The tests and real query have **not yet run in MCP**.
+Do not write to \`echo_analytic\`, alter the height/weight windows
+or units, or call this confirmed 95% completeness.
