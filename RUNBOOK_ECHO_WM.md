@@ -2490,3 +2490,86 @@ and any ambiguous duplicate measurements are reconciled by an
 approved policy. The tests and real query have **not yet run in MCP**.
 Do not write to \`echo_analytic\`, alter the height/weight windows
 or units, or call this confirmed 95% completeness.
+
+
+### Epic flowsheet findings and date-bounded direct-vital follow-up (2026-11-24)
+
+The first 2019–2023 *same-Epic-encounter* flowsheet audit returned
+600 saved cohort patient/index-days, 578 with one Epic echo source
+encounter, 69 broad-label numeric height candidate days, 156 broad-label
+numeric weight candidate days, and baseline missing values on 41
+height / 38 weight days. **Zero of the missing-height days and zero of
+the missing-weight days had a numeric candidate in the exact Epic
+echo encounter on the index date.** No clinical completeness was gained
+by this same-encounter route.
+
+Inspection of the Mayo DIM row metadata demonstrated that a substring
+search for height/weight is *far too permissive*: it includes
+exercise-equipment repetitions, dietary questions, dosing/calculated
+weights, diaper weights, unrelated body-part heights, and other
+variables. The 69/156 broad source candidates should NOT be treated
+as valid patient vital signs.
+
+A stricter and separate **read-only** candidate audit was added:
+\`echo_wm_training/flowsheet_nearby_vitals.py\`.
+It uses whole-description candidate labels observed in the Mayo
+DIM dictionary (e.g., Actual Height, Admit Height (cm), Actual Weight,
+Clinical Weight (kg), Current Weight, Admit Weight (kg), and similar
+direct-measurement labels); excludes calculated, retrospective,
+questionnaire, exercise, infant, dosing, and nonpatient records.
+It does NOT assume that such a label by itself clinically validates a
+measurement or its units.
+
+The audit checks **only original-cohort NULL height/weight rows**
+in the 2019–2023 Epic-consistent cohort period; it maps original OMOP
+person to exactly one Mayo PATIENT_DK by the existing clinical-number
+crosswalk. It may use **a different encounter** if the flowsheet
+assessment falls inside the *existing*, unchanged clinical windows:
+height [-1095, +30] days; weight [-90, +30] days. Source rows
+before 2019-01-01 are excluded. This follows Mayo's advice to
+look for nearest historical measurements when echo-encounter values
+are absent, but remains a feasibility exercise: no source rows
+are selected, ranked, converted or inserted into \`echo_analytic\`.
+
+Native BigQuery SQL aggregates candidate presence *in BigQuery*
+and returns only five counts. Numeric source values, PATIENT_DK,
+encounter numbers, flowsheet IDs and row text are never returned
+from the source query. Counts are subject to joint primary and
+complementary suppression, and cumulative release review.
+
+After merging the fork validation branch into MCP's \`echo-wm-mcp\`:
+
+\`\`\`bash
+git pull --ff-only
+python -m pytest -q \
+  tests/test_echo_flowsheet_nearby_vitals.py \
+  tests/test_echo_epic_flowsheet_feasibility.py
+\`\`\`
+
+From **fresh IPython in Mayo Cloud PC**:
+
+\`\`\`python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.flowsheet_nearby_vitals import (
+    run_nearby_direct_vital_feasibility,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+safe_nearby_vitals = run_nearby_direct_vital_feasibility(
+    eng, study
+)
+print("NEARBY DIRECT-VITAL CANDIDATES FOR BASELINE-MISSING VALUES")
+print(safe_nearby_vitals.to_string(index=False))
+\`\`\`
+
+The candidate date-window query and its synthetic tests have
+**not yet run in MCP**. Numeric-only candidate presence is
+not enough to establish clinical validity. If the screened source
+appears useful, verify actual unit metadata, clinical range,
+date ordering and duplicate handling with Mayo/advisors before
+writing an approved extractor. If the source yields no candidates,
+do not widen the study's accepted windows or invent mappings
+solely to improve the 95% height/weight completeness targets.
