@@ -59,6 +59,8 @@ def test_native_bigquery_sql_is_read_only_strict_and_date_bounded():
     assert "SAFE_CAST(TRIM(CAST(f.FLOWSHEET_RESULT_TXT AS STRING)) AS FLOAT64) > 0" in sql
     assert "r'^(?:actual height" in sql
     assert "r'^(?:actual weight" in sql
+    assert "HAVING COUNT(DISTINCT kind) = 1 AND COUNTIF(kind IS NULL) = 0" in sql
+    assert "WHERE kind IS NOT NULL" not in sql
     assert "SELECT COUNT(*) AS cohort_days" in sql
     assert "SELECT * FROM" not in sql
     assert "CREATE " not in sql
