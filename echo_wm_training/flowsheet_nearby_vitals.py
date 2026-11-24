@@ -129,7 +129,7 @@ unambiguous_rows AS (
   FROM direct_rows
   WHERE kind IS NOT NULL
   GROUP BY row_dk
-  HAVING COUNT(DISTINCT kind) = 1
+  HAVING COUNT(DISTINCT kind) = 1 AND COUNTIF(kind IS NULL) = 0
 ),
 candidate AS (
   SELECT a.person_id, a.index_date, r.kind
