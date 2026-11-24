@@ -74,22 +74,9 @@ def test_privacy_gate_safely_displays_synthetic_aggregates():
          missing_clinical_indication_with_cue=0),
 ])
 def test_primary_and_derived_small_cells_suppress_everything(change):
-    # These distributions may be impossible (rather than merely sensitive)
-    # if they violate nested constraints; suppression should never be
-    # bypassed by malformed aggregate inputs.
-    with pytest.raises(ValueError, match="Impossible") if (
-        change.get("missing_clinical_indication_with_note") == 700
-        or change.get("sole_eims_with_note") == 1400
-    ) else _does_not_raise():
-        out = protect_eims_note_gap_counts(_counts(**change))
-        assert (out.patient_days == "suppressed").all()
+    out = protect_eims_note_gap_counts(_counts(**change))
+    assert (out.patient_days == "suppressed").all()
 
-
-class _does_not_raise:
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc, tb):
-        return False
 
 
 def test_malformed_overlap_counts_fail_closed():
