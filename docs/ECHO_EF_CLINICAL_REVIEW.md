@@ -1122,3 +1122,41 @@ are committed on \`validation/echo-wm-mcp\`, but the associated
 synthetic tests and Mayo Cloud PC query have **not yet run**.
 No baseline cohorts, unit conversions, reference measurements,
 measurement windows or study targets have been changed.
+
+
+### Epic flowsheet clinical-vital follow-up after zero same-encounter recovery (2026-11-24)
+
+MCP ran the 2019–2023 exact Epic-encounter flowsheet feasibility
+audit across 600 original echo index-days. There were 578 days with
+one unambiguous Epic echo source encounter; 69 days with possible
+numeric height and 156 with possible numeric weight under a **broad**
+row-name search. Among baseline-missing cases (41 height, 38 weight),
+there were **zero same-encounter numeric candidate days** for both
+height and weight. These are cohort-scoped audit signals, not
+accepted clinical values, and they do not imply absence of height or
+weight anywhere else in the longitudinal Mayo source.
+
+The accompanying nonpatient \`DIM_FLOWSHEET_ROW_NAME\` listing
+contained many misleading substring matches: dietary history
+questions, weight-loss surveys, calculation/dosing weights,
+diaper weights, exercise machine weights, optical segment height,
+etc. That broad name selection must **not** feed clinical extraction.
+
+A new strictly labeled, read-only, date-window source feasibility
+query is committed as \`echo_wm_training.flowsheet_nearby_vitals\`.
+It considers only direct-measurement row descriptions,
+only baseline-missing values, a uniquely mapped Mayo patient DK,
+and Mayo assessment dates >=2019-01-01 within the originally approved
+height [-1095,+30] and weight [-90,+30] windows. It can evaluate
+flowsheet readings from **other encounters** with the same patient,
+as Mayo suggested after failing the exact echo encounter match.
+It returns disclosure-gated aggregate candidate *presence* only,
+not numeric source values, selected measurement records, inferred
+units or proposed cohort changes.
+
+The new audit and its synthetic tests are committed but have **not
+yet been run in MCP**. Review individual row names and unit
+conventions as permitted within Mayo before any production mapping.
+Do not widen study source windows, fill values from unvalidated
+rows, silently change thresholds, or count provisional numeric text
+as confirmed height/weight measurements.
