@@ -2315,3 +2315,87 @@ per encounter, duplicate vital measurements, units and time.
 Do not assume a flowsheet presence flag is an accepted
 height/weight measurement or alter the existing source
 window/required completeness thresholds without approval.
+
+
+### Staged EIMS-first LVEDV/LVESV candidate extractor (2026-11-23)
+
+The original saved `echo_analytic` cohort was **not** rebuilt
+or edited. EIMS is now the selected *engineering source strategy*
+for independently evaluating LVEDV and LVESV candidates:
+`ROW_SOURCE_ID=12315`, numeric and explicitly labeled mL,
+on a single eligible EIMS `ECHO_TEST_FPK` on the existing
+patient/index-day. Epic's unitless MC CV measurements are
+**not** automatically used as mL.
+
+Implemented `echo_wm_training/eims_first_extractor.py` provides:
+
+- `stage_eims_first_volumes(cohort, tests, source_results)`:
+  a **PRIVATE** one-row-per-index-day DataFrame with candidate
+  numeric LVEDV/LVESV, `eims_echo_test_fpk`,
+  `exam_status`, provisional `*_method_tier`,
+  `*_status`, and per-metric review flags.
+  Do **not** print, save, email, paste, screenshot, or export
+  this DataFrame. It contains protected clinical source data.
+- `run_eims_first_extraction_preview(eng, study)`:
+  read-only source queries for FACT_ECHO_TEST / RESULTS
+  and the original saved `echo_analytic`, returning
+  **(PRIVATE candidates, disclosure-gated 27-field
+  before/after completeness summary)**.
+- Exactly one EIMS FPK per index-day is the source-test
+  candidate gate. A same-day Epic or other-source TTE
+  yields `single_eims_other_source_review`; the value
+  may be staged privately but is **not clinically approved**
+  for cohort promotion. Multiple EIMS FPKs are withheld.
+- The provisional sensitivity priority is biplane → 3D
+  → single-plane. Conflicting values in the preferred
+  tier are withheld, not averaged; identical duplicates
+  do not cause a conflict. This method hierarchy is
+  **not yet approved by the clinical advisor**.
+  No mismatched provenance or unlabeled units are accepted.
+- The before/after summary fills only initially null
+  volume fields in a **temporary in-memory copy** for
+  completeness estimation. All 25 other study elements
+  remain unchanged. It never writes or creates a BigQuery
+  table or view.
+
+**Run synthetic tests** after merging the validation branch
+into the authorized original MCP checkout:
+
+```bash
+git pull --ff-only
+python -m pytest -q \
+  tests/test_echo_eims_first_extractor.py \
+  tests/test_echo_eims_volume_eligibility.py
+```
+
+**Fresh IPython inside the authorized Mayo Cloud PC**:
+
+```python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.eims_first_extractor import (
+    run_eims_first_extraction_preview,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+private_eims_candidates, safe_eims_completeness = (
+    run_eims_first_extraction_preview(eng, study)
+)
+
+# PRIVATE: never print/export private_eims_candidates
+# Safe only after combined disclosure review:
+print(safe_eims_completeness.to_string(index=False))
+```
+
+This staged extractor has not yet executed against MCP data.
+Before any *production* promotion, document clinical advisor
+approval for (1) selecting EIMS rather than Epic as the
+index echo examination, particularly when both exist on
+the same day, (2) within-EIMS biplane/3D/2C/4C method
+priority, and (3) acceptable source-unit and range policy.
+Do not modify the locked cohort or validation references
+without an authorized change. The 90% target is not
+met by the currently recognized 964 LVEDV / 955 LVESV
+source candidates, so document that shortfall explicitly.
