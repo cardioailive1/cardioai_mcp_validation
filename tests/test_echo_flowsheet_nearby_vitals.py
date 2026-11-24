@@ -59,7 +59,15 @@ def test_native_bigquery_sql_is_read_only_strict_and_date_bounded():
     assert "SAFE_CAST(TRIM(CAST(f.FLOWSHEET_RESULT_TXT AS STRING)) AS FLOAT64) > 0" in sql
     assert "r'^(?:actual height" in sql
     assert "r'^(?:actual weight" in sql
-    assert "HAVING COUNT(DISTINCT kind) = 1 AND COUNTIF(kind IS NULL) = 0" in sql
+    # BigQuery HAVING must use the qualified source column; the
+    # SELECT aggregate alias MIN(dr.kind) AS kind must not be reused
+    # inside COUNT(DISTINCT ...) or COUNTIF(...).
+    assert "MIN(dr.kind) AS kind" in sql
+    assert "FROM direct_rows dr" in sql
+    assert "HAVING COUNT(DISTINCT dr.kind) = 1" in sql
+    assert "COUNTIF(dr.kind IS NULL) = 0" in sql
+    assert "COUNT(DISTINCT kind)" not in sql
+    assert "COUNTIF(kind IS NULL)" not in sql
     assert "WHERE kind IS NOT NULL" not in sql
     assert "SELECT COUNT(*) AS cohort_days" in sql
     assert "SELECT * FROM" not in sql
