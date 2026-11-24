@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .eims_volume_eligibility import _EIMS, eims_test_source_sql
+from .eims_volume_eligibility import _EIMS
+from .cohort_source_discovery import _cohort_tte_cte
 from .mcp_echo import _cfg, _t
 
 _METRICS = ("wall_motion", "image_quality", "clinical_indication")
@@ -41,16 +42,9 @@ def eims_note_gap_sql(modality_cfg: dict, *, start: str, end: str) -> str:
     """Native GoogleSQL: only aggregate source note existence and cues."""
     cfg = _cfg(modality_cfg)
     ec = cfg["echo_test_columns"]
-    q = eims_test_source_sql(modality_cfg, start=start, end=end)
+    q = _cohort_tte_cte(modality_cfg, start=start, end=end)
     base_flags = ",\n         ".join(
         f"{field} IS NULL AS missing_{field}" for field in _METRICS
-    )
-    cue_flags = ",\n         ".join(
-        "LOGICAL_OR(CASE WHEN s.test_row_source_id = '"
-        + _EIMS + "' THEN REGEXP_CONTAINS("
-        + "LOWER(COALESCE(CAST(t." + str(ec["note"]) + " AS STRING), '')),"
-        + " r'" + regex + "') ELSE FALSE END) AS has_" + field + "_cue"
-        for field, regex in _CUES.items()
     )
     cols = [
         "COUNT(*) AS cohort_days",
@@ -68,7 +62,7 @@ def eims_note_gap_sql(modality_cfg: dict, *, start: str, end: str) -> str:
                 AS missing_{field}_with_cue""",
         ]
     return f"""
-WITH source_ttes AS ({q}),
+WITH {q},
 cohort AS (
   SELECT person_id, DATE(index_date) AS index_date,
          {base_flags}
@@ -76,16 +70,18 @@ cohort AS (
   WHERE DATE(index_date) BETWEEN DATE('{start}') AND DATE('{end}')
 ),
 source_notes AS (
-  SELECT s.person_id, DATE(s.index_date) AS index_date,
-         s.echo_test_fpk, s.test_row_source_id,
-         LENGTH(TRIM(COALESCE(CAST(t.{ec['note']} AS STRING), ''))) > 0
-             AS has_note,
-         {cue_flags}
-  FROM source_ttes s
+  -- Reuse the existing native GoogleSQL TTE and note cue
+  -- classification from cohort_source_discovery. Its predicates
+  -- are not Spark SQL and require no SQLGlot conversion.
+  SELECT s.person_id, s.index_date, s.echo_test_fpk,
+         TRIM(CAST(t.ROW_SOURCE_ID AS STRING)) AS test_row_source_id,
+         s.has_echo_note AS has_note,
+         s.has_wall_motion_cue,
+         s.has_quality_cue AS has_image_quality_cue,
+         s.has_indication_cue AS has_clinical_indication_cue
+  FROM source_tests s
   JOIN {_t(cfg, "echo_test_table")} t
     ON CAST(t.{ec['test_key']} AS STRING) = s.echo_test_fpk
-  GROUP BY s.person_id, index_date, s.echo_test_fpk,
-           s.test_row_source_id, has_note
 ),
 eims_per_day AS (
   SELECT person_id, index_date,
