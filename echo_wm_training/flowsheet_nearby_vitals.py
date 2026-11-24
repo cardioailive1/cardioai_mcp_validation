@@ -127,7 +127,6 @@ direct_rows AS (
 unambiguous_rows AS (
   SELECT row_dk, MIN(kind) AS kind
   FROM direct_rows
-  WHERE kind IS NOT NULL
   GROUP BY row_dk
   HAVING COUNT(DISTINCT kind) = 1 AND COUNTIF(kind IS NULL) = 0
 ),
