@@ -170,3 +170,23 @@ def test_no_eims_measurement_is_inferred_from_epic_or_unitless_data():
     staged = stage_eims_first_volumes(c, tests, only).set_index("person_id")
     assert pd.isna(staged.loc[1, "lv_end_diastolic_volume"])
     assert staged.loc[1, "lv_end_diastolic_volume_status"] == "no_explicit_ml"
+
+
+def test_candidate_counts_reconcile_with_prior_eims_feasibility():
+    from echo_wm_training.eims_volume_eligibility import (
+        summarize_eims_volume_eligibility,
+    )
+
+    cohort, tests, source_rows = _fixtures()
+    staged = stage_eims_first_volumes(cohort, tests, source_rows)
+    _, counts = summarize_eims_volume_eligibility(
+        cohort, tests, source_rows, small_cell=1, report_style="compact"
+    )
+    for metric in ("lv_end_diastolic_volume", "lv_end_systolic_volume"):
+        from_staged = int(staged[metric].notna().sum())
+        from_feasibility = counts.loc[
+            counts.metric.eq(metric)
+            & counts.availability_category.eq("explicit_ml_candidate"),
+            "sole_eims_fpk_patient_days",
+        ]
+        assert from_staged == int(from_feasibility.iloc[0])
