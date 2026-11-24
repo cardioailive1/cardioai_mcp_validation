@@ -2673,3 +2673,23 @@ note-derived fields to \`echo_analytic\` without validated
 examination linkage, physician-reviewed interpretation and
 approved parsing/label policy. The saved cohort and thresholds
 have not changed.
+
+
+### Current handoff: Sampson completeness decision (2026-11-24)
+
+A single reviewer briefing consolidates the validated 1,500-person
+cohort findings, EIMS-first LVEDV/LVESV read-only integration status,
+zero flowsheet recovery for 2019–2023 baseline-missing height and
+weight, persistent report-derived completeness gaps, thresholds
+specified in `config/cohorts/echo.yaml`, and questions requiring
+model-specific approval:
+
+`docs/ECHO_COMPLETENESS_DECISION_BRIEF_2026-11-24.md`
+
+The **95% required-element endpoint**, individual per-element
+targets, cohort population, reference labels, and original
+`echo_analytic` source extraction have **not** been changed.
+The EIMS source selection remains an in-memory candidate
+implementation pending source-exam, method-tier and next-stage
+approval. Do not reuse this briefing as an authorization to
+rebuild or unlock the held-out validation cohort.
