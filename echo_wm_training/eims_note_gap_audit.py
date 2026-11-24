@@ -63,7 +63,7 @@ def eims_note_gap_sql(modality_cfg: dict, *, start: str, end: str) -> str:
         ]
     return f"""
 WITH {q},
-cohort AS (
+study_day AS (
   SELECT person_id, DATE(index_date) AS index_date,
          {base_flags}
   FROM {{{{work}}}}.echo_analytic
@@ -97,7 +97,7 @@ eims_per_day AS (
   GROUP BY person_id, index_date
 )
 SELECT {", ".join(cols)}
-FROM cohort a
+FROM study_day a
 LEFT JOIN eims_per_day e USING (person_id, index_date)
 """
 
