@@ -115,6 +115,15 @@ elements:
   - {name: wall_motion, domain: imaging, role: reference, description: Wall motion assessment, required: true, expected_completeness: 0.95,
      src: {type: derived, expr: "NULLIF(REGEXP_EXTRACT(echo_report, '(normal (regional )?wall motion|no regional wall motion abnormalit[a-z]*|regional wall motion abnormalit[a-z]*|[a-z]*kines[a-z]*)', 1), '')"},
      transform: "CASE WHEN echo_report IS NULL THEN NULL WHEN {v} IS NULL THEN NULL WHEN {v} RLIKE '(^normal|^no regional)' THEN 'normal' ELSE 'abnormal' END"}
+  # 2026-11-24 EIMS-first implementation is currently READ-ONLY in
+  # echo_wm_training/eims_first_extractor.py; it is NOT connected to
+  # CohortBuilder / this OMOP measurement source without clinical approval.
+  # MCP preview: 964 EIMS LVEDV explicit-mL candidates; 955 LVESV candidates
+  # (LVESV in-memory completeness 63.67%, LVEDV before/after SUPPRESSED).
+  # Same-test FPK/source checks are implemented, while biplane > 3D >
+  # single-plane and same-day Epic/EIMS adjudication need sign-off.
+  # Sampson decision request: docs/ECHO_COMPLETENESS_DECISION_BRIEF_2026-11-24.md
+  # Do not relax any threshold or rebuild echo_analytic on this basis alone.
   - {name: lv_end_diastolic_volume, domain: imaging, description: LV end-diastolic volume, required: true, expected_completeness: 0.90,
      src: {type: measurement, set: lv_edv, window: [0, 1], range: [20, 500]}}
   - {name: lv_end_systolic_volume, domain: imaging, description: LV end-systolic volume, required: true, expected_completeness: 0.90,
