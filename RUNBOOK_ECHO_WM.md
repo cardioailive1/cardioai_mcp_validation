@@ -2588,3 +2588,88 @@ The exact source alias is covered by regression tests.
 This is a compile-time query bug, not evidence about cohort
 source-data coverage. The corrected query still needs to be
 executed in MCP; cohort and measurement thresholds are unchanged.
+
+
+### 2026-11-24: No additional height/weight recovery; next EIMS narrative audit
+
+The corrected read-only \`run_nearby_direct_vital_feasibility\` executed
+successfully in the MCP Cloud PC (previous BigQuery alias/HAVING
+compilation issue resolved):
+
+| 2019–2023 index-day counts | Patient-days |
+|---|---:|
+| Cohort index-days | 600 |
+| Baseline missing height | 41 |
+| Baseline missing weight | 38 |
+| Missing height with possible direct flowsheet numeric measurement within original date window | **0** |
+| Missing weight with possible direct flowsheet numeric measurement within original date window | **0** |
+
+This follows the prior *exact same Epic encounter* audit, which
+also showed zero overlap with missing cohort measurements.
+The nearby audit used strict whole-description row names,
+a unique Mayo person-DK map, source date >=2019-01-01,
+and the existing height [-1095,+30] / weight [-90,+30]
+clinical windows. **No replacement height/weight values were found
+in either tested flowsheet strategy.** These source availability
+queries do not establish that missing values are absent
+from all Mayo source systems, but additional broad text-matching
+or automatic window relaxation is not justified. Keep
+the existing OMOP height/weight extraction as-is.
+
+The next read-only diagnostic targets three **required** cohort
+fields with larger completeness deficits: \`wall_motion\` (12.8%
+vs 95%), \`image_quality\` (18.8% vs 95%) and
+\`clinical_indication\` (45.67% vs 90%). We already know
+\`FACT_ECHO_TEST.ECHO_NOTE\` may have narrative content, but
+a patient/day keyword hit does not prove exact examination
+identity or clinical label extractability.
+
+New \`echo_wm_training/eims_note_gap_audit.py\` is an
+**EIMS source-FPK audit only**. It uses the existing
+native-GoogleSQL conventional-TTE and note keyword
+classification, joins \`FACT_ECHO_TEST\` on
+\`ECHO_TEST_FPK\`, and checks the test's
+\`ROW_SOURCE_ID=12315\` (EIMS). Only patient/index-days
+with **exactly one EIMS source test FPK** can count
+as possible report candidates. Another Epic TTE on the
+same day remains a clinical exam-selection ambiguity.
+Report note text, exam identifiers and patient keys
+never leave BigQuery: it returns one aggregate row
+followed by joint primary/complementary suppression.
+The cue expressions identify possible mention of a
+subject, not clinical diagnosis, normality, quality,
+indication, or valid model/reference labels.
+
+**After merging changes into the original MCP
+\`echo-wm-mcp\` branch:**
+
+\`\`\`bash
+git pull --ff-only
+python -m pytest -q tests/test_echo_eims_note_gap_audit.py
+\`\`\`
+
+**Fresh IPython inside Mayo Cloud PC:**
+
+\`\`\`python
+from cardioai_mcp.config import load_study
+from cardioai_mcp.engine import make_engine
+from echo_wm_training.eims_note_gap_audit import (
+    run_eims_note_gap_audit,
+)
+
+study = load_study()
+eng = make_engine("bigquery", study)
+
+safe_eims_note_gaps = run_eims_note_gap_audit(eng, study)
+print("EIMS REPORT TEXT AVAILABILITY FOR MISSING REQUIRED FIELDS")
+print(safe_eims_note_gaps.to_string(index=False))
+\`\`\`
+
+The returned dataframe contains aggregate counts only, with
+small-cell suppression. Still review cumulative disclosure
+risk before external sharing. The code's synthetic tests and
+real MCP query are **not yet executed**. Do not promote any
+note-derived fields to \`echo_analytic\` without validated
+examination linkage, physician-reviewed interpretation and
+approved parsing/label policy. The saved cohort and thresholds
+have not changed.
