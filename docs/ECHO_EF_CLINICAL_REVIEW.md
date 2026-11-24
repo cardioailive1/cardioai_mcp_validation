@@ -1002,3 +1002,47 @@ an Epic encounter-scoped, read-only audit with
 verified row names, units, patient identity and
 duplicate-vital safeguards. The discovery code and
 synthetic tests have not yet executed inside MCP.
+
+
+### EIMS-first volume value extraction implemented as a gated stage (2026-11-23)
+
+Following the confirmed EIMS source-system mapping and 964/955
+explicit-mL candidate availability, the new read-only
+`echo_wm_training.eims_first_extractor` now stages concrete
+LVEDV and LVESV *candidate values* privately for the
+unchanged saved `echo_analytic` patient/index-days.
+
+The stage requires exactly one EIMS test FPK for the day,
+matching `FACT_ECHO_TEST` and `FACT_ECHO_RESULTS`
+`ROW_SOURCE_ID=12315`, known result names, numeric
+range checks, and **explicit mL units**. The existing
+biplane → 3D → single-plane hierarchy is used for a
+*provisional what-if*, not as a clinically validated
+measurement-selection rule. A conflicting preferred method
+is withheld rather than averaging measurements or choosing
+a lower-ranked method. The stage records the chosen
+method tier and whether another source system has an
+echo examination on the same day. Those cases require
+separate clinical index-exam adjudication before promotion.
+
+A safe summary runner compares the complete 27-element
+cohort before/after candidate fills **in memory only**
+with primary, complementary and delta suppression;
+the first returned DataFrame is PRIVATE and must never
+leave MCP. No BigQuery source table, saved `echo_analytic`,
+clinical reference, locked validation cohort or approved
+completeness threshold is changed.
+
+Synthetic tests include exact-FPK source guards, multiple
+exam ambiguity, explicit units, duplicate and conflicting
+method values, missing identifiers, cardinality checks,
+and reconciliation of extracted candidate counts against
+the prior EIMS feasibility report. These tests and the
+actual staging run have **not yet been executed in MCP**.
+
+**Pending before production activation:** Clinical sign-off
+for EIMS as the selected index examination, including
+same-day Epic/EIMS scenarios, the preferred measurement
+method policy and review of the remaining 90%-target
+shortfall. This code is an implementable and auditable
+stage, **not** authorization to write new clinical values.
