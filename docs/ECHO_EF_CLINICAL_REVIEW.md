@@ -1086,3 +1086,39 @@ studies are adjudicated. The saved `echo_analytic`
 reference and derived fields must be updated only
 through an approved, validated cohort change; this
 read-only stage did not recompute the derived outputs.
+
+
+### Next independent completeness gap: Epic flowsheet height/weight (2026-11-24)
+
+After the EIMS-first LVEDV/LVESV read-only staging comparison
+reproduced the EIMS LVESV source-candidate completeness
+(63.67%; 955/1,500), the source-volume implementation remains
+pending clinical method/examination approval, with no production
+cohort update. The other study elements did not change.
+
+Height (93.87% versus 95%) and weight (93.60% versus 95%)
+are the next independent gaps. Using Mayo's **Epic-specific**
+confirmed encounter mapping, a new read-only
+\`echo_wm_training.epic_flowsheet_feasibility\` audit checks
+2019–2023 only, for a single Epic \`FACT_ECHO_TEST\` source
+test \`ECHO_TEST_FPK\` with nonblank patient and encounter IDs.
+It matches the candidate \`FACT_FLOWSHEETS\` reading on
+patient DK, encounter number and the same index date.
+That avoids accidentally treating separate clinical encounters
+on the same day as interchangeable, or applying Epic mapping
+to EIMS records.
+
+Only nonpatient flowsheet row-name/codes are used to screen
+for possible height or weight; positive numeric text is a
+**source-availability signal, not accepted clinical completeness**.
+Actual row meanings, unit conventions, duplicate readings,
+assessment timestamps and any nearest-date fallback require
+subsequent review. The initial SQL returns one aggregate
+row, and its Python display applies complementary suppression
+including counts overlapping currently missing height/weight.
+
+Both metadata row discovery and the source-feasibility audit
+are committed on \`validation/echo-wm-mcp\`, but the associated
+synthetic tests and Mayo Cloud PC query have **not yet run**.
+No baseline cohorts, unit conversions, reference measurements,
+measurement windows or study targets have been changed.
