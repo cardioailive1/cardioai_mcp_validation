@@ -125,10 +125,14 @@ direct_rows AS (
   FROM {schema}.DIM_FLOWSHEET_ROW_NAME
 ),
 unambiguous_rows AS (
-  SELECT row_dk, MIN(kind) AS kind
-  FROM direct_rows
-  GROUP BY row_dk
-  HAVING COUNT(DISTINCT kind) = 1 AND COUNTIF(kind IS NULL) = 0
+  -- dr.kind is the source expression, NOT the aggregate SELECT alias
+  -- MIN(dr.kind) AS kind. Unqualified kind in HAVING is resolved by
+  -- BigQuery as MIN(kind), causing an illegal nested aggregation.
+  SELECT dr.row_dk, MIN(dr.kind) AS kind
+  FROM direct_rows dr
+  GROUP BY dr.row_dk
+  HAVING COUNT(DISTINCT dr.kind) = 1
+     AND COUNTIF(dr.kind IS NULL) = 0
 ),
 candidate AS (
   SELECT a.person_id, a.index_date, r.kind
