@@ -2573,3 +2573,18 @@ date ordering and duplicate handling with Mayo/advisors before
 writing an approved extractor. If the source yields no candidates,
 do not widen the study's accepted windows or invent mappings
 solely to improve the 95% height/weight completeness targets.
+
+
+**2026-11-24 BigQuery SQL compilation fix:** The first
+`flowsheet_nearby_vitals` execution failed with
+`BadRequest 400: Aggregations of aggregations are not allowed at [47:25]`.
+The `unambiguous_rows` CTE selected `MIN(kind) AS kind`
+and then used unqualified `kind` inside `HAVING COUNT(DISTINCT kind)`.
+BigQuery resolved the unqualified name to the aggregate SELECT
+alias, accidentally nesting aggregations. The corrected expression
+qualifies the **source** column (`dr.kind`) in both
+`COUNT(DISTINCT dr.kind)` and `COUNTIF(dr.kind IS NULL)`.
+The exact source alias is covered by regression tests.
+This is a compile-time query bug, not evidence about cohort
+source-data coverage. The corrected query still needs to be
+executed in MCP; cohort and measurement thresholds are unchanged.
